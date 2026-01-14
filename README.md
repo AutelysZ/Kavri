@@ -1,6 +1,6 @@
-# kavri
+# Kavri
 
-Kavri is an extremely simple yet feature-rich dependency injection framework for JavaScript/TypeScript that doesn't require `reflect-metadata`.
+Kavri is an extremely simple yet feature-rich dependency injection framework for JavaScript/TypeScript that supports both TypeScript `experimentalDecorators` and [tc39/proposal-decorators](https://github.com/tc39/proposal-decorators), and doesn't require `reflect-metadata`.
 
 ## Usage
 
