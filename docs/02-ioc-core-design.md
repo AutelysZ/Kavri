@@ -81,24 +81,25 @@ declare function selector<T>(
 ): Token<T>;
 declare function registry<T>(name: string): Registry<T>;
 
-declare function inject<T>(target: TokenLike<T>, options?: { optional?: boolean }): T | undefined;
-declare function injectLazy<T>(
-  target: TokenLike<T>,
-  options?: { optional?: boolean },
-): () => Promise<T | undefined>;
-declare function injectNamed<T>(
-  base: Constructor<T>,
-  name: string,
-  options?: { optional?: boolean },
-): T | undefined;
-declare function injectConfig<T>(schema: ConfigSchema<T>, options?: { optional?: boolean }): T | undefined;
+declare function inject<T>(target: TokenLike<T>): T;
+declare function inject<T>(target: TokenLike<T>, options: { optional: true }): T | undefined;
+
+declare function injectLazy<T>(target: TokenLike<T>): Promise<T>;
+declare function injectLazy<T>(target: TokenLike<T>, options: { optional: true }): Promise<T | undefined>;
+
+declare function injectNamed<T>(base: Constructor<T>, name: string): T;
+declare function injectNamed<T>(base: Constructor<T>, name: string, options: { optional: true }): T | undefined;
+
+declare function injectConfig<T>(schema: ConfigSchema<T>): T;
+declare function injectConfig<T>(schema: ConfigSchema<T>, options: { optional: true }): T | undefined;
+
 declare function injectConstructorMap<T>(base: Constructor<T>): Map<string, Constructor<T>>;
 ```
 
 Notes:
 
 - No chained methods on `inject`.
-- Optional mode is available everywhere through `options.optional`.
+- Optional mode is available through overload signatures on each inject API.
 
 ## 4. Container API
 
@@ -249,14 +250,14 @@ class AppService {
     private readonly selectedPet = inject(PetSelector)!,
     private readonly driver = inject(DriverToken)!,
     private readonly maybeMetrics = inject(token<{ emit(name: string): void }>('metrics.client'), { optional: true }),
-    private readonly lazyLogger = injectLazy(LoggerToken, { optional: false }),
+    private readonly loggerPromise = injectLazy(LoggerToken),
   ) {}
 
   async run() {
-    const dog = injectNamed(Pet, 'dog', { optional: false })!;
+    const dog = injectNamed(Pet, 'dog');
     const db = await this.driver.query('select 1');
-    const logger = await this.lazyLogger();
-    logger!.info({ db, dog: dog.speak(), hasMetrics: !!this.maybeMetrics });
+    const logger = await this.loggerPromise;
+    logger.info({ db, dog: dog.speak(), hasMetrics: !!this.maybeMetrics });
     return `${this.selectedPet.speak()} | ${db}`;
   }
 }
