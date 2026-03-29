@@ -10,35 +10,46 @@ class UserService {}
 // 2) token provider
 const ClockToken = token<Date>('clock', () => new Date());
 
-// 3) dynamic/conditional provider
+// 3) dynamic provider
 const DriverRegistry = registry<Driver>('database.driver');
 export const registerPsql = DriverRegistry.register('psql', PsqlDriver);
 const DriverToken = configRegistry('database.driver', DatabaseConfig, 'driver');
 ```
 
-## Example B: Named collection + selected item
+## Example B: Named subtype + selector without eager instantiation
 
 ```ts
+@Component()
 abstract class Pet {}
 
-@Named(Pet, 'dog')
+@Named('dog')
 class Dog extends Pet {}
 
-@Named(Pet, 'cat')
+@Named('cat')
 class Cat extends Pet {}
 
-const AllPetToken = token<Pet[]>('pets.all', [Dog, Cat]);
+const AllPets = [Dog, Cat];
+container.provide(AllPets);
 
-const SelectedPetToken = token<Pet>('pets.selected',
-  (cfg = injectConfig(PetConfig), all = inject(AllPetToken)) => {
-    const result = all.find((pet) => pet.name === cfg.selectedPet);
-    if (!result) throw new Error(`Unknown pet: ${cfg.selectedPet}`);
-    return result;
-  },
+const PetSelector = selector(
+  'pet.selector',
+  Pet,
+  (map: Map<string, Provider<Pet>>, cfg = injectConfig(PetConfig)) => map.get(cfg.selectedPet),
 );
 ```
 
-## Example C: External factory with lifecycle
+`PetSelector` consumes constructors/providers, so only the selected pet gets instantiated.
+
+## Example C: Collection injection helpers
+
+```ts
+const pets = injectList(Pet);                    // readonly Pet[]
+const petsByName = injectMap(Pet);               // ReadonlyMap<string, Pet>
+const petSet = injectSet(Pet);                   // ReadonlySet<Pet>
+const ordered = injectList(Pet, { orderBy: 'topo' });
+```
+
+## Example D: External factory with lifecycle
 
 ```ts
 container.provide({
@@ -49,7 +60,7 @@ container.provide({
 });
 ```
 
-## Example D: Config schema styles
+## Example E: Config schema styles
 
 ```ts
 // class-validator style
@@ -65,7 +76,7 @@ const BillingConfig = defineZodConfig('billing', z.object({
 }));
 ```
 
-## Example E: Dynamic provider mismatch error
+## Example F: Dynamic provider mismatch error
 
 Given config:
 
@@ -88,7 +99,7 @@ Configured implementation was not registered.
 Registered keys: psql
 ```
 
-## Example F: Simple entry + full entry
+## Example G: Simple entry + full entry
 
 ```ts
 // simple

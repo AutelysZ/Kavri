@@ -82,3 +82,26 @@ await serve({ port: 3000, controllers: [HealthController] });
 - `createContainer()` — lightweight IoC bootstrap
 - `createApp()` — full app preset (config + validation + diagnostics)
 - `serve()` — HTTP-focused shortcut
+
+## 6.7 Conditional selection with constructor map
+
+```ts
+@Component()
+abstract class Pet {}
+
+@Named('dog')
+class Dog extends Pet {}
+
+@Named('cat')
+class Cat extends Pet {}
+
+container.provide([Dog, Cat]);
+
+const PetSelector = selector(
+  'pet.selector',
+  Pet,
+  (map: Map<string, Provider<Pet>>, cfg = injectConfig(PetConfig)) => map.get(cfg.selectedPet),
+);
+```
+
+This pattern avoids instantiating all pet implementations eagerly.

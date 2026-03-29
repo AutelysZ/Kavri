@@ -17,19 +17,20 @@ class UserService {
 const userService = await container.resolve(UserService);
 ```
 
-### Named component variants
+### Named component variants (simplified)
 
 ```ts
+@Component()
 abstract class Pet {}
 
-@Named(Pet, 'dog')
+@Named('dog')
 class Dog extends Pet {}
 
-@Named(Pet, 'cat')
+@Named('cat')
 class Cat extends Pet {}
 ```
 
-Use class directly for injection/registration.
+`@Named(...)` should infer base category from inheritance (`Dog extends Pet`), so `@Named(Pet, 'dog')` is not required.
 
 ---
 
@@ -50,7 +51,7 @@ const SequelizeToken = token<Sequelize>('sequelize',
 );
 ```
 
-If token is declared **without factory**, user must provide a provider explicitly.
+If token is declared **without factory**, user must provide it explicitly.
 
 ```ts
 const RedisToken = token<RedisClient>('redis');
@@ -62,50 +63,61 @@ container.provide({
 });
 ```
 
-### External value and alias
-
-```ts
-container.provide({ provide: AppNameToken, useValue: 'kavri-app' });
-container.provide({ provide: LoggerToken, useExisting: PinoLoggerToken });
-```
-
 ---
 
 ## 3) Conditional, collection, and dynamic providers
 
-This category supports feature-rich runtime selection patterns.
+### 3.1 Register component group explicitly
 
-### 3.1 Collection token
+Classes must still be provided to container (especially when declared in other files):
 
 ```ts
-const AllPetToken = token<Pet[]>('pets.all', [Dog, Cat]);
+const AllPets = [Dog, Cat];
+container.provide(AllPets);
 ```
 
-### 3.2 Config-driven selection from collection
+### 3.2 Collection injection APIs (runtime instances)
+
+Collections are **injected directly**, not declared as collection tokens.
 
 ```ts
-const SelectedPetToken = token<Pet>('pets.selected',
-  (cfg = injectConfig(PetConfig), all = inject(AllPetToken)) => {
-    const selected = all.find((p) => p.name === cfg.selectedPet);
-    if (!selected) throw new Error(`Unknown pet: ${cfg.selectedPet}`);
-    return selected;
-  },
+const allPets = injectList(Pet);          // readonly Pet[]
+const petMap = injectMap(Pet);            // ReadonlyMap<string, Pet>
+const petSet = injectSet(Pet);            // ReadonlySet<Pet>
+```
+
+Optional ordering can be supported:
+
+```ts
+const ordered = injectList(Pet, { orderBy: 'topo' });
+```
+
+### 3.3 Selector API (constructor map, lazy instantiate)
+
+For conditional selection, inject a map of **constructors/providers**, not instances.
+This avoids instantiating all candidates.
+
+```ts
+const PetSelector = selector(
+  'pet.selector',
+  Pet,
+  (map: Map<string, Provider<Pet>>, cfg = injectConfig(PetConfig)) => map.get(cfg.selectedPet),
 );
 ```
 
-### 3.3 Registry for dynamic providers
+Resolution behavior:
 
-Registry is a helper for keyed dynamic implementations (drivers, plugins, handlers).
+1. selector chooses provider by key
+2. container instantiates only the selected one
+3. missing key produces clear startup/runtime error
+
+### 3.4 Registry for dynamic implementations
 
 ```ts
 const DriverRegistry = registry<Driver>('database.driver');
 export const registerPsql = DriverRegistry.register('psql', PsqlDriver);
 export const registerMysql = DriverRegistry.register('mysql', MysqlDriver);
-```
 
-Then resolve selected implementation via token:
-
-```ts
 const DriverToken = token<Driver>('database.driver.selected',
   (cfg = injectConfig(DatabaseConfig)) => DriverRegistry.getOrThrow(cfg.driver),
 );
@@ -113,44 +125,25 @@ const DriverToken = token<Driver>('database.driver.selected',
 
 If config asks for `mssql` but only `registerPsql()` was called, startup should fail with a clear error.
 
-### 3.4 Combined helper patterns (proposed)
-
-To reduce boilerplate, provide helpers:
+### 3.5 Helper reducers (proposed)
 
 ```ts
-const SelectedPetToken = configToken('pets.selected', PetConfig, 'selectedPet');
 const DriverToken = configRegistry('database.driver', DatabaseConfig, 'driver');
-```
-
-Equivalent lower-level form:
-
-```ts
-const DriverRegistry = registry<Driver>('database.driver',
-  (r, cfg = injectConfig(DatabaseConfig)) => r.getOrThrow(cfg.driver),
-);
-```
-
-Proposed signature:
-
-```ts
-registry<T>(
-  name: string,
-  provider?: (registry: Registry<T>) => TokenLike<T> | T,
-): RegistryToken<T>;
+const SelectedPetToken = configSelector('pet.selector', Pet, PetConfig, 'selectedPet');
 ```
 
 ---
 
 ## Provider capability matrix
 
-| Capability | Component | Token | Collection/Conditional | Registry |
+| Capability | Component | Token | Selector/Conditional | Registry |
 |---|---:|---:|---:|---:|
-| Declared by class | ✅ | ❌ | ⚠️ (uses class list) | ❌ |
-| External value | ❌ | ✅ | ✅ | ❌ |
+| Declared by class | ✅ | ❌ | ⚠️ (uses class group) | ❌ |
+| External value | ❌ | ✅ | ⚠️ | ❌ |
 | Factory | ⚠️ | ✅ | ✅ | ✅ |
-| Lifecycle hooks | ✅ | ✅ | ✅ | ⚠️ (via selected token) |
+| Lifecycle hooks | ✅ | ✅ | ✅ (selected only) | ✅ (selected only) |
 | Config-aware | ⚠️ | ✅ | ✅ | ✅ |
-| Lazy / optional | ✅ | ✅ | ✅ | ✅ |
+| Lazy instantiate selected only | ❌ | ⚠️ | ✅ | ✅ |
 | Dynamic by key | ❌ | ⚠️ | ✅ | ✅ |
 
 ---
@@ -160,13 +153,18 @@ registry<T>(
 ```ts
 class Container {
   // registration
-  provide(...providers: Provider<any>[]): this;
+  provide(...providers: ProviderInput[]): this; // supports class, token provider, arrays
   use(module: ModuleRef): this;
 
   // resolution ergonomics
   get<T>(token: TokenLike<T>): T; // instantiate only, no lifecycle
   resolve<T>(token: TokenLike<T>): Promise<T>; // full lifecycle
-  resolveAll<T>(token: TokenLike<T>): Promise<T[]>;
+  resolveAll<T>(base: TokenLike<T>): Promise<readonly T[]>;
+
+  // collection resolution helpers
+  injectList<T>(base: TokenLike<T>, options?: { orderBy?: 'provided' | 'topo' }): readonly T[];
+  injectMap<T>(base: TokenLike<T>): ReadonlyMap<string, T>;
+  injectSet<T>(base: TokenLike<T>): ReadonlySet<T>;
 
   // utility
   has(token: TokenLike<unknown>): boolean;
@@ -184,14 +182,16 @@ class Container {
 ## Injection helpers
 
 ```ts
-const inject: {
+declare const inject: {
   <T>(token: TokenLike<T>): T;
   optional<T>(token: TokenLike<T>): T | undefined;
-  all<T>(token: TokenLike<T>): T[];
   lazy<T>(token: TokenLike<T>): () => Promise<T>;
   named<T>(base: TokenLike<T>, name: string): T;
 };
 
+declare function injectList<T>(base: TokenLike<T>, options?: { orderBy?: 'provided' | 'topo' }): readonly T[];
+declare function injectMap<T>(base: TokenLike<T>): ReadonlyMap<string, T>;
+declare function injectSet<T>(base: TokenLike<T>): ReadonlySet<T>;
 declare function injectConfig<T>(schema: ConfigSchema<T>): T;
 ```
 
@@ -199,6 +199,7 @@ declare function injectConfig<T>(schema: ConfigSchema<T>): T;
 
 - `resolve(...)` triggers `onInit`/`@PostConstruct`.
 - `get(...)` skips lifecycle intentionally.
+- selector/registry instantiate only selected target.
 - `destroy()` triggers `onDestroy`/`@BeforeDestroy` in reverse dependency order.
 
 ## Scope rules
