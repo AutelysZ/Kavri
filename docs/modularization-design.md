@@ -1,4 +1,4 @@
-# 0x Modularization Design
+# Modularization Design
 
 ## 1. Purpose
 

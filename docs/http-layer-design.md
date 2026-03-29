@@ -1,4 +1,4 @@
-# 0x HTTP Layer Design
+# HTTP Layer Design
 
 ## 1. Positioning
 

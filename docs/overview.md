@@ -1,4 +1,4 @@
-# 0x Overview
+# Overview
 
 Kavri is a TypeScript IoC framework focused on explicit dependency wiring and config-aware provider selection.
 
@@ -12,9 +12,9 @@ Kavri is a TypeScript IoC framework focused on explicit dependency wiring and co
 
 ## Document map
 
-- [`0x-ioc.md`](./0x-ioc.md)
-- [`0x-config.md`](./0x-config.md)
-- [`0x-modularization.md`](./0x-modularization.md)
-- [`0x-http.md`](./0x-http.md)
+- [`ioc-core-design.md`](./ioc-core-design.md)
+- [`configuration-design.md`](./configuration-design.md)
+- [`modularization-design.md`](./modularization-design.md)
+- [`http-layer-design.md`](./http-layer-design.md)
 
 Current focus: **IoC completeness and implementation-ready API definition**.

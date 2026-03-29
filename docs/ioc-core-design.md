@@ -1,4 +1,4 @@
-# 0x IoC Core Design
+# IoC Core Design
 
 ## 1. Scope
 

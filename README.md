@@ -9,11 +9,11 @@ It has two layers:
 
 ## Documentation
 
-- [0x Overview](./docs/0x-overview.md)
-- [0x IoC Core](./docs/0x-ioc.md)
-- [0x Configuration](./docs/0x-config.md)
-- [0x Modularization](./docs/0x-modularization.md)
-- [0x HTTP](./docs/0x-http.md)
+- [Overview](./docs/overview.md)
+- [IoC Core Design](./docs/ioc-core-design.md)
+- [Configuration Design](./docs/configuration-design.md)
+- [Modularization Design](./docs/modularization-design.md)
+- [HTTP Layer Design](./docs/http-layer-design.md)
 
 ## Project Status
 

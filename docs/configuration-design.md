@@ -1,4 +1,4 @@
-# 0x Configuration Design
+# Configuration Design
 
 ## 1. Position
 
