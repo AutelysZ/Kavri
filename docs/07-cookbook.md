@@ -1,59 +1,71 @@
 # 07. Cookbook / End-to-End Examples
 
-## Example A: Feature module with exported service
+## Example A: Three provider categories in one place
 
 ```ts
-export const UserModule = defineModule({
-  providers: [UserService, UserRepo],
-  exports: [UserService],
+// 1) component provider
+@Component()
+class UserService {}
+
+// 2) token provider
+const ClockToken = token<Date>('clock', () => new Date());
+
+// 3) dynamic/conditional provider
+const DriverRegistry = registry<Driver>('database.driver');
+export const registerPsql = DriverRegistry.register('psql', PsqlDriver);
+const DriverToken = configRegistry('database.driver', DatabaseConfig, 'driver');
+```
+
+## Example B: Named collection + selected item
+
+```ts
+abstract class Pet {}
+
+@Named(Pet, 'dog')
+class Dog extends Pet {}
+
+@Named(Pet, 'cat')
+class Cat extends Pet {}
+
+const AllPetToken = token<Pet[]>('pets.all', [Dog, Cat]);
+
+const SelectedPetToken = token<Pet>('pets.selected',
+  (cfg = injectConfig(PetConfig), all = inject(AllPetToken)) => {
+    const result = all.find((pet) => pet.name === cfg.selectedPet);
+    if (!result) throw new Error(`Unknown pet: ${cfg.selectedPet}`);
+    return result;
+  },
+);
+```
+
+## Example C: External factory with lifecycle
+
+```ts
+container.provide({
+  provide: RedisToken,
+  useFactory: (cfg = injectConfig(RedisConfig)) => createRedis(cfg.url),
+  onInit: (redis) => redis.connect(),
+  onDestroy: (redis) => redis.quit(),
 });
 ```
 
-## Example B: Request-scoped dependency in HTTP
+## Example D: Config schema styles
 
 ```ts
-@Component({ scope: 'scoped' })
-class RequestContext {
-  constructor(private readonly req = inject(HttpRequestToken)) {}
-  userId() {
-    return this.req.headers['x-user-id'];
-  }
-}
-```
-
-## Example C: Config with class-validator
-
-```ts
-@ConfigSchema('feature.mail')
+// class-validator style
+@ConfigSchema('app.mail')
 class MailConfig {
   @IsString()
   host!: string;
-
-  @IsNumber()
-  port = 587;
 }
 
-@Component()
-class Mailer {
-  constructor(private readonly cfg = inject(configToken(MailConfig))) {}
-}
-```
-
-## Example D: Config with zod
-
-```ts
+// zod style
 const BillingConfig = defineZodConfig('billing', z.object({
   currency: z.enum(['USD', 'EUR', 'JPY']).default('USD'),
-  retries: z.number().int().min(0).default(2),
 }));
-
-@Component()
-class BillingService {
-  constructor(private readonly cfg = inject(BillingConfig)) {}
-}
 ```
 
-## Example E: Dynamic provider error scenario
+## Example E: Dynamic provider mismatch error
 
 Given config:
 
@@ -62,26 +74,30 @@ database:
   driver: mssql
 ```
 
-But app only registers:
+Registered only:
 
 ```ts
-providePsql(container);
+registerPsql(container);
 ```
 
 Expected startup failure:
 
 ```txt
-[DYNAMIC_PROVIDER_NOT_FOUND] registry=database.provider key=mssql
-No registered provider for "mssql".
-Did you mean one of: psql
+[DYNAMIC_PROVIDER_NOT_FOUND] registry=database.driver key=mssql
+Configured implementation was not registered.
+Registered keys: psql
 ```
 
-## Example F: Testing overrides
+## Example F: Simple entry + full entry
 
 ```ts
-const test = new Container()
-  .use(AppModule)
-  .override(UserRepoToken, { provide: UserRepoToken, useValue: fakeUserRepo });
+// simple
+const foo = await new Container().resolve(FooService);
 
-const service = await test.resolve(UserService);
+// full
+const app = createApp({
+  config: { files: ['application.yaml'] },
+  modules: [UserModule, DatabaseModule],
+});
+await app.start();
 ```

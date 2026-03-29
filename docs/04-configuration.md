@@ -1,28 +1,26 @@
 # 04. Configuration Module
 
+## Why config is first-class
+
+Configuration directly controls provider behavior (selected implementations, lifecycles, feature gates). In Kavri, config is a first-class system, not a side utility.
+
 ## Goals
 
-The config module should feel **feature-rich like Spring Boot**, while staying explicit and TypeScript-friendly.
+- feature-rich experience similar to Spring Boot
+- composable as `ConfigModule`
+- typed and validated
+- supports class-validator and zod styles
+- integrates deeply with provider selection and dynamic registries
 
-## Design requirements
-
-- modular and importable (`ConfigModule`)
-- multi-source loading (CLI args, env vars, config files)
-- schema validation with both:
-  - class-validator style
-  - zod style
-- profile/environment support
-- typed retrieval in runtime
-
-## Source loading
+## Sources and precedence
 
 Priority (high -> low):
 
-1. explicit runtime overrides
-2. CLI arguments (`--app.port=8080`)
-3. environment variables (`APP_PORT=8080`)
-4. configuration files (`.yaml`, `.json`, `.toml`)
-5. schema defaults
+1. runtime overrides
+2. CLI args (`--app.port=8080`)
+3. env vars (`APP_PORT=8080`)
+4. config files (`.yaml`, `.json`, `.toml`)
+5. defaults
 
 ## Module API
 
@@ -32,6 +30,7 @@ ConfigModule.from({
   envPrefix: 'APP',
   cli: process.argv,
   profile: process.env.APP_PROFILE ?? 'default',
+  strictUnknownKeys: true,
 });
 ```
 
@@ -49,42 +48,67 @@ class ServerConfig {
   host = '0.0.0.0';
 }
 
-const serverConfig = inject(configToken(ServerConfig));
+const serverConfig = injectConfig(ServerConfig);
 ```
 
 ## Validation style B — zod
 
 ```ts
-const ServerSchema = z.object({
+const ServerConfig = defineZodConfig('app.server', z.object({
   port: z.number().int().min(1).max(65535).default(3000),
   host: z.string().default('0.0.0.0'),
-});
+}));
 
-const ServerConfig = defineZodConfig('app.server', ServerSchema);
-const serverConfig = inject(ServerConfig);
+const serverConfig = injectConfig(ServerConfig);
 ```
 
-## Typed value retrieval
+## Config -> provider helpers
+
+### `injectConfig`
 
 ```ts
-const port = config.value(ServerConfig, 'port');
-const host = config.value(ServerConfig, 'host');
+const db = injectConfig(DatabaseConfig);
 ```
+
+### `configToken`
+
+Generate token value directly from config field:
+
+```ts
+const SelectedPetToken = configToken('pets.selected', PetConfig, 'selectedPet');
+```
+
+### `configRegistry`
+
+Resolve an implementation from a named registry based on config field:
+
+```ts
+const DriverToken = configRegistry('database.driver', DatabaseConfig, 'driver');
+```
+
+This avoids repetitive boilerplate in dynamic provider scenarios.
 
 ## Advanced features
 
-- placeholder resolution (`${DB_HOST:localhost}`)
-- profile documents (`application-prod.yaml`)
-- encrypted secret source abstraction (vault/kms adapters)
-- config change events for reloadable providers
+- profile docs (`application-prod.yaml`)
+- placeholder expansion (`${DB_HOST:localhost}`)
+- secret source adapters (vault/kms)
+- optional reload/watch mode
+- startup report of effective resolved values (with secret masking)
 
-## Failure behavior
+## Failure semantics
 
-Startup must fail if:
+Startup fails when:
 
-- required value missing
-- value parsing fails
-- schema validation fails
-- unknown strict-mode keys are present
+- missing required key
+- parse failure
+- validation failure
+- unknown strict key
+- referenced dynamic provider key is unregistered
 
-Errors should include key path, source, and parse stage.
+Errors should include:
+
+- key path
+- expected type/rule
+- source origin (cli/env/file/default)
+- suggested fix

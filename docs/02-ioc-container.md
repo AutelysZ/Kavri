@@ -1,71 +1,159 @@
 # 02. IoC Container API
 
-## Core concepts
+## Core design center
 
-- **Token**: typed dependency key.
-- **Provider**: rule to create or map a value for a token.
-- **Container**: resolver and lifecycle manager.
-- **Scope**: lifetime boundary.
+Kavri provider design should be explicit and complete around **three provider categories**.
 
-## Tokens
+## 1) Component providers (declared classes)
 
-```ts
-const UserRepoToken = token<UserRepo>('user.repo');
-const DbPoolToken = token<DbPool>('db.pool');
-```
-
-### Registry token (for dynamic providers)
-
-```ts
-const DatabaseDriverRegistry = registryToken<Driver>('database.driver');
-```
-
-A registry token stores named implementations and supports safe runtime selection.
-
-## Providers
-
-```ts
-type Provider<T> =
-  | { provide: TokenLike<T>; useValue: T }
-  | { provide: TokenLike<T>; useClass: Constructor<T>; scope?: ScopeKind }
-  | { provide: TokenLike<T>; useFactory: Factory<T>; deps?: Dep[]; scope?: ScopeKind }
-  | { provide: TokenLike<T>; useExisting: TokenLike<T> };
-```
-
-## Entry-point ergonomics
-
-Kavri intentionally supports both **simple** and **advanced** styles.
-
-### Simple style (no explicit module required)
+A class decorated with `@Component()` (or higher-order decorators that include `@Component`) is a provider by itself.
 
 ```ts
 @Component()
-class Foo {
-  ping() {
-    return 'ok';
-  }
+class UserService {
+  constructor(private readonly repo = inject(UserRepo)) {}
 }
 
-const container = new Container();
-
-// Resolve + run lifecycle hooks
-const foo1 = await container.resolve(Foo);
-
-// Just instantiate synchronously when graph is sync-safe; no lifecycle hooks
-const foo2 = container.get(Foo);
+const userService = await container.resolve(UserService);
 ```
 
-### Advanced style
+### Named component variants
 
 ```ts
-const AppModule = defineModule({
-  imports: [UserModule],
-  providers: [FooService],
-});
+abstract class Pet {}
 
-const container = new Container().use(AppModule);
-const foo = await container.resolve(FooService);
+@Named(Pet, 'dog')
+class Dog extends Pet {}
+
+@Named(Pet, 'cat')
+class Cat extends Pet {}
 ```
+
+Use class directly for injection/registration.
+
+---
+
+## 2) Token providers (external classes, values, factories)
+
+Use tokens for:
+
+- external/non-decorated classes
+- primitive values
+- factories requiring dependencies/config
+- custom lifecycle hooks
+
+### Token declaration
+
+```ts
+const SequelizeToken = token<Sequelize>('sequelize',
+  (config = injectConfig(SequelizeConfig)) => new Sequelize(config.url),
+);
+```
+
+If token is declared **without factory**, user must provide a provider explicitly.
+
+```ts
+const RedisToken = token<RedisClient>('redis');
+
+container.provide({
+  provide: RedisToken,
+  useFactory: (cfg = injectConfig(RedisConfig)) => createRedis(cfg.url),
+  onDestroy: (client) => client.quit(),
+});
+```
+
+### External value and alias
+
+```ts
+container.provide({ provide: AppNameToken, useValue: 'kavri-app' });
+container.provide({ provide: LoggerToken, useExisting: PinoLoggerToken });
+```
+
+---
+
+## 3) Conditional, collection, and dynamic providers
+
+This category supports feature-rich runtime selection patterns.
+
+### 3.1 Collection token
+
+```ts
+const AllPetToken = token<Pet[]>('pets.all', [Dog, Cat]);
+```
+
+### 3.2 Config-driven selection from collection
+
+```ts
+const SelectedPetToken = token<Pet>('pets.selected',
+  (cfg = injectConfig(PetConfig), all = inject(AllPetToken)) => {
+    const selected = all.find((p) => p.name === cfg.selectedPet);
+    if (!selected) throw new Error(`Unknown pet: ${cfg.selectedPet}`);
+    return selected;
+  },
+);
+```
+
+### 3.3 Registry for dynamic providers
+
+Registry is a helper for keyed dynamic implementations (drivers, plugins, handlers).
+
+```ts
+const DriverRegistry = registry<Driver>('database.driver');
+export const registerPsql = DriverRegistry.register('psql', PsqlDriver);
+export const registerMysql = DriverRegistry.register('mysql', MysqlDriver);
+```
+
+Then resolve selected implementation via token:
+
+```ts
+const DriverToken = token<Driver>('database.driver.selected',
+  (cfg = injectConfig(DatabaseConfig)) => DriverRegistry.getOrThrow(cfg.driver),
+);
+```
+
+If config asks for `mssql` but only `registerPsql()` was called, startup should fail with a clear error.
+
+### 3.4 Combined helper patterns (proposed)
+
+To reduce boilerplate, provide helpers:
+
+```ts
+const SelectedPetToken = configToken('pets.selected', PetConfig, 'selectedPet');
+const DriverToken = configRegistry('database.driver', DatabaseConfig, 'driver');
+```
+
+Equivalent lower-level form:
+
+```ts
+const DriverRegistry = registry<Driver>('database.driver',
+  (r, cfg = injectConfig(DatabaseConfig)) => r.getOrThrow(cfg.driver),
+);
+```
+
+Proposed signature:
+
+```ts
+registry<T>(
+  name: string,
+  provider?: (registry: Registry<T>) => TokenLike<T> | T,
+): RegistryToken<T>;
+```
+
+---
+
+## Provider capability matrix
+
+| Capability | Component | Token | Collection/Conditional | Registry |
+|---|---:|---:|---:|---:|
+| Declared by class | ✅ | ❌ | ⚠️ (uses class list) | ❌ |
+| External value | ❌ | ✅ | ✅ | ❌ |
+| Factory | ⚠️ | ✅ | ✅ | ✅ |
+| Lifecycle hooks | ✅ | ✅ | ✅ | ⚠️ (via selected token) |
+| Config-aware | ⚠️ | ✅ | ✅ | ✅ |
+| Lazy / optional | ✅ | ✅ | ✅ | ✅ |
+| Dynamic by key | ❌ | ⚠️ | ✅ | ✅ |
+
+---
 
 ## Container API proposal
 
@@ -75,26 +163,25 @@ class Container {
   provide(...providers: Provider<any>[]): this;
   use(module: ModuleRef): this;
 
-  // resolution
-  get<T>(token: TokenLike<T>): T; // no lifecycle
-  resolve<T>(token: TokenLike<T>): Promise<T>; // with lifecycle
+  // resolution ergonomics
+  get<T>(token: TokenLike<T>): T; // instantiate only, no lifecycle
+  resolve<T>(token: TokenLike<T>): Promise<T>; // full lifecycle
   resolveAll<T>(token: TokenLike<T>): Promise<T[]>;
 
-  // runtime control
+  // utility
   has(token: TokenLike<unknown>): boolean;
   createScope(name?: string): ScopedContainer;
   override<T>(token: TokenLike<T>, provider: Provider<T>): this;
 
-  // diagnostics
+  // safety
   validate(options?: ValidationOptions): Promise<void>;
   inspect(): DependencyGraph;
 
-  // shutdown
   destroy(): Promise<void>;
 }
 ```
 
-## `inject(...)` helpers
+## Injection helpers
 
 ```ts
 const inject: {
@@ -102,30 +189,22 @@ const inject: {
   optional<T>(token: TokenLike<T>): T | undefined;
   all<T>(token: TokenLike<T>): T[];
   lazy<T>(token: TokenLike<T>): () => Promise<T>;
-  named<T>(token: TokenLike<T>, name: string): T;
+  named<T>(base: TokenLike<T>, name: string): T;
 };
+
+declare function injectConfig<T>(schema: ConfigSchema<T>): T;
 ```
 
 ## Lifecycle semantics
 
-- `resolve(...)` will trigger component/provider `onInit` or `@PostConstruct`.
-- `get(...)` intentionally skips lifecycle (for fast, local, controlled use).
-- `destroy()` calls `onDestroy` / `@BeforeDestroy` in reverse order.
+- `resolve(...)` triggers `onInit`/`@PostConstruct`.
+- `get(...)` skips lifecycle intentionally.
+- `destroy()` triggers `onDestroy`/`@BeforeDestroy` in reverse dependency order.
 
 ## Scope rules
 
-- `singleton`: root cached.
-- `scoped`: per-scope cached.
-- `transient`: never cached.
+- `singleton`: root cache.
+- `scoped`: per child-scope cache.
+- `transient`: no cache.
 
-Strict mode should reject unsafe singleton -> scoped dependency chains.
-
-## Error model
-
-- `ResolutionError`
-- `CircularDependencyError`
-- `ScopeViolationError`
-- `ProviderConflictError`
-- `LifecycleError`
-
-All errors should include dependency path metadata.
+Strict validation should reject unsafe singleton -> scoped dependency edges.

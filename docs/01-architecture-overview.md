@@ -16,6 +16,7 @@ Kavri should be:
 
 Scope:
 
+- provider system (component, token, conditional/collection/registry)
 - token system
 - providers and resolution
 - scopes (singleton/scoped/transient)

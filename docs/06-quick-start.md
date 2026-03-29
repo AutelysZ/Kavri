@@ -1,44 +1,67 @@
 # 06. Quick Start & Entry Patterns
 
-## 6.1 Core IoC only (small script/service)
+## 6.1 Smallest IoC usage
 
 ```ts
 import { Container, Component, inject } from '@kavri/core';
 
 @Component()
-class Clock {
-  now() {
-    return new Date().toISOString();
+class Foo {
+  hello() {
+    return 'hello';
   }
 }
 
 @Component()
 class App {
-  constructor(private readonly clock = inject(Clock)) {}
+  constructor(private readonly foo = inject(Foo)) {}
   run() {
-    console.log(this.clock.now());
+    console.log(this.foo.hello());
   }
 }
 
 const container = new Container();
-const app = await container.resolve(App); // with lifecycle
+const app = await container.resolve(App); // lifecycle enabled
 app.run();
 await container.destroy();
 ```
 
-## 6.2 Difference between `get` and `resolve`
+## 6.2 `get` vs `resolve`
 
 ```ts
 const container = new Container();
 
-const a = container.get(Foo);        // sync instantiate, no lifecycle
-const b = await container.resolve(Foo); // async-safe + lifecycle hooks
+const a = container.get(Foo); // instantiate only
+const b = await container.resolve(Foo); // full lifecycle flow
 ```
 
-Use `get` for local/simple cases when you intentionally do not need startup hooks.
-Use `resolve` for application composition and production startup.
+## 6.3 Token provider for external library
 
-## 6.3 Simple HTTP app
+```ts
+const SequelizeToken = token<Sequelize>('sequelize',
+  (cfg = injectConfig(SequelizeConfig)) => new Sequelize(cfg.url),
+);
+
+const sequelize = await container.resolve(SequelizeToken);
+```
+
+## 6.4 Dynamic provider registration (database)
+
+```ts
+import { registerPsql } from '@kavri/database/psql';
+
+const app = new Container();
+registerPsql(app);
+
+app.use(ConfigModule.from({ files: ['application.yaml'], cli: process.argv }));
+app.use(DatabaseModule);
+
+await app.validate();
+```
+
+If `application.yaml` selects `mssql` while only `registerPsql(app)` was called, startup fails with clear guidance.
+
+## 6.5 Simple HTTP app (optional upper layer)
 
 ```ts
 import { serve, Controller, Get } from '@kavri/http';
@@ -51,34 +74,11 @@ class HealthController {
   }
 }
 
-await serve({
-  port: 3000,
-  controllers: [HealthController],
-});
+await serve({ port: 3000, controllers: [HealthController] });
 ```
 
-## 6.4 App with config + dynamic database provider
+## 6.6 Presets
 
-```ts
-import { Container } from '@kavri/core';
-import { ConfigModule } from '@kavri/config';
-import { DatabaseModule } from '@kavri/database';
-import { providePsql } from '@kavri/database/psql';
-
-const app = new Container();
-providePsql(app); // register only what user wants
-
-app.use(ConfigModule.from({ files: ['application.yaml'], cli: process.argv }));
-app.use(DatabaseModule);
-
-await app.validate();
-await app.resolve(Bootstrap);
-```
-
-## 6.5 Suggested entrypoint presets
-
-- `createApp()` -> full app preset (config + lifecycle validation + diagnostics)
-- `createContainer()` -> lightweight IoC preset
-- `serve()` -> HTTP-focused shortcut
-
-This gives beginners a one-liner while preserving power-user control.
+- `createContainer()` — lightweight IoC bootstrap
+- `createApp()` — full app preset (config + validation + diagnostics)
+- `serve()` — HTTP-focused shortcut

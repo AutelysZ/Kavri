@@ -1,100 +1,118 @@
 # 05. Dynamic Provider Registry
 
-## Problem
+## Problem statement
 
-Some integrations are pluggable (e.g., database drivers: psql/mysql/mssql).
+Modules like database integration must support multiple implementations (psql/mysql/mssql), but only load implementations explicitly installed/registered by user code.
 
-Kavri should allow users to register only the drivers they explicitly import. If configuration asks for a driver that was not registered, startup must fail with a clear error.
+### Required behavior
 
-## Proposed abstraction: `registryToken<T>()`
+- User imports and calls explicit registration functions, e.g. `registerPsql(container)`.
+- Configuration selects driver key, e.g. `database.driver = "psql"`.
+- If config selects a key not registered, startup fails with a clear error.
+
+## Baseline API
 
 ```ts
-const DatabaseDriverRegistry = registryToken<Driver>('database.provider');
+const DriverRegistry = registry<Driver>('database.driver');
+
+export const registerPsql = DriverRegistry.register('psql', PsqlDriver);
+export const registerMysql = DriverRegistry.register('mysql', MysqlDriver);
+export const registerMssql = DriverRegistry.register('mssql', MssqlDriver);
 ```
 
-This token represents a map-like provider registry keyed by string IDs.
+No implicit side-effect imports required.
 
-## Driver package pattern
-
-### `database/psql.ts`
+## Selected driver token
 
 ```ts
-class PsqlDriver implements Driver {
-  /* ... */
-}
-
-export const providePsql = DatabaseDriverRegistry.register('psql', PsqlDriver);
+const DriverToken = token<Driver>('database.driver.selected',
+  (cfg = injectConfig(DatabaseConfig)) => DriverRegistry.getOrThrow(cfg.driver),
+);
 ```
 
-### `database/mysql.ts`
+## Optional boilerplate reducers
+
+### `configRegistry(...)`
 
 ```ts
-class MysqlDriver implements Driver {
-  /* ... */
-}
-
-export const provideMysql = DatabaseDriverRegistry.register('mysql', MysqlDriver);
+const DriverToken = configRegistry('database.driver', DatabaseConfig, 'driver');
 ```
 
-## Application usage
+Equivalent to:
 
 ```ts
-import { providePsql } from 'database/psql';
+const DriverToken = token('database.driver.selected',
+  (cfg = injectConfig(DatabaseConfig)) => DriverRegistry.getOrThrow(cfg.driver),
+);
+```
+
+### Registry with built-in provider
+
+```ts
+const DriverRegistry = registry<Driver>(
+  'database.driver',
+  (r, cfg = injectConfig(DatabaseConfig)) => r.getOrThrow(cfg.driver),
+);
+```
+
+Proposed signature:
+
+```ts
+registry<T>(
+  name: string,
+  provider?: (registry: Registry<T>) => TokenLike<T> | T,
+): RegistryToken<T>;
+```
+
+## Concrete flow
+
+```ts
+import { registerPsql } from '@kavri/database/psql';
 
 const container = new Container();
-providePsql(container);
+registerPsql(container);
 
-container.use(ConfigModule.from({ files: ['app.yaml'] }));
+container.use(ConfigModule.from({ files: ['application.yaml'] }));
 container.use(DatabaseModule);
 
 await container.validate();
+await container.resolve(AppBootstrap);
 ```
 
-`app.yaml`:
+`application.yaml`:
 
 ```yaml
 database:
   driver: psql
 ```
 
-## Resolution strategy in `DatabaseModule`
+## Error case (intended)
 
-```ts
-const DatabaseConfig = defineZodConfig('database', z.object({
-  driver: z.enum(['psql', 'mysql', 'mssql']),
-}));
+If config sets `database.driver = mssql` but app only called `registerPsql(container)`, throw:
 
-container.provide({
-  provide: DbClient,
-  useFactory: (cfg = inject(DatabaseConfig), reg = inject(DatabaseDriverRegistry)) => {
-    const impl = reg.get(cfg.driver);
-    if (!impl) {
-      throw new DynamicProviderNotFoundError({
-        registry: 'database.provider',
-        key: cfg.driver,
-        message: `Database driver "${cfg.driver}" is configured but not registered. Import and call provide${cfg.driver[0].toUpperCase() + cfg.driver.slice(1)}(...).`,
-      });
-    }
-    return new impl();
-  },
-});
+```txt
+[DYNAMIC_PROVIDER_NOT_FOUND] registry=database.driver key=mssql
+Configured implementation was not registered.
+Registered keys: psql
+Hint: import and call registerMssql(container)
 ```
 
-## Safety and ergonomics
+## Additional scenarios supported by same model
 
-- **explicit import + explicit registration** (no side-effect `import 'database/psql'` required)
-- validation can assert required registry entry exists before serving traffic
-- useful for optional peer dependencies and smaller bundles
+- payment gateways: `stripe`, `adyen`, `paypal`
+- message queues: `kafka`, `rabbitmq`, `nats`
+- storage backends: `s3`, `gcs`, `azure-blob`
+- auth providers: `local`, `oidc`, `saml`
 
-## Error contract
+## Lifecycle handling
 
-Suggested error payload:
+Registry entries can still define lifecycle via selected token provider.
 
 ```ts
-{
-  code: 'DYNAMIC_PROVIDER_NOT_FOUND',
-  registry: 'database.provider',
-  key: 'mssql',
-  suggestions: ['providePsql', 'provideMysql']
-}
+container.provide({
+  provide: DriverToken,
+  useFactory: (cfg = injectConfig(DatabaseConfig)) => DriverRegistry.getOrThrow(cfg.driver),
+  onInit: (driver) => driver.connect?.(),
+  onDestroy: (driver) => driver.close?.(),
+});
 ```
