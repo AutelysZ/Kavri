@@ -8,7 +8,7 @@ Configuration is a first-class subsystem because it controls provider factories,
 
 ```ts
 type ConfigSchema<T> = { key: string; parse(input: unknown): T };
-type Constructor<T> = abstract new (...args: any[]) => T;
+type Constructor<T> = abstract new () => T;
 interface Token<T> { kind: 'token'; name: string; }
 interface ModuleRef { kind: 'module'; name: string; }
 

@@ -7,7 +7,7 @@ Modularization organizes provider registration for medium and large projects whi
 ## 2. Types used in this document
 
 ```ts
-type Constructor<T> = abstract new (...args: any[]) => T;
+type Constructor<T> = abstract new () => T;
 type TokenLike<T> = Token<T> | Constructor<T>;
 
 interface Token<T> { kind: 'token'; name: string; }

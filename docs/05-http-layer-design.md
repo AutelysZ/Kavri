@@ -7,7 +7,7 @@ HTTP is an optional upper layer built on IoC core. IoC remains fully usable with
 ## 2. Types used in this document
 
 ```ts
-type Constructor<T> = abstract new (...args: any[]) => T;
+type Constructor<T> = abstract new () => T;
 interface ModuleRef { kind: 'module'; name: string; }
 
 interface HttpApplication {

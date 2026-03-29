@@ -2,21 +2,22 @@
 
 ## 1. Scope
 
-This document defines a complete IoC-first API surface with explicit dependencies and config-aware provider selection.
+This document defines the implementation-ready IoC core API with explicit provider registration, config-driven selection, and deterministic lifecycle behavior.
 
 ## 2. Canonical type declarations
 
-All referenced API types are declared here for clarity.
+All key types used by the IoC API are declared here.
 
 ```ts
-export type Constructor<T> = abstract new (...args: any[]) => T;
-
-export type TokenLike<T> = Token<T> | Constructor<T>;
+export type Constructor<T> = abstract new () => T;
 
 export interface Token<T> {
   readonly kind: 'token';
   readonly name: string;
+  readonly __type?: T; // brand field to preserve generic identity
 }
+
+export type TokenLike<T> = Token<T> | Constructor<T>;
 
 export interface ModuleRef {
   readonly kind: 'module';
@@ -30,42 +31,28 @@ export interface ScopeRef {
   destroy(): Promise<void>;
 }
 
-export type ProviderFactory<T> = (...deps: any[]) => T | Promise<T>;
-
-export interface ClassProvider<T> {
-  provide: TokenLike<T>;
-  useClass: Constructor<T>;
-  scope?: 'singleton' | 'scoped' | 'transient';
-}
+export type ProviderFactory<T> = () => T | Promise<T>;
 
 export interface ValueProvider<T> {
-  provide: TokenLike<T>;
+  provide: Token<T>;
   useValue: T;
 }
 
 export interface FactoryProvider<T> {
-  provide: TokenLike<T>;
+  provide: Token<T>;
   useFactory: ProviderFactory<T>;
   scope?: 'singleton' | 'scoped' | 'transient';
   onInit?: (value: T) => void | Promise<void>;
   onDestroy?: (value: T) => void | Promise<void>;
 }
 
-export interface ExistingProvider<T> {
-  provide: TokenLike<T>;
-  useExisting: TokenLike<T>;
-}
-
 export type Provider<T = unknown> =
-  | ClassProvider<T>
   | ValueProvider<T>
   | FactoryProvider<T>
-  | ExistingProvider<T>;
+  | Constructor<T>;
 
 export type ProviderInput =
   | Provider
-  | Constructor<any>
-  | readonly Constructor<any>[]
   | readonly Provider[];
 
 export type ConfigSchema<T> = { key: string; parse(input: unknown): T };
@@ -75,31 +62,45 @@ export interface Registry<T> {
   get(name: string): Constructor<T> | undefined;
   getOrThrow(name: string): Constructor<T>;
 }
+
+type LegacyClassDecorator = (target: Function) => void | Function;
+type TC39ClassDecorator = (value: Function, context: { kind: 'class'; name: string }) => Function | void;
+export type HybridClassDecorator = LegacyClassDecorator & TC39ClassDecorator;
 ```
 
 ## 3. Decorators and injection APIs
 
 ```ts
-declare function Component(): ClassDecorator;
-declare function token<T>(name: string, factory?: ProviderFactory<T>): Token<T>;
-declare function selector<TBase>(
-  name: string,
-  base: Constructor<TBase>,
-  select: (map: Map<string, Constructor<TBase>>, ...deps: any[]) => Constructor<TBase> | undefined,
-): Token<TBase>;
-declare function registry<T>(name: string): Registry<T>;
-declare function Named(name: string): ClassDecorator;
+declare function Component(): HybridClassDecorator;
+declare function Named(name: string): HybridClassDecorator;
 
-declare function inject<T>(target: TokenLike<T>): T;
-declare function injectOptional<T>(target: TokenLike<T>): T | undefined;
-declare function injectLazy<T>(target: TokenLike<T>): () => Promise<T>;
-declare function injectNamed<T>(base: Constructor<T>, name: string): T;
-declare function injectConfig<T>(schema: ConfigSchema<T>): T;
+declare function token<T>(name: string, provider?: Provider<T>): Token<T>;
+declare function selector<T>(
+  name: string,
+  extractor: () => TokenLike<T> | undefined,
+): Token<T>;
+declare function registry<T>(name: string): Registry<T>;
+
+declare function inject<T>(target: TokenLike<T>, options?: { optional?: boolean }): T | undefined;
+declare function injectLazy<T>(
+  target: TokenLike<T>,
+  options?: { optional?: boolean },
+): () => Promise<T | undefined>;
+declare function injectNamed<T>(
+  base: Constructor<T>,
+  name: string,
+  options?: { optional?: boolean },
+): T | undefined;
+declare function injectConfig<T>(schema: ConfigSchema<T>, options?: { optional?: boolean }): T | undefined;
+declare function injectConstructorMap<T>(base: Constructor<T>): Map<string, Constructor<T>>;
 ```
 
-No chained methods on `inject`.
+Notes:
 
-## 4. Container API (restricted)
+- No chained methods on `inject`.
+- Optional mode is available everywhere through `options.optional`.
+
+## 4. Container API
 
 ```ts
 class Container {
@@ -115,7 +116,7 @@ Only `resolve(...)` is used to obtain instances.
 
 ## 5. Provider categories
 
-### 5.1 Component provider
+### 5.1 Component provider (constructor directly)
 
 ```ts
 @Component()
@@ -125,12 +126,13 @@ class UserService {}
 ### 5.2 Token provider
 
 ```ts
-const SequelizeToken = token<Sequelize>('sequelize',
-  (cfg = injectConfig(SequelizeConfig)) => new Sequelize(cfg.url),
-);
+const SequelizeToken = token<Sequelize>('sequelize', {
+  provide: token<Sequelize>('sequelize.provider.id'),
+  useFactory: () => new Sequelize(injectConfig(SequelizeConfig)!.url),
+});
 ```
 
-### 5.3 Conditional selector provider (constructor map)
+### 5.3 Conditional selector provider (flexible extractor)
 
 ```ts
 @Component()
@@ -144,14 +146,14 @@ class Cat extends Pet {}
 
 const AllPets = [Dog, Cat];
 
-const PetSelector = selector(
-  'pet.selector',
-  Pet,
-  (map: Map<string, Constructor<Pet>>, cfg = injectConfig(PetConfig)) => map.get(cfg.selectedPet),
-);
+const PetSelector = selector('pet.selector', () => {
+  const map = injectConstructorMap(Pet);
+  const cfg = injectConfig(PetConfig)!;
+  return map.get(cfg.selectedPet);
+});
 ```
 
-Conditional selection must use constructors/providers map to avoid eager instantiation.
+The selector is not bound to a single provider source and can extract from any runtime condition.
 
 ### 5.4 Dynamic registry provider
 
@@ -159,22 +161,23 @@ Conditional selection must use constructors/providers map to avoid eager instant
 const DriverRegistry = registry<Driver>('database.driver');
 export const registerPsql = DriverRegistry.register('psql', PsqlDriver);
 
-const DriverToken = token<Driver>('database.driver.selected',
-  (cfg = injectConfig(DatabaseConfig)) => new (DriverRegistry.getOrThrow(cfg.driver))(),
-);
+const DriverToken = token<Driver>('database.driver.selected', {
+  provide: token<Driver>('database.driver.provider.id'),
+  useFactory: () => new (DriverRegistry.getOrThrow(injectConfig(DatabaseConfig)!.driver))(),
+});
 ```
 
 ## 6. Scopes and lifecycle
 
 - `singleton`: container lifetime
-- `scoped`: child scope lifetime
-- `transient`: resolution lifetime
+- `scoped`: child-scope lifetime
+- `transient`: per-resolution lifetime
 
 Lifecycle order:
 
 1. provider created
 2. optional `onInit` / `@PostConstruct`
-3. on scope/container teardown: `onDestroy` / `@BeforeDestroy` in reverse dependency order
+3. `onDestroy` / `@BeforeDestroy` in reverse dependency order during scope/container destroy
 
 ## 7. Full example
 
@@ -187,19 +190,18 @@ import {
   selector,
   registry,
   inject,
-  injectOptional,
   injectLazy,
   injectNamed,
   injectConfig,
+  injectConstructorMap,
+  Constructor,
 } from '@kavri/core';
 import { ConfigModule, defineZodConfig } from '@kavri/config';
 import { z } from 'zod';
 
-// -------- config schemas --------
 const PetConfig = defineZodConfig('pet', z.object({ selectedPet: z.enum(['dog', 'cat']) }));
 const DatabaseConfig = defineZodConfig('database', z.object({ driver: z.enum(['psql', 'mysql']) }));
 
-// -------- component providers --------
 @Component()
 abstract class Pet { abstract speak(): string; }
 
@@ -211,13 +213,12 @@ class Cat extends Pet { speak() { return 'meow'; } }
 
 const AllPets = [Dog, Cat];
 
-const PetSelector = selector(
-  'pet.selector',
-  Pet,
-  (map: Map<string, Constructor<Pet>>, cfg = injectConfig(PetConfig)) => map.get(cfg.selectedPet),
-);
+const PetSelector = selector('pet.selector', () => {
+  const map = injectConstructorMap(Pet);
+  const cfg = injectConfig(PetConfig)!;
+  return map.get(cfg.selectedPet);
+});
 
-// -------- dynamic registry --------
 interface Driver { query(sql: string): Promise<string>; }
 class PsqlDriver implements Driver { async query(sql: string) { return `psql:${sql}`; } }
 class MysqlDriver implements Driver { async query(sql: string) { return `mysql:${sql}`; } }
@@ -226,27 +227,36 @@ const DriverRegistry = registry<Driver>('database.driver');
 const registerPsql = DriverRegistry.register('psql', PsqlDriver);
 const registerMysql = DriverRegistry.register('mysql', MysqlDriver);
 
-const DriverToken = token<Driver>('database.driver.selected',
-  (cfg = injectConfig(DatabaseConfig)) => new (DriverRegistry.getOrThrow(cfg.driver))(),
-);
+const DriverProviderToken = token<Driver>('database.driver.provider.id');
+const DriverToken = token<Driver>('database.driver.selected', {
+  provide: DriverProviderToken,
+  useFactory: () => {
+    const cfg = injectConfig(DatabaseConfig)!;
+    const Impl: Constructor<Driver> = DriverRegistry.getOrThrow(cfg.driver);
+    return new Impl();
+  },
+});
 
-const MetricsClientToken = token<{ emit(name: string): void }>('metrics.client');
-const LoggerToken = token<{ info(data: unknown): void }>('logger');
+const LoggerProviderToken = token<{ info(data: unknown): void }>('logger.provider.id');
+const LoggerToken = token<{ info(data: unknown): void }>('logger', {
+  provide: LoggerProviderToken,
+  useFactory: () => ({ info: console.log }),
+});
 
 @Component()
 class AppService {
   constructor(
-    private readonly selectedPet = inject(PetSelector),
-    private readonly driver = inject(DriverToken),
-    private readonly maybeMetrics = injectOptional(MetricsClientToken),
-    private readonly lazyLogger = injectLazy(LoggerToken),
+    private readonly selectedPet = inject(PetSelector)!,
+    private readonly driver = inject(DriverToken)!,
+    private readonly maybeMetrics = inject(token<{ emit(name: string): void }>('metrics.client'), { optional: true }),
+    private readonly lazyLogger = injectLazy(LoggerToken, { optional: false }),
   ) {}
 
   async run() {
-    const namedDog = injectNamed(Pet, 'dog');
+    const dog = injectNamed(Pet, 'dog', { optional: false })!;
     const db = await this.driver.query('select 1');
     const logger = await this.lazyLogger();
-    logger.info({ db, namedDog: namedDog.speak(), hasMetrics: !!this.maybeMetrics });
+    logger!.info({ db, dog: dog.speak(), hasMetrics: !!this.maybeMetrics });
     return `${this.selectedPet.speak()} | ${db}`;
   }
 }
