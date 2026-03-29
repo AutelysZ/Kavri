@@ -12,7 +12,7 @@ It has two layers:
 - [0x Overview](./docs/0x-overview.md)
 - [0x IoC Core](./docs/0x-ioc.md)
 - [0x Configuration](./docs/0x-config.md)
-- [0x Moduleization](./docs/0x-moduleize.md)
+- [0x Modularization](./docs/0x-modularization.md)
 - [0x HTTP](./docs/0x-http.md)
 
 ## Project Status

@@ -1,8 +1,8 @@
-# 0x Moduleization Design
+# 0x Modularization Design
 
 ## 1. Purpose
 
-Moduleization organizes provider registration for medium/large projects while keeping one IoC runtime model.
+Modularization organizes provider registration for medium and large projects while preserving a single IoC runtime model.
 
 ## 2. Types used in this document
 
@@ -27,10 +27,10 @@ declare function defineModule(spec: ModuleSpec): ModuleRef;
 
 ## 3. Rules
 
-- providers are private unless exported
-- imports form explicit visibility edges
-- module layer does not change provider/lifecycle semantics
-- modules are optional for small apps
+- Providers are private unless exported.
+- Imports create explicit visibility edges.
+- The module layer does not change provider or lifecycle semantics.
+- Modules are optional for small applications.
 
 ## 4. Full example
 
@@ -69,6 +69,7 @@ const DatabaseModule = defineModule({
 @Component()
 class UserService {
   constructor(private readonly db = inject(DbToken)) {}
+
   async getUser(id: string) {
     await this.db.query(`select * from users where id='${id}'`);
     return { id, name: 'mock' };
@@ -85,6 +86,7 @@ const UserModule = defineModule({
 @Component()
 class AppService {
   constructor(private readonly users = inject(UserService)) {}
+
   async run() {
     return this.users.getUser('u1');
   }
