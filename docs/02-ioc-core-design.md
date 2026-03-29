@@ -58,7 +58,7 @@ export type ProviderInput =
 export type ConfigSchema<T> = { key: string; parse(input: unknown): T };
 
 export interface Registry<T> {
-  register(name: string, impl: Constructor<T>): (container: Container) => void;
+  register(name: string, impl: Constructor<T>): () => void;
   get(name: string): Constructor<T> | undefined;
   getOrThrow(name: string): Constructor<T>;
 }
@@ -77,7 +77,7 @@ declare function Named(name: string): HybridClassDecorator;
 declare function token<T>(name: string, provider?: Provider<T>): Token<T>;
 declare function selector<T>(
   name: string,
-  extractor: () => TokenLike<T> | undefined,
+  extractor: (...args: unknown[]) => TokenLike<T> | undefined,
 ): Token<T>;
 declare function registry<T>(name: string): Registry<T>;
 
@@ -94,12 +94,19 @@ declare function injectConfig<T>(schema: ConfigSchema<T>): T;
 declare function injectConfig<T>(schema: ConfigSchema<T>, options: { optional: true }): T | undefined;
 
 declare function injectConstructorMap<T>(base: Constructor<T>): Map<string, Constructor<T>>;
+declare function injectMap<T>(base: Constructor<T>): ReadonlyMap<string, T>;
+declare function injectSet<T>(base: Constructor<T>): ReadonlySet<T>;
+declare function injectList<T>(
+  base: Constructor<T>,
+  options?: { order?: 'topo' | 'provided' | 'alphabet' },
+): readonly T[];
 ```
 
 Notes:
 
 - No chained methods on `inject`.
 - Optional mode is available through overload signatures on each inject API.
+- `inject*` APIs may only be used in constructor parameter defaults, `selector(...)` extractors, and token/class lifecycle default parameters.
 
 ## 4. Container API
 
@@ -128,8 +135,7 @@ class UserService {}
 
 ```ts
 const SequelizeToken = token<Sequelize>('sequelize', {
-  provide: token<Sequelize>('sequelize.provider.id'),
-  useFactory: () => new Sequelize(injectConfig(SequelizeConfig)!.url),
+  useFactory: () => new Sequelize(injectConfig(SequelizeConfig).url),
 });
 ```
 
@@ -147,25 +153,29 @@ class Cat extends Pet {}
 
 const AllPets = [Dog, Cat];
 
-const PetSelector = selector('pet.selector', () => {
-  const map = injectConstructorMap(Pet);
-  const cfg = injectConfig(PetConfig)!;
-  return map.get(cfg.selectedPet);
-});
+const PetSelector = selector(
+  'pet.selector',
+  (
+    map = injectConstructorMap(Pet),
+    cfg = injectConfig(PetConfig),
+  ) => map.get(cfg.selectedPet),
+);
 ```
 
 The selector is not bound to a single provider source and can extract from any runtime condition.
 
-### 5.4 Dynamic registry provider
+### 5.4 Dynamic registry provider (selector-based)
 
 ```ts
 const DriverRegistry = registry<Driver>('database.driver');
 export const registerPsql = DriverRegistry.register('psql', PsqlDriver);
 
-const DriverToken = token<Driver>('database.driver.selected', {
-  provide: token<Driver>('database.driver.provider.id'),
-  useFactory: () => new (DriverRegistry.getOrThrow(injectConfig(DatabaseConfig)!.driver))(),
-});
+const DriverSelector = selector(
+  'database.driver.selected',
+  (
+    cfg = injectConfig(DatabaseConfig),
+  ) => DriverRegistry.get(cfg.driver),
+);
 ```
 
 ## 6. Scopes and lifecycle
@@ -195,7 +205,6 @@ import {
   injectNamed,
   injectConfig,
   injectConstructorMap,
-  Constructor,
 } from '@kavri/core';
 import { ConfigModule, defineZodConfig } from '@kavri/config';
 import { z } from 'zod';
@@ -214,11 +223,13 @@ class Cat extends Pet { speak() { return 'meow'; } }
 
 const AllPets = [Dog, Cat];
 
-const PetSelector = selector('pet.selector', () => {
-  const map = injectConstructorMap(Pet);
-  const cfg = injectConfig(PetConfig)!;
-  return map.get(cfg.selectedPet);
-});
+const PetSelector = selector(
+  'pet.selector',
+  (
+    map = injectConstructorMap(Pet),
+    cfg = injectConfig(PetConfig),
+  ) => map.get(cfg.selectedPet),
+);
 
 interface Driver { query(sql: string): Promise<string>; }
 class PsqlDriver implements Driver { async query(sql: string) { return `psql:${sql}`; } }
@@ -228,36 +239,33 @@ const DriverRegistry = registry<Driver>('database.driver');
 const registerPsql = DriverRegistry.register('psql', PsqlDriver);
 const registerMysql = DriverRegistry.register('mysql', MysqlDriver);
 
-const DriverProviderToken = token<Driver>('database.driver.provider.id');
-const DriverToken = token<Driver>('database.driver.selected', {
-  provide: DriverProviderToken,
-  useFactory: () => {
-    const cfg = injectConfig(DatabaseConfig)!;
-    const Impl: Constructor<Driver> = DriverRegistry.getOrThrow(cfg.driver);
-    return new Impl();
-  },
-});
+const DriverSelector = selector(
+  'database.driver.selected',
+  (
+    cfg = injectConfig(DatabaseConfig),
+  ) => DriverRegistry.get(cfg.driver),
+);
 
-const LoggerProviderToken = token<{ info(data: unknown): void }>('logger.provider.id');
 const LoggerToken = token<{ info(data: unknown): void }>('logger', {
-  provide: LoggerProviderToken,
   useFactory: () => ({ info: console.log }),
 });
+
+const MetricsToken = token<{ emit(name: string): void }>('metrics.client');
 
 @Component()
 class AppService {
   constructor(
-    private readonly selectedPet = inject(PetSelector)!,
-    private readonly driver = inject(DriverToken)!,
-    private readonly maybeMetrics = inject(token<{ emit(name: string): void }>('metrics.client'), { optional: true }),
+    private readonly selectedPet = inject(PetSelector),
+    private readonly driver = inject(DriverSelector),
+    private readonly maybeMetrics = inject(MetricsToken, { optional: true }),
     private readonly loggerPromise = injectLazy(LoggerToken),
+    private readonly dog = injectNamed(Pet, 'dog'),
   ) {}
 
   async run() {
-    const dog = injectNamed(Pet, 'dog');
     const db = await this.driver.query('select 1');
     const logger = await this.loggerPromise;
-    logger.info({ db, dog: dog.speak(), hasMetrics: !!this.maybeMetrics });
+    logger.info({ db, dog: this.dog.speak(), hasMetrics: !!this.maybeMetrics });
     return `${this.selectedPet.speak()} | ${db}`;
   }
 }
@@ -265,8 +273,8 @@ class AppService {
 const app = new Container();
 app.use(ConfigModule.from({ files: ['application.yaml'], cli: process.argv }));
 app.provide(AllPets);
-registerPsql(app);
-registerMysql(app);
+registerPsql();
+registerMysql();
 
 const service = await app.resolve(AppService);
 console.log(await service.run());
