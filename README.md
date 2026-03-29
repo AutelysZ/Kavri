@@ -11,15 +11,13 @@ It has two layers:
 
 ## Documentation
 
-Design docs are modularized under [`docs/`](./docs):
+Design docs are organized as:
 
-- [Architecture Overview](./docs/01-architecture-overview.md)
-- [IoC Container API](./docs/02-ioc-container.md)
-- [HTTP Framework Layer](./docs/03-http-framework.md)
-- [Configuration Module](./docs/04-configuration.md)
-- [Dynamic Provider Registry](./docs/05-dynamic-providers.md)
-- [Quick Start & Entry Patterns](./docs/06-quick-start.md)
-- [Cookbook / End-to-End Examples](./docs/07-cookbook.md)
+- [Overview](./docs/overview.md)
+- [IoC Core](./docs/ioc.md)
+- [Configuration](./docs/config.md)
+- [Moduleization](./docs/moduleize.md)
+- [HTTP Layer](./docs/http.md)
 
 ## Project Status
 
