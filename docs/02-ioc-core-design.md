@@ -17,7 +17,22 @@ export interface Token<T> {
   readonly __type?: T; // brand field to preserve generic identity
 }
 
-export type TokenLike<T> = Token<T> | Constructor<T>;
+export interface SelectorToken<T> {
+  readonly kind: 'selector-token';
+  readonly name: string;
+  readonly __type?: T;
+}
+
+export interface CollectionToken<T> {
+  readonly kind: 'collection-token';
+  readonly name: string;
+  get(name: string): Constructor<T> | undefined;
+  set(): ReadonlySet<Constructor<T>>;
+  map(): ReadonlyMap<string, Constructor<T>>;
+  list(options?: { order?: 'topo' | 'provided' | 'alphabet' }): readonly Constructor<T>[];
+}
+
+export type TokenLike<T> = Token<T> | SelectorToken<T> | Constructor<T>;
 
 export interface ModuleRef {
   readonly kind: 'module';
@@ -53,7 +68,8 @@ export type Provider<T = unknown> =
 
 export type ProviderInput =
   | Provider
-  | readonly Provider[];
+  | CollectionToken<unknown>
+  | readonly (Provider | CollectionToken<unknown>)[];
 
 export type ConfigSchema<T> = { key: string; parse(input: unknown): T };
 
@@ -80,10 +96,11 @@ export interface ComponentOptions {
 declare function Component(options?: ComponentOptions): HybridClassDecorator;
 
 declare function token<T>(name: string, provider?: Provider<T>): Token<T>;
+declare function collection<T>(name: string, ...constructors: Constructor<T>[]): CollectionToken<T>;
 declare function selector<T>(
   name: string,
   extractor: () => TokenLike<T> | undefined,
-): Token<T>;
+): SelectorToken<T>;
 declare function registry<T>(name: string): Registry<T>;
 
 declare function inject<T>(target: TokenLike<T>): T;
@@ -98,16 +115,10 @@ declare function injectNamed<T>(base: Constructor<T>, name: string, options: { o
 declare function injectConfig<T>(schema: ConfigSchema<T>): T;
 declare function injectConfig<T>(schema: ConfigSchema<T>, options: { optional: true }): T | undefined;
 
-declare function injectConstructorMap<T>(base: Constructor<T>): Map<string, Constructor<T>>;
-declare function injectConstructorSet<T>(base: Constructor<T>): ReadonlySet<Constructor<T>>;
-declare function injectConstructorList<T>(
-  base: Constructor<T>,
-  options?: { order?: 'topo' | 'provided' | 'alphabet' },
-): readonly Constructor<T>[];
-declare function injectMap<T>(base: Constructor<T>): ReadonlyMap<string, T>;
-declare function injectSet<T>(base: Constructor<T>): ReadonlySet<T>;
+declare function injectMap<T>(collection: CollectionToken<T>): ReadonlyMap<string, T>;
+declare function injectSet<T>(collection: CollectionToken<T>): ReadonlySet<T>;
 declare function injectList<T>(
-  base: Constructor<T>,
+  collection: CollectionToken<T>,
   options?: { order?: 'topo' | 'provided' | 'alphabet' },
 ): readonly T[];
 ```
@@ -117,8 +128,8 @@ Notes:
 - No chained methods on `inject`.
 - Optional mode is available through overload signatures on each inject API.
 - `inject*` APIs may only be used in constructor parameter defaults, `selector(...)` extractors, and token/class lifecycle default parameters.
-- Constructor collection injectors (`injectConstructorMap/List/Set`) are preferred for conditional flows to avoid eager instance creation.
 - `selector(...)` extractor is a zero-argument callback (`() => ...`); if an implementation declares parameters, they must all be defaulted so zero-arg invocation remains valid.
+- `CollectionToken<T>` is not `TokenLike<T>` and cannot be resolved directly; it is only used with `injectMap`, `injectSet`, and `injectList`.
 
 ## 4. Container API
 
@@ -151,7 +162,7 @@ const SequelizeToken = token<Sequelize>('sequelize', {
 });
 ```
 
-### 5.3 Conditional selector provider (flexible extractor)
+### 5.3 Collection + conditional selector provider
 
 ```ts
 @Component()
@@ -163,12 +174,12 @@ class Dog extends Pet {}
 @Component({ name: 'cat' })
 class Cat extends Pet {}
 
-const AllPets = [Dog, Cat];
+const PetCollection = collection<Pet>('pets', Dog, Cat);
 
 const PetSelector = selector(
   'pet.selector',
   () => {
-    const map = injectConstructorMap(Pet);
+    const map = PetCollection.map();
     const cfg = injectConfig(PetConfig);
     return map.get(cfg.selectedPet);
   },
@@ -177,6 +188,8 @@ const PetSelector = selector(
 
 The selector is not bound to a single provider source and can extract from any runtime condition.
 Named bindings are declared through `@Component({ name: '...' })` instead of a separate decorator.
+With `collection(...)`, `container.provide([Dog, Cat])` is not required for collection injection.
+`container.provide(PetCollection)` and `container.provide(Dog)` / `container.provide(Cat)` are still valid when only named-resolution (`injectNamed`) paths are used.
 
 ### 5.4 Dynamic registry provider (selector-based)
 
@@ -212,13 +225,14 @@ import {
   Container,
   Component,
   token,
+  collection,
   selector,
   registry,
   inject,
+  injectMap,
   injectLazy,
   injectNamed,
   injectConfig,
-  injectConstructorMap,
 } from '@kavri/core';
 import { ConfigModule, defineZodConfig } from '@kavri/config';
 import { z } from 'zod';
@@ -235,12 +249,12 @@ class Dog extends Pet { speak() { return 'woof'; } }
 @Component({ name: 'cat' })
 class Cat extends Pet { speak() { return 'meow'; } }
 
-const AllPets = [Dog, Cat];
+const PetCollection = collection<Pet>('pets', Dog, Cat);
 
 const PetSelector = selector(
   'pet.selector',
   () => {
-    const map = injectConstructorMap(Pet);
+    const map = PetCollection.map();
     const cfg = injectConfig(PetConfig);
     return map.get(cfg.selectedPet);
   },
@@ -273,6 +287,7 @@ class AppService {
   constructor(
     private readonly selectedPet = inject(PetSelector),
     private readonly driver = inject(DriverSelector),
+    private readonly pets = injectMap(PetCollection),
     private readonly maybeMetrics = inject(MetricsToken, { optional: true }),
     private readonly loggerPromise = injectLazy(LoggerToken),
     private readonly dog = injectNamed(Pet, 'dog'),
@@ -281,14 +296,20 @@ class AppService {
   async run() {
     const db = await this.driver.query('select 1');
     const logger = await this.loggerPromise;
-    logger.info({ db, dog: this.dog.speak(), hasMetrics: !!this.maybeMetrics });
+    logger.info({
+      db,
+      dog: this.dog.speak(),
+      availablePets: Array.from(this.pets.keys()),
+      hasMetrics: !!this.maybeMetrics,
+    });
     return `${this.selectedPet.speak()} | ${db}`;
   }
 }
 
 const app = new Container();
 app.use(ConfigModule.from({ files: ['application.yaml'], cli: process.argv }));
-app.provide(AllPets);
+// Optional: provide collection/components when only injectNamed(...) paths are used.
+app.provide(PetCollection);
 registerPsql();
 registerMysql();
 
