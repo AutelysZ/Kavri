@@ -10,7 +10,6 @@ All key types used by the IoC API are declared here.
 
 ```ts
 export type Constructor<T> = abstract new () => T;
-export type NamedConstructor<T> = Constructor<T> & { readonly __componentName__: string | symbol };
 
 export interface Token<T> {
   readonly kind: 'token';
@@ -98,7 +97,7 @@ declare function Component(options?: ComponentOptions): HybridClassDecorator;
 
 declare function token<T>(provider?: Provider<T>): Token<T>;
 declare function collection<T>(
-  constructors: readonly NamedConstructor<T>[],
+  constructors: readonly Constructor<T>[],
   options?: { order?: 'topo' | 'provided' | 'alphabet' },
 ): CollectionToken<T>;
 declare function selector<T>(
@@ -134,7 +133,7 @@ Notes:
 - `selector(...)` extractor is a zero-argument callback (`() => ...`); if an implementation declares parameters, they must all be defaulted so zero-arg invocation remains valid.
 - `CollectionToken<T>` is not `TokenLike<T>` and cannot be resolved directly; it is only used with `injectMap`, `injectSet`, and `injectList`.
 - `collection(...)` defaults to `'provided'` order when `options.order` is omitted.
-- `collection(...)` only accepts named components (`@Component({ name })`).
+- `collection(...)` validates named components at runtime and throws if a constructor is not decorated with `@Component({ name })`.
 
 ## 4. Container API
 
