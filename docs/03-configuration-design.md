@@ -12,7 +12,7 @@ interface ConfigSchema<T> {
   parse(input: unknown): T;
 }
 type Constructor<T> = abstract new () => T;
-interface Token<T> { kind: 'token'; id: symbol; }
+interface Token<T> { readonly kind: 'token'; readonly id: symbol; }
 interface ModuleRef { kind: 'module'; name: string; }
 interface CreateConfigModuleOptions {
   files?: string[];

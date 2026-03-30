@@ -14,7 +14,7 @@ export type Constructor<T> = abstract new () => T;
 export interface Token<T> {
   readonly kind: 'token';
   readonly id: symbol;
-  provide: Provider<T> | undefined;
+  readonly provide: Provider<T> | undefined;
 }
 
 export type SelectorExtractor<T> = () => TokenLike<T> | undefined;
@@ -22,7 +22,7 @@ export type SelectorExtractor<T> = () => TokenLike<T> | undefined;
 export interface SelectorToken<T> {
   readonly kind: 'selector-token';
   readonly id: symbol;
-  extractor: SelectorExtractor<T>;
+  readonly extractor: SelectorExtractor<T>;
 }
 
 export interface CollectionToken<T> {
