@@ -182,10 +182,10 @@ class Dog extends Pet {}
 class Cat extends Pet {}
 
 const PetCollection = collection<Pet>([Dog, Cat], { order: 'provided' });
-const SelectedPetName: string | symbol = 'cat';
+const SelectedPetNameToken = token<string | symbol>({ useValue: 'cat' });
 
 const PetSelector = selector(
-  () => PetCollection.get(SelectedPetName),
+  () => PetCollection.get(inject(SelectedPetNameToken)),
 );
 ```
 
@@ -199,9 +199,10 @@ With `collection(...)`, `container.provide([Dog, Cat])` is not required for coll
 ```ts
 const DriverRegistry = registry<Driver>();
 export const registerPsql = DriverRegistry.register('psql', PsqlDriver);
+export const SelectedDriverNameToken = token<string>();
 
 const DriverSelector = selector(
-  () => DriverRegistry.get('psql'),
+  () => DriverRegistry.get(inject(SelectedDriverNameToken)),
 );
 ```
 
@@ -234,8 +235,8 @@ import {
   injectNamed,
 } from '@kavri/core';
 
-const SelectedPetName: string | symbol = 'cat';
-const SelectedDriverName = 'psql';
+const SelectedPetNameToken = token<string | symbol>({ useValue: 'cat' });
+const SelectedDriverNameToken = token<string>();
 
 @Component()
 abstract class Pet { abstract speak(): string; }
@@ -251,7 +252,7 @@ class Cat extends Pet { speak() { return 'meow'; } }
 const PetCollection = collection<Pet>([Dog, Cat], { order: 'provided' });
 
 const PetSelector = selector(
-  () => PetCollection.get(SelectedPetName),
+  () => PetCollection.get(inject(SelectedPetNameToken)),
 );
 
 interface Driver { query(sql: string): Promise<string>; }
@@ -263,7 +264,7 @@ const registerPsql = DriverRegistry.register('psql', PsqlDriver);
 const registerMysql = DriverRegistry.register('mysql', MysqlDriver);
 
 const DriverSelector = selector(
-  () => DriverRegistry.get(SelectedDriverName),
+  () => DriverRegistry.get(inject(SelectedDriverNameToken)),
 );
 
 const LoggerToken = token<{ info(data: unknown): void }>({
@@ -299,6 +300,7 @@ class AppService {
 registerPsql();
 registerMysql();
 const app = new Container();
+app.provide(SelectedDriverNameToken, { useValue: 'psql' });
 
 const service = await app.resolve(AppService);
 console.log(await service.run());
