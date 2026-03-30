@@ -66,13 +66,18 @@ export interface Registry<T> {
 type LegacyClassDecorator = (target: Function) => void | Function;
 type TC39ClassDecorator = (value: Function, context: { kind: 'class'; name: string }) => Function | void;
 export type HybridClassDecorator = LegacyClassDecorator & TC39ClassDecorator;
+export type ProviderScope = 'singleton' | 'scoped' | 'transient';
+
+export interface ComponentOptions {
+  name?: string;
+  scope?: ProviderScope;
+}
 ```
 
 ## 3. Decorators and injection APIs
 
 ```ts
-declare function Component(): HybridClassDecorator;
-declare function Named(name: string): HybridClassDecorator;
+declare function Component(options?: ComponentOptions): HybridClassDecorator;
 
 declare function token<T>(name: string, provider?: Provider<T>): Token<T>;
 declare function selector<T>(
@@ -145,10 +150,10 @@ const SequelizeToken = token<Sequelize>('sequelize', {
 @Component()
 abstract class Pet {}
 
-@Named('dog')
+@Component({ name: 'dog' })
 class Dog extends Pet {}
 
-@Named('cat')
+@Component({ name: 'cat' })
 class Cat extends Pet {}
 
 const AllPets = [Dog, Cat];
@@ -163,6 +168,7 @@ const PetSelector = selector(
 ```
 
 The selector is not bound to a single provider source and can extract from any runtime condition.
+Named bindings are declared through `@Component({ name: '...' })` instead of a separate decorator.
 
 ### 5.4 Dynamic registry provider (selector-based)
 
@@ -196,7 +202,6 @@ Lifecycle order:
 import {
   Container,
   Component,
-  Named,
   token,
   selector,
   registry,
@@ -215,10 +220,10 @@ const DatabaseConfig = defineZodConfig('database', z.object({ driver: z.enum(['p
 @Component()
 abstract class Pet { abstract speak(): string; }
 
-@Named('dog')
+@Component({ name: 'dog' })
 class Dog extends Pet { speak() { return 'woof'; } }
 
-@Named('cat')
+@Component({ name: 'cat' })
 class Cat extends Pet { speak() { return 'meow'; } }
 
 const AllPets = [Dog, Cat];
