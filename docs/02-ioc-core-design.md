@@ -14,13 +14,15 @@ export type Constructor<T> = abstract new () => T;
 export interface Token<T> {
   readonly kind: 'token';
   readonly id: symbol;
-  readonly __type?: T; // brand field to preserve generic identity
+  provide: Provider<T> | undefined;
 }
+
+export type SelectorExtractor<T> = () => TokenLike<T> | undefined;
 
 export interface SelectorToken<T> {
   readonly kind: 'selector-token';
   readonly id: symbol;
-  readonly __type?: T;
+  extractor: SelectorExtractor<T>;
 }
 
 export interface CollectionToken<T> {
@@ -49,27 +51,17 @@ export interface ScopeRef {
 export type ProviderFactory<T> = () => T | Promise<T>;
 
 export interface ValueProvider<T> {
-  provide: Token<T>;
   useValue: T;
 }
 
 export interface FactoryProvider<T> {
-  provide: Token<T>;
   useFactory: ProviderFactory<T>;
   scope?: 'singleton' | 'scoped' | 'transient';
   onInit?: (value: T) => void | Promise<void>;
   onDestroy?: (value: T) => void | Promise<void>;
 }
 
-export type Provider<T = unknown> =
-  | ValueProvider<T>
-  | FactoryProvider<T>
-  | Constructor<T>;
-
-export type ProviderInput =
-  | Provider
-  | CollectionToken<unknown>
-  | readonly (Provider | CollectionToken<unknown>)[];
+export type Provider<T = unknown> = ValueProvider<T> | FactoryProvider<T>;
 
 export interface ConfigSchema<T> {
   key: string;
@@ -99,6 +91,7 @@ export interface CollectionListOptions {
 export interface ComponentOptions {
   name?: string | symbol;
   scope?: ProviderScope;
+  predicate?: () => boolean;
 }
 ```
 
@@ -113,7 +106,7 @@ declare function collection<T>(
   options?: CollectionListOptions,
 ): CollectionToken<T>;
 declare function selector<T>(
-  extractor: (...args: unknown[]) => TokenLike<T> | undefined,
+  extractor: SelectorExtractor<T>,
 ): SelectorToken<T>;
 declare function registry<T>(): Registry<T>;
 
@@ -125,6 +118,7 @@ declare function injectOptionalLazy<T>(target: TokenLike<T>): Promise<T | undefi
 
 declare function injectNamed<T>(collection: CollectionToken<T>, name: string | symbol): T;
 declare function injectOptionalNamed<T>(collection: CollectionToken<T>, name: string | symbol): T | undefined;
+declare function injectAll<T>(decorator: ClassDecorator): readonly T[];
 
 declare function injectConfig<T>(schema: ConfigSchema<T>): T;
 declare function injectOptionalConfig<T>(schema: ConfigSchema<T>): T | undefined;
@@ -142,7 +136,7 @@ Notes:
 - No chained methods on `inject`.
 - Optional injection is exposed via dedicated `injectOptionalXxx(...)` APIs (no options object).
 - `inject*` APIs may only be used in constructor parameter defaults, `selector(...)` extractors, and token/class lifecycle default parameters.
-- `selector(...)` extractor is invoked with zero arguments; when parameters are declared, they must all provide defaults.
+- `selector(...)` extractor signature is strict: `() => TokenLike<T> | undefined`.
 - `CollectionToken<T>` is not `TokenLike<T>` and cannot be resolved directly; it is only used with `injectMap`, `injectSet`, and `injectList`.
 - `collection(...)` defaults to `'provided'` order when `options.order` is omitted.
 - `collection(...)` validates named components at runtime and throws if a constructor is not decorated with `@Component({ name })`.
@@ -151,7 +145,9 @@ Notes:
 
 ```ts
 class Container {
-  provide(...inputs: ProviderInput[]): this;
+  provide<T>(constructor: Constructor<T>): this;
+  provide<T>(token: Token<T>, provider: Provider<T>): this;
+  provide(entries: readonly (Constructor<any> | [Token<any>, Provider<any>])[]): this;
   use(module: ModuleRef): this;
   createScope(name?: string): ScopeRef;
   resolve<T>(target: TokenLike<T>): Promise<T>;
@@ -160,6 +156,7 @@ class Container {
 ```
 
 Only `resolve(...)` is used to obtain instances.
+`provide(constructor)` is a no-op registration used to ensure constructor import/visibility.
 
 ## 5. Provider categories
 
@@ -195,14 +192,17 @@ class Cat extends Pet {}
 const PetCollection = collection<Pet>([Dog, Cat], { order: 'provided' });
 
 const PetSelector = selector(
-  (config = injectConfig(PetConfig)) => PetCollection.get(config.selectedPet === 'dog' ? PET_DOG : 'cat'),
+  () => {
+    const config = injectConfig(PetConfig);
+    return PetCollection.get(config.selectedPet === 'dog' ? PET_DOG : 'cat');
+  },
 );
 ```
 
 The selector is not bound to a single provider source and can extract from any runtime condition.
 Named bindings are declared through `@Component({ name })` and support both `string` and `symbol`.
 With `collection(...)`, `container.provide([Dog, Cat])` is not required for collection injection.
-`container.provide(PetCollection)` and `container.provide(Dog)` / `container.provide(Cat)` are still valid when only named-resolution (`injectNamed(PetCollection, ...)`) paths are used.
+`container.provide(Dog)` / `container.provide(Cat)` are valid import-assurance calls when only named-resolution (`injectNamed(PetCollection, ...)`) paths are used.
 
 ### 5.4 Dynamic registry provider (selector-based)
 
@@ -211,7 +211,10 @@ const DriverRegistry = registry<Driver>();
 export const registerPsql = DriverRegistry.register('psql', PsqlDriver);
 
 const DriverSelector = selector(
-  (config = injectConfig(DatabaseConfig)) => DriverRegistry.get(config.driver),
+  () => {
+    const config = injectConfig(DatabaseConfig);
+    return DriverRegistry.get(config.driver);
+  },
 );
 ```
 
@@ -269,7 +272,10 @@ class Cat extends Pet { speak() { return 'meow'; } }
 const PetCollection = collection<Pet>([Dog, Cat], { order: 'provided' });
 
 const PetSelector = selector(
-  (config = injectConfig(PetConfig)) => PetCollection.get(config.selectedPet === 'dog' ? PET_DOG : 'cat'),
+  () => {
+    const config = injectConfig(PetConfig);
+    return PetCollection.get(config.selectedPet === 'dog' ? PET_DOG : 'cat');
+  },
 );
 
 interface Driver { query(sql: string): Promise<string>; }
@@ -281,7 +287,10 @@ const registerPsql = DriverRegistry.register('psql', PsqlDriver);
 const registerMysql = DriverRegistry.register('mysql', MysqlDriver);
 
 const DriverSelector = selector(
-  (config = injectConfig(DatabaseConfig)) => DriverRegistry.get(config.driver),
+  () => {
+    const config = injectConfig(DatabaseConfig);
+    return DriverRegistry.get(config.driver);
+  },
 );
 
 const LoggerToken = token<{ info(data: unknown): void }>({

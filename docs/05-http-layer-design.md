@@ -38,7 +38,7 @@ Per request:
 ## 4. Full example
 
 ```ts
-import { Container, Component, inject, Constructor, defineModule } from '@kavri/core';
+import { Container, Component, inject, injectAll, Constructor, defineModule } from '@kavri/core';
 import { createConfigModule, defineZodConfig, injectConfig } from '@kavri/config';
 import { createHttpModule, HttpApplication, Controller, Get, Param } from '@kavri/http';
 import { z } from 'zod';
@@ -69,9 +69,11 @@ class Bootstrap {
   constructor(
     private readonly http = inject(HttpApplication),
     private readonly serverCfg = injectConfig(ServerConfig),
+    private readonly controllers = injectAll<object>(Controller),
   ) {}
 
   async start() {
+    console.log(`controllers=${this.controllers.length}`);
     await this.http.listen({ port: this.serverCfg.port });
   }
 }

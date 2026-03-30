@@ -15,19 +15,26 @@ There is no root/local module hierarchy model; ESM already handles physical modu
 ```ts
 type Constructor<T> = abstract new () => T;
 type TokenLike<T> = Token<T> | Constructor<T>;
+type Provider<T> = ValueProvider<T> | FactoryProvider<T>;
 
 interface Token<T> { kind: 'token'; id: symbol; }
 interface ModuleRef { kind: 'module'; name: string; }
+interface ValueProvider<T> { useValue: T; }
+interface FactoryProvider<T> {
+  useFactory: () => T | Promise<T>;
+  scope?: 'singleton' | 'scoped' | 'transient';
+}
 
-type ProviderInput = unknown;
 interface ModuleSetupContext {
-  provide(...providers: ProviderInput[]): void;
+  provide<T>(constructor: Constructor<T>): void;
+  provide<T>(token: Token<T>, provider: Provider<T>): void;
+  provide(entries: readonly (Constructor<any> | [Token<any>, Provider<any>])[]): void;
   use(module: ModuleRef): void;
 }
 
 interface ModuleSpec {
   name: string;
-  providers?: ProviderInput[];
+  providers?: readonly (Constructor<any> | [Token<any>, Provider<any>])[];
   setup?: (container: ModuleSetupContext) => void | Promise<void>;
   teardown?: () => void | Promise<void>;
 }
@@ -51,7 +58,6 @@ import {
   defineModule,
   token,
   inject,
-  ProviderInput,
 } from '@kavri/core';
 import { createConfigModule, defineZodConfig, injectConfig } from '@kavri/config';
 import { z } from 'zod';
@@ -60,18 +66,17 @@ const DbConfig = defineZodConfig('db', z.object({ url: z.string() }));
 const DbToken = token<{ query(sql: string): Promise<string> }>();
 
 function createDatabaseModule() {
+  const DbProvider = {
+    useFactory: (cfg = injectConfig(DbConfig)) => ({
+      async query(sql: string) {
+        return `query(${sql})@${cfg.url}`;
+      },
+    }),
+  };
+
   return defineModule({
     name: 'database',
-    providers: [
-      {
-        provide: DbToken,
-        useFactory: (cfg = injectConfig(DbConfig)) => ({
-          async query(sql: string) {
-            return `query(${sql})@${cfg.url}`;
-          },
-        }),
-      },
-    ],
+    providers: [[DbToken, DbProvider]],
   });
 }
 
