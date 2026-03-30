@@ -110,13 +110,13 @@ declare function inject<T>(target: TokenLike<T>): T;
 declare function injectOptional<T>(target: TokenLike<T>): T | undefined;
 
 declare function injectLazy<T>(target: TokenLike<T>): Promise<T>;
-declare function injectLazyOptional<T>(target: TokenLike<T>): Promise<T | undefined>;
+declare function injectOptionalLazy<T>(target: TokenLike<T>): Promise<T | undefined>;
 
 declare function injectNamed<T>(collection: CollectionToken<T>, name: string | symbol): T;
-declare function injectNamedOptional<T>(collection: CollectionToken<T>, name: string | symbol): T | undefined;
+declare function injectOptionalNamed<T>(collection: CollectionToken<T>, name: string | symbol): T | undefined;
 
 declare function injectConfig<T>(schema: ConfigSchema<T>): T;
-declare function injectConfigOptional<T>(schema: ConfigSchema<T>): T | undefined;
+declare function injectOptionalConfig<T>(schema: ConfigSchema<T>): T | undefined;
 
 declare function injectMap<T>(collection: CollectionToken<T>): ReadonlyMap<string | symbol, T>;
 declare function injectSet<T>(collection: CollectionToken<T>): ReadonlySet<T>;
@@ -129,7 +129,7 @@ declare function injectList<T>(
 Notes:
 
 - No chained methods on `inject`.
-- Optional injection is exposed via dedicated `injectXxxOptional(...)` APIs (no options object).
+- Optional injection is exposed via dedicated `injectOptionalXxx(...)` APIs (no options object).
 - `inject*` APIs may only be used in constructor parameter defaults, `selector(...)` extractors, and token/class lifecycle default parameters.
 - `selector(...)` extractor is a zero-argument callback (`() => ...`); if an implementation declares parameters, they must all be defaulted so zero-arg invocation remains valid.
 - `CollectionToken<T>` is not `TokenLike<T>` and cannot be resolved directly; it is only used with `injectMap`, `injectSet`, and `injectList`.
