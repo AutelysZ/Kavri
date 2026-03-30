@@ -90,7 +90,7 @@ interface TC39ClassDecoratorContext {
 type TC39ClassDecorator = (value: Function, context: TC39ClassDecoratorContext) => Function | void;
 export type HybridClassDecorator = LegacyClassDecorator & TC39ClassDecorator;
 export type ProviderScope = 'singleton' | 'scoped' | 'transient';
-export type CollectionOrder = 'topo' | 'provided' | 'alphabet';
+export type CollectionOrder = 'topological' | 'provided' | 'alphabetical';
 
 export interface CollectionListOptions {
   order?: CollectionOrder;
