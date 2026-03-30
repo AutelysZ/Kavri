@@ -101,7 +101,7 @@ declare function collection<T>(
   options?: { order?: 'topo' | 'provided' | 'alphabet' },
 ): CollectionToken<T>;
 declare function selector<T>(
-  extractor: () => TokenLike<T> | undefined,
+  extractor: (...args: unknown[]) => TokenLike<T> | undefined,
 ): SelectorToken<T>;
 declare function registry<T>(): Registry<T>;
 
@@ -130,7 +130,7 @@ Notes:
 - No chained methods on `inject`.
 - Optional injection is exposed via dedicated `injectOptionalXxx(...)` APIs (no options object).
 - `inject*` APIs may only be used in constructor parameter defaults, `selector(...)` extractors, and token/class lifecycle default parameters.
-- `selector(...)` extractor is a zero-argument callback (`() => ...`); if an implementation declares parameters, they must all be defaulted so zero-arg invocation remains valid.
+- `selector(...)` extractor is invoked with zero arguments; when parameters are declared, they must all provide defaults.
 - `CollectionToken<T>` is not `TokenLike<T>` and cannot be resolved directly; it is only used with `injectMap`, `injectSet`, and `injectList`.
 - `collection(...)` defaults to `'provided'` order when `options.order` is omitted.
 - `collection(...)` validates named components at runtime and throws if a constructor is not decorated with `@Component({ name })`.
@@ -183,11 +183,7 @@ class Cat extends Pet {}
 const PetCollection = collection<Pet>([Dog, Cat], { order: 'provided' });
 
 const PetSelector = selector(
-  () => {
-    const map = PetCollection.map();
-    const cfg = injectConfig(PetConfig);
-    return cfg.selectedPet === 'dog' ? map.get(PET_DOG) : map.get('cat');
-  },
+  (config = injectConfig(PetConfig)) => PetCollection.get(config.selectedPet === 'dog' ? PET_DOG : 'cat'),
 );
 ```
 
@@ -259,11 +255,7 @@ class Cat extends Pet { speak() { return 'meow'; } }
 const PetCollection = collection<Pet>([Dog, Cat], { order: 'provided' });
 
 const PetSelector = selector(
-  () => {
-    const map = PetCollection.map();
-    const cfg = injectConfig(PetConfig);
-    return cfg.selectedPet === 'dog' ? map.get(PET_DOG) : map.get('cat');
-  },
+  (config = injectConfig(PetConfig)) => PetCollection.get(config.selectedPet === 'dog' ? PET_DOG : 'cat'),
 );
 
 interface Driver { query(sql: string): Promise<string>; }
