@@ -14,11 +14,9 @@ interface HttpApplication {
   listen(options: { port: number }): Promise<void>;
 }
 
-declare class HttpModule {
-  static forRoot(options: {
-    controllers: Constructor<any>[];
-  }): ModuleRef;
-}
+declare function createHttpModule(options: {
+  controllers: Constructor<any>[];
+}): ModuleRef;
 
 declare function Controller(path: string): ClassDecorator;
 declare function Get(path: string): MethodDecorator;
@@ -38,9 +36,9 @@ Per request:
 ## 4. Full example
 
 ```ts
-import { Container, Component, inject, injectConfig, Constructor } from '@kavri/core';
-import { ConfigModule, defineZodConfig } from '@kavri/config';
-import { HttpModule, HttpApplication, Controller, Get, Param } from '@kavri/http';
+import { Container, Component, inject, Constructor, defineModule } from '@kavri/core';
+import { createConfigModule, defineZodConfig, injectConfig } from '@kavri/config';
+import { createHttpModule, HttpApplication, Controller, Get, Param } from '@kavri/http';
 import { z } from 'zod';
 
 const ServerConfig = defineZodConfig('server', z.object({
@@ -76,10 +74,17 @@ class Bootstrap {
   }
 }
 
+const AppModule = defineModule({
+  name: 'app',
+  setup(container) {
+    container.use(createConfigModule({ files: ['application.yaml'], cli: process.argv }));
+    container.use(createHttpModule({ controllers: [UserController] }));
+    container.provide(UserService, Bootstrap);
+  },
+});
+
 const app = new Container();
-app.use(ConfigModule.from({ files: ['application.yaml'], cli: process.argv }));
-app.use(HttpModule.forRoot({ controllers: [UserController] }));
-app.provide(UserService);
+app.use(AppModule);
 
 const bootstrap = await app.resolve(Bootstrap);
 await bootstrap.start();

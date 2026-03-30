@@ -2,7 +2,13 @@
 
 ## 1. Purpose
 
-Modularization organizes provider registration for medium and large projects while preserving a single IoC runtime model.
+Module is a lightweight wrapper over a component set plus optional init/destroy logic.
+There is no root/local module hierarchy model; ESM already handles physical modularization.
+
+`defineModule(...)` is used to:
+
+1. register a cohesive set of components/providers
+2. run custom init/destroy logic (for example loading configuration files)
 
 ## 2. Types used in this document
 
@@ -10,16 +16,16 @@ Modularization organizes provider registration for medium and large projects whi
 type Constructor<T> = abstract new () => T;
 type TokenLike<T> = Token<T> | Constructor<T>;
 
-interface Token<T> { kind: 'token'; name: string; }
+interface Token<T> { kind: 'token'; id: symbol; }
 interface ModuleRef { kind: 'module'; name: string; }
 
 type ProviderInput = unknown;
 
 interface ModuleSpec {
   name: string;
-  imports?: ModuleRef[];
   providers?: ProviderInput[];
-  exports?: TokenLike<any>[];
+  setup?: (container: { provide(...providers: ProviderInput[]): void; use(module: ModuleRef): void }) => void | Promise<void>;
+  teardown?: () => void | Promise<void>;
 }
 
 declare function defineModule(spec: ModuleSpec): ModuleRef;
@@ -27,10 +33,10 @@ declare function defineModule(spec: ModuleSpec): ModuleRef;
 
 ## 3. Rules
 
-- Providers are private unless exported.
-- Imports create explicit visibility edges.
-- The module layer does not change provider or lifecycle semantics.
-- Modules are optional for small applications.
+- Module is optional for small applications.
+- Module does not change provider resolution or lifecycle semantics.
+- Module can register providers and run init/destroy hooks.
+- Use module factory functions (`createXxxModule(params)`) for dynamic module behavior.
 
 ## 4. Full example
 
@@ -41,30 +47,29 @@ import {
   defineModule,
   token,
   inject,
-  injectConfig,
   ProviderInput,
-  ModuleRef,
 } from '@kavri/core';
-import { ConfigModule, defineZodConfig } from '@kavri/config';
+import { createConfigModule, defineZodConfig, injectConfig } from '@kavri/config';
 import { z } from 'zod';
 
 const DbConfig = defineZodConfig('db', z.object({ url: z.string() }));
-const DbToken = token<{ query(sql: string): Promise<string> }>('db');
+const DbToken = token<{ query(sql: string): Promise<string> }>();
 
-const DatabaseModule = defineModule({
-  name: 'database',
-  providers: [
-    {
-      provide: DbToken,
-      useFactory: (cfg = injectConfig(DbConfig)) => ({
-        async query(sql: string) {
-          return `query(${sql})@${cfg.url}`;
-        },
-      }),
-    },
-  ],
-  exports: [DbToken],
-});
+function createDatabaseModule() {
+  return defineModule({
+    name: 'database',
+    providers: [
+      {
+        provide: DbToken,
+        useFactory: (cfg = injectConfig(DbConfig)) => ({
+          async query(sql: string) {
+            return `query(${sql})@${cfg.url}`;
+          },
+        }),
+      },
+    ],
+  });
+}
 
 @Component()
 class UserService {
@@ -76,12 +81,12 @@ class UserService {
   }
 }
 
-const UserModule = defineModule({
-  name: 'user',
-  imports: [DatabaseModule],
-  providers: [UserService],
-  exports: [UserService],
-});
+function createUserModule() {
+  return defineModule({
+    name: 'user',
+    providers: [UserService],
+  });
+}
 
 @Component()
 class AppService {
@@ -94,12 +99,15 @@ class AppService {
 
 const AppModule = defineModule({
   name: 'app',
-  imports: [UserModule],
-  providers: [AppService],
+  setup(container) {
+    container.use(createDatabaseModule());
+    container.use(createUserModule());
+    container.provide(AppService);
+  },
 });
 
 const container = new Container();
-container.use(ConfigModule.from({ files: ['application.yaml'] }));
+container.use(createConfigModule({ files: ['application.yaml'] }));
 container.use(AppModule);
 
 const app = await container.resolve(AppService);

@@ -199,10 +199,7 @@ const DriverRegistry = registry<Driver>();
 export const registerPsql = DriverRegistry.register('psql', PsqlDriver);
 
 const DriverSelector = selector(
-  () => {
-    const cfg = injectConfig(DatabaseConfig);
-    return DriverRegistry.get(cfg.driver);
-  },
+  (config = injectConfig(DatabaseConfig)) => DriverRegistry.get(config.driver),
 );
 ```
 
@@ -233,13 +230,18 @@ import {
   injectMap,
   injectLazy,
   injectNamed,
-  injectConfig,
 } from '@kavri/core';
-import { ConfigModule, defineZodConfig } from '@kavri/config';
+import {
+  createConfigModule,
+  defineZodConfig,
+  injectConfig,
+  injectOptionalConfig,
+} from '@kavri/config';
 import { z } from 'zod';
 
 const PetConfig = defineZodConfig('pet', z.object({ selectedPet: z.enum(['dog', 'cat']) }));
 const DatabaseConfig = defineZodConfig('database', z.object({ driver: z.enum(['psql', 'mysql']) }));
+const ObservabilityConfig = defineZodConfig('observability', z.object({ enabled: z.boolean() }));
 
 @Component()
 abstract class Pet { abstract speak(): string; }
@@ -267,10 +269,7 @@ const registerPsql = DriverRegistry.register('psql', PsqlDriver);
 const registerMysql = DriverRegistry.register('mysql', MysqlDriver);
 
 const DriverSelector = selector(
-  () => {
-    const cfg = injectConfig(DatabaseConfig);
-    return DriverRegistry.get(cfg.driver);
-  },
+  (config = injectConfig(DatabaseConfig)) => DriverRegistry.get(config.driver),
 );
 
 const LoggerToken = token<{ info(data: unknown): void }>({
@@ -286,6 +285,7 @@ class AppService {
     private readonly driver = inject(DriverSelector),
     private readonly pets = injectMap(PetCollection),
     private readonly maybeMetrics = injectOptional(MetricsToken),
+    private readonly maybeObsCfg = injectOptionalConfig(ObservabilityConfig),
     private readonly loggerPromise = injectLazy(LoggerToken),
     private readonly dog = injectNamed(PetCollection, PET_DOG),
   ) {}
@@ -298,17 +298,16 @@ class AppService {
       dog: this.dog.speak(),
       availablePets: Array.from(this.pets.keys()),
       hasMetrics: !!this.maybeMetrics,
+      observabilityEnabled: this.maybeObsCfg?.enabled ?? false,
     });
     return `${this.selectedPet.speak()} | ${db}`;
   }
 }
 
-const app = new Container();
-app.use(ConfigModule.from({ files: ['application.yaml'], cli: process.argv }));
-// Optional: provide collection/components when only injectNamed(...) paths are used.
-app.provide(PetCollection);
 registerPsql();
 registerMysql();
+const app = new Container();
+app.use(createConfigModule({ files: ['application.yaml'], cli: process.argv }));
 
 const service = await app.resolve(AppService);
 console.log(await service.run());
