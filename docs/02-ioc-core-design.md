@@ -10,6 +10,7 @@ All key types used by the IoC API are declared here.
 
 ```ts
 export type Constructor<T> = abstract new () => T;
+export type NamedConstructor<T> = Constructor<T> & { readonly __componentName__: string | symbol };
 
 export interface Token<T> {
   readonly kind: 'token';
@@ -97,7 +98,7 @@ declare function Component(options?: ComponentOptions): HybridClassDecorator;
 
 declare function token<T>(provider?: Provider<T>): Token<T>;
 declare function collection<T>(
-  constructors: readonly Constructor<T>[],
+  constructors: readonly NamedConstructor<T>[],
   options?: { order?: 'topo' | 'provided' | 'alphabet' },
 ): CollectionToken<T>;
 declare function selector<T>(
@@ -111,8 +112,8 @@ declare function inject<T>(target: TokenLike<T>, options: { optional: true }): T
 declare function injectLazy<T>(target: TokenLike<T>): Promise<T>;
 declare function injectLazy<T>(target: TokenLike<T>, options: { optional: true }): Promise<T | undefined>;
 
-declare function injectNamed<T>(base: Constructor<T>, name: string | symbol): T;
-declare function injectNamed<T>(base: Constructor<T>, name: string | symbol, options: { optional: true }): T | undefined;
+declare function injectNamed<T>(collection: CollectionToken<T>, name: string | symbol): T;
+declare function injectNamed<T>(collection: CollectionToken<T>, name: string | symbol, options: { optional: true }): T | undefined;
 
 declare function injectConfig<T>(schema: ConfigSchema<T>): T;
 declare function injectConfig<T>(schema: ConfigSchema<T>, options: { optional: true }): T | undefined;
@@ -133,6 +134,7 @@ Notes:
 - `selector(...)` extractor is a zero-argument callback (`() => ...`); if an implementation declares parameters, they must all be defaulted so zero-arg invocation remains valid.
 - `CollectionToken<T>` is not `TokenLike<T>` and cannot be resolved directly; it is only used with `injectMap`, `injectSet`, and `injectList`.
 - `collection(...)` defaults to `'provided'` order when `options.order` is omitted.
+- `collection(...)` only accepts named components (`@Component({ name })`).
 
 ## 4. Container API
 
@@ -193,7 +195,7 @@ const PetSelector = selector(
 The selector is not bound to a single provider source and can extract from any runtime condition.
 Named bindings are declared through `@Component({ name })` and support both `string` and `symbol`.
 With `collection(...)`, `container.provide([Dog, Cat])` is not required for collection injection.
-`container.provide(PetCollection)` and `container.provide(Dog)` / `container.provide(Cat)` are still valid when only named-resolution (`injectNamed`) paths are used.
+`container.provide(PetCollection)` and `container.provide(Dog)` / `container.provide(Cat)` are still valid when only named-resolution (`injectNamed(PetCollection, ...)`) paths are used.
 
 ### 5.4 Dynamic registry provider (selector-based)
 
@@ -293,7 +295,7 @@ class AppService {
     private readonly pets = injectMap(PetCollection),
     private readonly maybeMetrics = inject(MetricsToken, { optional: true }),
     private readonly loggerPromise = injectLazy(LoggerToken),
-    private readonly dog = injectNamed(Pet, PET_DOG),
+    private readonly dog = injectNamed(PetCollection, PET_DOG),
   ) {}
 
   async run() {
