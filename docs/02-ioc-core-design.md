@@ -26,9 +26,9 @@ export interface SelectorToken<T> {
 export interface CollectionToken<T> {
   readonly kind: 'collection-token';
   readonly name: string;
-  get(name: string): Constructor<T> | undefined;
+  get(name: string | symbol): Constructor<T> | undefined;
   set(): ReadonlySet<Constructor<T>>;
-  map(): ReadonlyMap<string, Constructor<T>>;
+  map(): ReadonlyMap<string | symbol, Constructor<T>>;
   list(options?: { order?: 'topo' | 'provided' | 'alphabet' }): readonly Constructor<T>[];
 }
 
@@ -85,7 +85,7 @@ export type HybridClassDecorator = LegacyClassDecorator & TC39ClassDecorator;
 export type ProviderScope = 'singleton' | 'scoped' | 'transient';
 
 export interface ComponentOptions {
-  name?: string;
+  name?: string | symbol;
   scope?: ProviderScope;
 }
 ```
@@ -109,13 +109,13 @@ declare function inject<T>(target: TokenLike<T>, options: { optional: true }): T
 declare function injectLazy<T>(target: TokenLike<T>): Promise<T>;
 declare function injectLazy<T>(target: TokenLike<T>, options: { optional: true }): Promise<T | undefined>;
 
-declare function injectNamed<T>(base: Constructor<T>, name: string): T;
-declare function injectNamed<T>(base: Constructor<T>, name: string, options: { optional: true }): T | undefined;
+declare function injectNamed<T>(base: Constructor<T>, name: string | symbol): T;
+declare function injectNamed<T>(base: Constructor<T>, name: string | symbol, options: { optional: true }): T | undefined;
 
 declare function injectConfig<T>(schema: ConfigSchema<T>): T;
 declare function injectConfig<T>(schema: ConfigSchema<T>, options: { optional: true }): T | undefined;
 
-declare function injectMap<T>(collection: CollectionToken<T>): ReadonlyMap<string, T>;
+declare function injectMap<T>(collection: CollectionToken<T>): ReadonlyMap<string | symbol, T>;
 declare function injectSet<T>(collection: CollectionToken<T>): ReadonlySet<T>;
 declare function injectList<T>(
   collection: CollectionToken<T>,
@@ -168,7 +168,9 @@ const SequelizeToken = token<Sequelize>('sequelize', {
 @Component()
 abstract class Pet {}
 
-@Component({ name: 'dog' })
+const PET_DOG = Symbol('dog');
+
+@Component({ name: PET_DOG })
 class Dog extends Pet {}
 
 @Component({ name: 'cat' })
@@ -181,13 +183,13 @@ const PetSelector = selector(
   () => {
     const map = PetCollection.map();
     const cfg = injectConfig(PetConfig);
-    return map.get(cfg.selectedPet);
+    return cfg.selectedPet === 'dog' ? map.get(PET_DOG) : map.get('cat');
   },
 );
 ```
 
 The selector is not bound to a single provider source and can extract from any runtime condition.
-Named bindings are declared through `@Component({ name: '...' })` instead of a separate decorator.
+Named bindings are declared through `@Component({ name })` and support both `string` and `symbol`.
 With `collection(...)`, `container.provide([Dog, Cat])` is not required for collection injection.
 `container.provide(PetCollection)` and `container.provide(Dog)` / `container.provide(Cat)` are still valid when only named-resolution (`injectNamed`) paths are used.
 
@@ -243,7 +245,9 @@ const DatabaseConfig = defineZodConfig('database', z.object({ driver: z.enum(['p
 @Component()
 abstract class Pet { abstract speak(): string; }
 
-@Component({ name: 'dog' })
+const PET_DOG = Symbol('dog');
+
+@Component({ name: PET_DOG })
 class Dog extends Pet { speak() { return 'woof'; } }
 
 @Component({ name: 'cat' })
@@ -256,7 +260,7 @@ const PetSelector = selector(
   () => {
     const map = PetCollection.map();
     const cfg = injectConfig(PetConfig);
-    return map.get(cfg.selectedPet);
+    return cfg.selectedPet === 'dog' ? map.get(PET_DOG) : map.get('cat');
   },
 );
 
@@ -290,7 +294,7 @@ class AppService {
     private readonly pets = injectMap(PetCollection),
     private readonly maybeMetrics = inject(MetricsToken, { optional: true }),
     private readonly loggerPromise = injectLazy(LoggerToken),
-    private readonly dog = injectNamed(Pet, 'dog'),
+    private readonly dog = injectNamed(Pet, PET_DOG),
   ) {}
 
   async run() {
