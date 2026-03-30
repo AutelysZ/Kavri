@@ -13,23 +13,23 @@ export type Constructor<T> = abstract new () => T;
 
 export interface Token<T> {
   readonly kind: 'token';
-  readonly name: string;
+  readonly id: symbol;
   readonly __type?: T; // brand field to preserve generic identity
 }
 
 export interface SelectorToken<T> {
   readonly kind: 'selector-token';
-  readonly name: string;
+  readonly id: symbol;
   readonly __type?: T;
 }
 
 export interface CollectionToken<T> {
   readonly kind: 'collection-token';
-  readonly name: string;
+  readonly id: symbol;
   get(name: string | symbol): Constructor<T> | undefined;
   set(): ReadonlySet<Constructor<T>>;
   map(): ReadonlyMap<string | symbol, Constructor<T>>;
-  list(options?: { order?: 'topo' | 'provided' | 'alphabet' }): readonly Constructor<T>[];
+  list(options?: { order?: 'topo' | 'provided' | 'alphabet' }): readonly Constructor<T>[]; // default order: 'provided'
 }
 
 export type TokenLike<T> = Token<T> | SelectorToken<T> | Constructor<T>;
@@ -95,13 +95,15 @@ export interface ComponentOptions {
 ```ts
 declare function Component(options?: ComponentOptions): HybridClassDecorator;
 
-declare function token<T>(name: string, provider?: Provider<T>): Token<T>;
-declare function collection<T>(name: string, ...constructors: Constructor<T>[]): CollectionToken<T>;
+declare function token<T>(provider?: Provider<T>): Token<T>;
+declare function collection<T>(
+  constructors: readonly Constructor<T>[],
+  options?: { order?: 'topo' | 'provided' | 'alphabet' },
+): CollectionToken<T>;
 declare function selector<T>(
-  name: string,
   extractor: () => TokenLike<T> | undefined,
 ): SelectorToken<T>;
-declare function registry<T>(name: string): Registry<T>;
+declare function registry<T>(): Registry<T>;
 
 declare function inject<T>(target: TokenLike<T>): T;
 declare function inject<T>(target: TokenLike<T>, options: { optional: true }): T | undefined;
@@ -130,6 +132,7 @@ Notes:
 - `inject*` APIs may only be used in constructor parameter defaults, `selector(...)` extractors, and token/class lifecycle default parameters.
 - `selector(...)` extractor is a zero-argument callback (`() => ...`); if an implementation declares parameters, they must all be defaulted so zero-arg invocation remains valid.
 - `CollectionToken<T>` is not `TokenLike<T>` and cannot be resolved directly; it is only used with `injectMap`, `injectSet`, and `injectList`.
+- `collection(...)` defaults to `'provided'` order when `options.order` is omitted.
 
 ## 4. Container API
 
@@ -157,7 +160,7 @@ class UserService {}
 ### 5.2 Token provider
 
 ```ts
-const SequelizeToken = token<Sequelize>('sequelize', {
+const SequelizeToken = token<Sequelize>({
   useFactory: () => new Sequelize(injectConfig(SequelizeConfig).url),
 });
 ```
@@ -176,10 +179,9 @@ class Dog extends Pet {}
 @Component({ name: 'cat' })
 class Cat extends Pet {}
 
-const PetCollection = collection<Pet>('pets', Dog, Cat);
+const PetCollection = collection<Pet>([Dog, Cat], { order: 'provided' });
 
 const PetSelector = selector(
-  'pet.selector',
   () => {
     const map = PetCollection.map();
     const cfg = injectConfig(PetConfig);
@@ -196,11 +198,10 @@ With `collection(...)`, `container.provide([Dog, Cat])` is not required for coll
 ### 5.4 Dynamic registry provider (selector-based)
 
 ```ts
-const DriverRegistry = registry<Driver>('database.driver');
+const DriverRegistry = registry<Driver>();
 export const registerPsql = DriverRegistry.register('psql', PsqlDriver);
 
 const DriverSelector = selector(
-  'database.driver.selected',
   () => {
     const cfg = injectConfig(DatabaseConfig);
     return DriverRegistry.get(cfg.driver);
@@ -253,10 +254,9 @@ class Dog extends Pet { speak() { return 'woof'; } }
 @Component({ name: 'cat' })
 class Cat extends Pet { speak() { return 'meow'; } }
 
-const PetCollection = collection<Pet>('pets', Dog, Cat);
+const PetCollection = collection<Pet>([Dog, Cat], { order: 'provided' });
 
 const PetSelector = selector(
-  'pet.selector',
   () => {
     const map = PetCollection.map();
     const cfg = injectConfig(PetConfig);
@@ -268,23 +268,22 @@ interface Driver { query(sql: string): Promise<string>; }
 class PsqlDriver implements Driver { async query(sql: string) { return `psql:${sql}`; } }
 class MysqlDriver implements Driver { async query(sql: string) { return `mysql:${sql}`; } }
 
-const DriverRegistry = registry<Driver>('database.driver');
+const DriverRegistry = registry<Driver>();
 const registerPsql = DriverRegistry.register('psql', PsqlDriver);
 const registerMysql = DriverRegistry.register('mysql', MysqlDriver);
 
 const DriverSelector = selector(
-  'database.driver.selected',
   () => {
     const cfg = injectConfig(DatabaseConfig);
     return DriverRegistry.get(cfg.driver);
   },
 );
 
-const LoggerToken = token<{ info(data: unknown): void }>('logger', {
+const LoggerToken = token<{ info(data: unknown): void }>({
   useFactory: () => ({ info: console.log }),
 });
 
-const MetricsToken = token<{ emit(name: string): void }>('metrics.client');
+const MetricsToken = token<{ emit(name: string): void }>();
 
 @Component()
 class AppService {
