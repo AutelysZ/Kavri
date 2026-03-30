@@ -9,14 +9,16 @@ HTTP is an optional upper layer built on IoC core. IoC remains fully usable with
 ```ts
 type Constructor<T> = abstract new () => T;
 interface ModuleRef { kind: 'module'; name: string; }
-
-interface HttpApplication {
-  listen(options: { port: number }): Promise<void>;
+interface ListenOptions { port: number; }
+interface CreateHttpModuleOptions {
+  controllers: Constructor<any>[];
 }
 
-declare function createHttpModule(options: {
-  controllers: Constructor<any>[];
-}): ModuleRef;
+interface HttpApplication {
+  listen(options: ListenOptions): Promise<void>;
+}
+
+declare function createHttpModule(options: CreateHttpModuleOptions): ModuleRef;
 
 declare function Controller(path: string): ClassDecorator;
 declare function Get(path: string): MethodDecorator;

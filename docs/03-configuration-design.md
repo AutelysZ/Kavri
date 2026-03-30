@@ -7,20 +7,24 @@ Configuration is a first-class subsystem because it controls provider factories,
 ## 2. Types used in this document
 
 ```ts
-type ConfigSchema<T> = { key: string; parse(input: unknown): T };
+interface ConfigSchema<T> {
+  key: string;
+  parse(input: unknown): T;
+}
 type Constructor<T> = abstract new () => T;
 interface Token<T> { kind: 'token'; id: symbol; }
 interface ModuleRef { kind: 'module'; name: string; }
-
-declare function defineZodConfig<T>(key: string, schema: unknown): ConfigSchema<T>;
-declare function ConfigSchema(key: string): ClassDecorator;
-declare function createConfigModule(options: {
+interface CreateConfigModuleOptions {
   files?: string[];
   envPrefix?: string;
   cli?: string[];
   profile?: string;
   strictUnknownKeys?: boolean;
-}): ModuleRef;
+}
+
+declare function defineZodConfig<T>(key: string, schema: unknown): ConfigSchema<T>;
+declare function ConfigSchema(key: string): ClassDecorator;
+declare function createConfigModule(options: CreateConfigModuleOptions): ModuleRef;
 
 declare function injectConfig<T>(schema: ConfigSchema<T>): T;
 declare function injectOptionalConfig<T>(schema: ConfigSchema<T>): T | undefined;

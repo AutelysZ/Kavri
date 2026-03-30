@@ -29,7 +29,7 @@ export interface CollectionToken<T> {
   get(name: string | symbol): Constructor<T> | undefined;
   set(): ReadonlySet<Constructor<T>>;
   map(): ReadonlyMap<string | symbol, Constructor<T>>;
-  list(options?: { order?: 'topo' | 'provided' | 'alphabet' }): readonly Constructor<T>[]; // default order: 'provided'
+  list(options?: CollectionListOptions): readonly Constructor<T>[]; // default order: 'provided'
 }
 
 export type TokenLike<T> = Token<T> | SelectorToken<T> | Constructor<T>;
@@ -71,7 +71,10 @@ export type ProviderInput =
   | CollectionToken<unknown>
   | readonly (Provider | CollectionToken<unknown>)[];
 
-export type ConfigSchema<T> = { key: string; parse(input: unknown): T };
+export interface ConfigSchema<T> {
+  key: string;
+  parse(input: unknown): T;
+}
 
 export interface Registry<T> {
   register(name: string, impl: Constructor<T>): () => void;
@@ -80,9 +83,18 @@ export interface Registry<T> {
 }
 
 type LegacyClassDecorator = (target: Function) => void | Function;
-type TC39ClassDecorator = (value: Function, context: { kind: 'class'; name: string }) => Function | void;
+interface TC39ClassDecoratorContext {
+  kind: 'class';
+  name: string;
+}
+type TC39ClassDecorator = (value: Function, context: TC39ClassDecoratorContext) => Function | void;
 export type HybridClassDecorator = LegacyClassDecorator & TC39ClassDecorator;
 export type ProviderScope = 'singleton' | 'scoped' | 'transient';
+export type CollectionOrder = 'topo' | 'provided' | 'alphabet';
+
+export interface CollectionListOptions {
+  order?: CollectionOrder;
+}
 
 export interface ComponentOptions {
   name?: string | symbol;
@@ -98,7 +110,7 @@ declare function Component(options?: ComponentOptions): HybridClassDecorator;
 declare function token<T>(provider?: Provider<T>): Token<T>;
 declare function collection<T>(
   constructors: readonly Constructor<T>[],
-  options?: { order?: 'topo' | 'provided' | 'alphabet' },
+  options?: CollectionListOptions,
 ): CollectionToken<T>;
 declare function selector<T>(
   extractor: (...args: unknown[]) => TokenLike<T> | undefined,
@@ -121,7 +133,7 @@ declare function injectMap<T>(collection: CollectionToken<T>): ReadonlyMap<strin
 declare function injectSet<T>(collection: CollectionToken<T>): ReadonlySet<T>;
 declare function injectList<T>(
   collection: CollectionToken<T>,
-  options?: { order?: 'topo' | 'provided' | 'alphabet' },
+  options?: CollectionListOptions,
 ): readonly T[];
 ```
 

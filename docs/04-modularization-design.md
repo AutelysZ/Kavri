@@ -20,11 +20,15 @@ interface Token<T> { kind: 'token'; id: symbol; }
 interface ModuleRef { kind: 'module'; name: string; }
 
 type ProviderInput = unknown;
+interface ModuleSetupContext {
+  provide(...providers: ProviderInput[]): void;
+  use(module: ModuleRef): void;
+}
 
 interface ModuleSpec {
   name: string;
   providers?: ProviderInput[];
-  setup?: (container: { provide(...providers: ProviderInput[]): void; use(module: ModuleRef): void }) => void | Promise<void>;
+  setup?: (container: ModuleSetupContext) => void | Promise<void>;
   teardown?: () => void | Promise<void>;
 }
 
