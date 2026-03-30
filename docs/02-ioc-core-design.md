@@ -2,7 +2,7 @@
 
 ## 1. Scope
 
-This document defines the implementation-ready IoC core API with explicit provider registration, config-driven selection, and deterministic lifecycle behavior.
+This document defines the implementation-ready IoC core API with explicit provider registration, conditional selection, and deterministic lifecycle behavior.
 
 ## 2. Canonical type declarations
 
@@ -63,11 +63,6 @@ export interface FactoryProvider<T> {
 
 export type Provider<T = unknown> = ValueProvider<T> | FactoryProvider<T>;
 
-export interface ConfigSchema<T> {
-  key: string;
-  parse(input: unknown): T;
-}
-
 export interface Registry<T> {
   register(name: string, impl: Constructor<T>): () => void;
   get(name: string): Constructor<T> | undefined;
@@ -120,9 +115,6 @@ declare function injectNamed<T>(collection: CollectionToken<T>, name: string | s
 declare function injectOptionalNamed<T>(collection: CollectionToken<T>, name: string | symbol): T | undefined;
 declare function injectAll<T>(decorator: ClassDecorator): readonly T[];
 
-declare function injectConfig<T>(schema: ConfigSchema<T>): T;
-declare function injectOptionalConfig<T>(schema: ConfigSchema<T>): T | undefined;
-
 declare function injectMap<T>(collection: CollectionToken<T>): ReadonlyMap<string | symbol, T>;
 declare function injectSet<T>(collection: CollectionToken<T>): ReadonlySet<T>;
 declare function injectList<T>(
@@ -171,7 +163,7 @@ class UserService {}
 
 ```ts
 const SequelizeToken = token<Sequelize>({
-  useFactory: () => new Sequelize(injectConfig(SequelizeConfig).url),
+  useFactory: () => new Sequelize('postgres://localhost/example'),
 });
 ```
 
@@ -190,12 +182,10 @@ class Dog extends Pet {}
 class Cat extends Pet {}
 
 const PetCollection = collection<Pet>([Dog, Cat], { order: 'provided' });
+const SelectedPetName: string | symbol = 'cat';
 
 const PetSelector = selector(
-  () => {
-    const config = injectConfig(PetConfig);
-    return PetCollection.get(config.selectedPet === 'dog' ? PET_DOG : 'cat');
-  },
+  () => PetCollection.get(SelectedPetName),
 );
 ```
 
@@ -211,10 +201,7 @@ const DriverRegistry = registry<Driver>();
 export const registerPsql = DriverRegistry.register('psql', PsqlDriver);
 
 const DriverSelector = selector(
-  () => {
-    const config = injectConfig(DatabaseConfig);
-    return DriverRegistry.get(config.driver);
-  },
+  () => DriverRegistry.get('psql'),
 );
 ```
 
@@ -246,17 +233,9 @@ import {
   injectLazy,
   injectNamed,
 } from '@kavri/core';
-import {
-  createConfigModule,
-  defineZodConfig,
-  injectConfig,
-  injectOptionalConfig,
-} from '@kavri/config';
-import { z } from 'zod';
 
-const PetConfig = defineZodConfig('pet', z.object({ selectedPet: z.enum(['dog', 'cat']) }));
-const DatabaseConfig = defineZodConfig('database', z.object({ driver: z.enum(['psql', 'mysql']) }));
-const ObservabilityConfig = defineZodConfig('observability', z.object({ enabled: z.boolean() }));
+const SelectedPetName: string | symbol = 'cat';
+const SelectedDriverName = 'psql';
 
 @Component()
 abstract class Pet { abstract speak(): string; }
@@ -272,10 +251,7 @@ class Cat extends Pet { speak() { return 'meow'; } }
 const PetCollection = collection<Pet>([Dog, Cat], { order: 'provided' });
 
 const PetSelector = selector(
-  () => {
-    const config = injectConfig(PetConfig);
-    return PetCollection.get(config.selectedPet === 'dog' ? PET_DOG : 'cat');
-  },
+  () => PetCollection.get(SelectedPetName),
 );
 
 interface Driver { query(sql: string): Promise<string>; }
@@ -287,10 +263,7 @@ const registerPsql = DriverRegistry.register('psql', PsqlDriver);
 const registerMysql = DriverRegistry.register('mysql', MysqlDriver);
 
 const DriverSelector = selector(
-  () => {
-    const config = injectConfig(DatabaseConfig);
-    return DriverRegistry.get(config.driver);
-  },
+  () => DriverRegistry.get(SelectedDriverName),
 );
 
 const LoggerToken = token<{ info(data: unknown): void }>({
@@ -306,7 +279,6 @@ class AppService {
     private readonly driver = inject(DriverSelector),
     private readonly pets = injectMap(PetCollection),
     private readonly maybeMetrics = injectOptional(MetricsToken),
-    private readonly maybeObsCfg = injectOptionalConfig(ObservabilityConfig),
     private readonly loggerPromise = injectLazy(LoggerToken),
     private readonly dog = injectNamed(PetCollection, PET_DOG),
   ) {}
@@ -319,7 +291,6 @@ class AppService {
       dog: this.dog.speak(),
       availablePets: Array.from(this.pets.keys()),
       hasMetrics: !!this.maybeMetrics,
-      observabilityEnabled: this.maybeObsCfg?.enabled ?? false,
     });
     return `${this.selectedPet.speak()} | ${db}`;
   }
@@ -328,7 +299,6 @@ class AppService {
 registerPsql();
 registerMysql();
 const app = new Container();
-app.use(createConfigModule({ files: ['application.yaml'], cli: process.argv }));
 
 const service = await app.resolve(AppService);
 console.log(await service.run());
