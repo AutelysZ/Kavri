@@ -10,11 +10,15 @@ All key types used by the IoC API are declared here.
 
 ```ts
 export type Constructor<T> = abstract new () => T;
+export type AnyConstructor<T> = abstract new (...args: any[]) => T;
+export type NoArgumentsMethodKeyof<T> = {
+  [K in keyof T]: T[K] extends (...args: never[]) => any ? K : never
+}[keyof T];
 
 export interface Token<T> {
   readonly kind: 'token';
   readonly id: symbol;
-  readonly provide: Provider<T> | undefined;
+  readonly defaultValue: T;
 }
 
 export type SelectorExtractor<T> = () => TokenLike<T> | undefined;
@@ -94,10 +98,16 @@ export interface ComponentOptions {
 
 ```ts
 declare function Component(options?: ComponentOptions): HybridClassDecorator;
-declare function Provide<T>(target: TokenLike<T>): MethodDecorator;
+declare function Provide<T>(
+  constructor: AnyConstructor<T>,
+  options?: {
+    destroyMethod?: NoArgumentsMethodKeyof<T>;
+    onDestroy?: (inst: T) => void | Promise<void>;
+  },
+): MethodDecorator;
 declare function defineModule(spec: ModuleSpec): ModuleRef;
 
-declare function token<T>(provider?: Provider<T>): Token<T>;
+declare function token<T>(defaultValue: T): Token<T>;
 declare function collection<T>(
   constructors: readonly Constructor<T>[],
   options?: CollectionListOptions,
@@ -166,9 +176,9 @@ class UserService {}
 ### 5.2 Token provider
 
 ```ts
-const SequelizeToken = token<Sequelize>({
-  useFactory: () => new Sequelize('postgres://localhost/example'),
-});
+const SequelizeToken = token<Sequelize>(
+  new Sequelize('postgres://localhost/example'),
+);
 ```
 
 ### 5.3 Method provider via `@Provide(...)`
@@ -197,7 +207,7 @@ class Dog extends Pet {}
 class Cat extends Pet {}
 
 const PetCollection = collection<Pet>([Dog, Cat], { order: 'provided' });
-const SelectedPetNameToken = token<string | symbol>({ useValue: 'cat' });
+const SelectedPetNameToken = token<string | symbol>('cat');
 
 const PetSelector = selector(
   () => PetCollection.get(inject(SelectedPetNameToken)),
@@ -214,7 +224,7 @@ With `collection(...)`, `container.provide([Dog, Cat])` is not required for coll
 ```ts
 const DriverRegistry = registry<Driver>();
 export const registerPsql = DriverRegistry.register('psql', PsqlDriver);
-export const SelectedDriverNameToken = token<string>();
+export const SelectedDriverNameToken = token<string>('psql');
 
 const DriverSelector = selector(
   () => DriverRegistry.get(inject(SelectedDriverNameToken)),
@@ -252,8 +262,8 @@ import {
   injectNamed,
 } from '@kavri/core';
 
-const SelectedPetNameToken = token<string | symbol>({ useValue: 'cat' });
-const SelectedDriverNameToken = token<string>();
+const SelectedPetNameToken = token<string | symbol>('cat');
+const SelectedDriverNameToken = token<string>('psql');
 
 @Component()
 abstract class Pet { abstract speak(): string; }
@@ -273,7 +283,10 @@ const PetSelector = selector(
 );
 
 interface Driver { query(sql: string): Promise<string>; }
-class Sequelize { constructor(public readonly url: string) {} }
+class Sequelize {
+  constructor(public readonly url: string) {}
+  close() {}
+}
 class PsqlDriver implements Driver { async query(sql: string) { return `psql:${sql}`; } }
 class MysqlDriver implements Driver { async query(sql: string) { return `mysql:${sql}`; } }
 
@@ -285,14 +298,12 @@ const DriverSelector = selector(
   () => DriverRegistry.get(inject(SelectedDriverNameToken)),
 );
 
-const LoggerToken = token<{ info(data: unknown): void }>({
-  useFactory: () => ({ info: console.log }),
-});
+const LoggerToken = token<{ info(data: unknown): void }>({ info: console.log });
 
-const MetricsToken = token<{ emit(name: string): void }>();
+const MetricsToken = token<{ emit(name: string): void } | undefined>(undefined);
 
 class DatabaseProviders {
-  @Provide(Sequelize)
+  @Provide(Sequelize, { destroyMethod: 'close' })
   public getSequelize(): Sequelize {
     return new Sequelize('postgres://localhost/example');
   }
@@ -332,7 +343,6 @@ class AppService {
 registerPsql();
 registerMysql();
 const app = new Container();
-app.provide(SelectedDriverNameToken, { useValue: 'psql' });
 app.use(DatabaseModule);
 
 const service = await app.resolve(AppService);
