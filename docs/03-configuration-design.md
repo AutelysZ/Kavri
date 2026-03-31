@@ -13,9 +13,7 @@ interface ConfigSchema<T> {
 }
 type Constructor<T> = abstract new () => T;
 interface Provider<T> { readonly useValue?: T; readonly useFactory?: () => T | Promise<T>; }
-interface Token<T> {
-  readonly kind: 'token';
-  readonly id: symbol;
+class Token<T> {
   readonly provide: Provider<T> | undefined;
 }
 interface ModuleRef { kind: 'module'; name: string; }

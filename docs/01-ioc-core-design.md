@@ -15,30 +15,24 @@ export type NoArgumentsMethodKeyof<T> = {
   [K in keyof T]: T[K] extends (...args: never[]) => any ? K : never
 }[keyof T];
 
-export interface Token<T> {
-  readonly kind: 'token';
-  readonly id: symbol;
+export class Token<T> {
   readonly defaultValue: T;
 }
 
-export type SelectorExtractor<T> = () => TokenLike<T> | undefined;
+export type ComputedExtractor<T> = () => TokenLike<T> | undefined;
 
-export interface SelectorToken<T> {
-  readonly kind: 'selector-token';
-  readonly id: symbol;
-  readonly extractor: SelectorExtractor<T>;
+export class Computed<T> {
+  readonly extractor: ComputedExtractor<T>;
 }
 
-export interface CollectionToken<T> {
-  readonly kind: 'collection-token';
-  readonly id: symbol;
+export class Collection<T> {
   get(name: string | symbol): Constructor<T> | undefined;
   set(): ReadonlySet<Constructor<T>>;
   map(): ReadonlyMap<string | symbol, Constructor<T>>;
   list(options?: CollectionListOptions): readonly Constructor<T>[]; // default order: 'provided'
 }
 
-export type TokenLike<T> = Token<T> | SelectorToken<T> | Constructor<T>;
+export type TokenLike<T> = Token<T> | Computed<T> | Constructor<T>;
 
 export interface ModuleRef {
   readonly kind: 'module';
@@ -111,10 +105,10 @@ declare function token<T>(defaultValue: T): Token<T>;
 declare function collection<T>(
   constructors: readonly Constructor<T>[],
   options?: CollectionListOptions,
-): CollectionToken<T>;
-declare function selector<T>(
-  extractor: SelectorExtractor<T>,
-): SelectorToken<T>;
+): Collection<T>;
+declare function computed<T>(
+  extractor: ComputedExtractor<T>,
+): Computed<T>;
 declare function registry<T>(): Registry<T>;
 
 declare function inject<T>(target: TokenLike<T>): T;
@@ -123,14 +117,14 @@ declare function injectOptional<T>(target: TokenLike<T>): T | undefined;
 declare function injectLazy<T>(target: TokenLike<T>): Promise<T>;
 declare function injectOptionalLazy<T>(target: TokenLike<T>): Promise<T | undefined>;
 
-declare function injectNamed<T>(collection: CollectionToken<T>, name: string | symbol): T;
-declare function injectOptionalNamed<T>(collection: CollectionToken<T>, name: string | symbol): T | undefined;
+declare function injectNamed<T>(collection: Collection<T>, name: string | symbol): T;
+declare function injectOptionalNamed<T>(collection: Collection<T>, name: string | symbol): T | undefined;
 declare function injectAll<T>(decorator: ClassDecorator): readonly T[];
 
-declare function injectMap<T>(collection: CollectionToken<T>): ReadonlyMap<string | symbol, T>;
-declare function injectSet<T>(collection: CollectionToken<T>): ReadonlySet<T>;
+declare function injectMap<T>(collection: Collection<T>): ReadonlyMap<string | symbol, T>;
+declare function injectSet<T>(collection: Collection<T>): ReadonlySet<T>;
 declare function injectList<T>(
-  collection: CollectionToken<T>,
+  collection: Collection<T>,
   options?: CollectionListOptions,
 ): readonly T[];
 ```
@@ -139,9 +133,9 @@ Notes:
 
 - No chained methods on `inject`.
 - Optional injection is exposed via dedicated `injectOptionalXxx(...)` APIs (no options object).
-- `inject*` APIs may only be used in constructor parameter defaults, `selector(...)` extractors, and token/class lifecycle default parameters.
-- `selector(...)` extractor signature is strict: `() => TokenLike<T> | undefined`.
-- `CollectionToken<T>` is not `TokenLike<T>` and cannot be resolved directly; it is only used with `injectMap`, `injectSet`, and `injectList`.
+- `inject*` APIs may only be used in constructor parameter defaults, `computed(...)` extractors, and token/class lifecycle default parameters.
+- `computed(...)` extractor signature is strict: `() => TokenLike<T> | undefined`.
+- `Collection<T>` is not `TokenLike<T>` and cannot be resolved directly; it is only used with `injectMap`, `injectSet`, and `injectList`.
 - `collection(...)` defaults to `'provided'` order when `options.order` is omitted.
 - `collection(...)` validates named components at runtime and throws if a constructor is not decorated with `@Component({ name })`.
 - External constructors are valid `TokenLike` targets for `inject*` and `container.provide(tokenLike, provider)`.
@@ -192,7 +186,7 @@ class DatabaseModule {
 }
 ```
 
-### 5.4 Collection + conditional selector provider
+### 5.4 Collection + conditional computed provider
 
 ```ts
 @Component()
@@ -209,24 +203,24 @@ class Cat extends Pet {}
 const PetCollection = collection<Pet>([Dog, Cat], { order: 'provided' });
 const SelectedPetNameToken = token<string | symbol>('cat');
 
-const PetSelector = selector(
+const PetComputed = computed(
   () => PetCollection.get(inject(SelectedPetNameToken)),
 );
 ```
 
-The selector is not bound to a single provider source and can extract from any runtime condition.
+The computed token is not bound to a single provider source and can extract from any runtime condition.
 Named bindings are declared through `@Component({ name })` and support both `string` and `symbol`.
 With `collection(...)`, `container.provide([Dog, Cat])` is not required for collection injection.
 `container.provide(Dog)` / `container.provide(Cat)` are valid import-assurance calls when only named-resolution (`injectNamed(PetCollection, ...)`) paths are used.
 
-### 5.5 Dynamic registry provider (selector-based)
+### 5.5 Dynamic registry provider (computed-based)
 
 ```ts
 const DriverRegistry = registry<Driver>();
 export const registerPsql = DriverRegistry.register('psql', PsqlDriver);
 export const SelectedDriverNameToken = token<string>('psql');
 
-const DriverSelector = selector(
+const DriverComputed = computed(
   () => DriverRegistry.get(inject(SelectedDriverNameToken)),
 );
 ```
@@ -253,7 +247,7 @@ import {
   defineModule,
   token,
   collection,
-  selector,
+  computed,
   registry,
   inject,
   injectOptional,
@@ -278,7 +272,7 @@ class Cat extends Pet { speak() { return 'meow'; } }
 
 const PetCollection = collection<Pet>([Dog, Cat], { order: 'provided' });
 
-const PetSelector = selector(
+const PetComputed = computed(
   () => PetCollection.get(inject(SelectedPetNameToken)),
 );
 
@@ -294,7 +288,7 @@ const DriverRegistry = registry<Driver>();
 const registerPsql = DriverRegistry.register('psql', PsqlDriver);
 const registerMysql = DriverRegistry.register('mysql', MysqlDriver);
 
-const DriverSelector = selector(
+const DriverComputed = computed(
   () => DriverRegistry.get(inject(SelectedDriverNameToken)),
 );
 
@@ -317,8 +311,8 @@ const DatabaseModule = defineModule({
 @Component()
 class AppService {
   constructor(
-    private readonly selectedPet = inject(PetSelector),
-    private readonly driver = inject(DriverSelector),
+    private readonly selectedPet = inject(PetComputed),
+    private readonly driver = inject(DriverComputed),
     private readonly sequelize = inject(Sequelize),
     private readonly pets = injectMap(PetCollection),
     private readonly maybeMetrics = injectOptional(MetricsToken),
