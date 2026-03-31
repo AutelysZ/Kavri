@@ -41,6 +41,11 @@ export interface ModuleRef {
   readonly name: string;
 }
 
+export interface ModuleSpec {
+  name: string;
+  providers?: readonly Constructor<any>[];
+}
+
 export interface ScopeRef {
   readonly kind: 'scope';
   readonly name: string;
@@ -90,6 +95,7 @@ export interface ComponentOptions {
 ```ts
 declare function Component(options?: ComponentOptions): HybridClassDecorator;
 declare function Provide<T>(target: TokenLike<T>): MethodDecorator;
+declare function defineModule(spec: ModuleSpec): ModuleRef;
 
 declare function token<T>(provider?: Provider<T>): Token<T>;
 declare function collection<T>(
@@ -234,6 +240,7 @@ import {
   Container,
   Component,
   Provide,
+  defineModule,
   token,
   collection,
   selector,
@@ -284,12 +291,17 @@ const LoggerToken = token<{ info(data: unknown): void }>({
 
 const MetricsToken = token<{ emit(name: string): void }>();
 
-class DatabaseModule {
+class DatabaseProviders {
   @Provide(Sequelize)
   public getSequelize(): Sequelize {
     return new Sequelize('postgres://localhost/example');
   }
 }
+
+const DatabaseModule = defineModule({
+  name: 'database',
+  providers: [DatabaseProviders],
+});
 
 @Component()
 class AppService {
@@ -321,7 +333,7 @@ registerPsql();
 registerMysql();
 const app = new Container();
 app.provide(SelectedDriverNameToken, { useValue: 'psql' });
-app.provide(Sequelize, { useFactory: () => new Sequelize('postgres://localhost/example') });
+app.use(DatabaseModule);
 
 const service = await app.resolve(AppService);
 console.log(await service.run());
