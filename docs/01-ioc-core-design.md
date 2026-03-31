@@ -89,6 +89,7 @@ export interface ComponentOptions {
 
 ```ts
 declare function Component(options?: ComponentOptions): HybridClassDecorator;
+declare function Provide<T>(target: TokenLike<T>): MethodDecorator;
 
 declare function token<T>(provider?: Provider<T>): Token<T>;
 declare function collection<T>(
@@ -127,14 +128,15 @@ Notes:
 - `CollectionToken<T>` is not `TokenLike<T>` and cannot be resolved directly; it is only used with `injectMap`, `injectSet`, and `injectList`.
 - `collection(...)` defaults to `'provided'` order when `options.order` is omitted.
 - `collection(...)` validates named components at runtime and throws if a constructor is not decorated with `@Component({ name })`.
+- External constructors are valid `TokenLike` targets for `inject*` and `container.provide(tokenLike, provider)`.
 
 ## 4. Container API
 
 ```ts
 class Container {
   provide<T>(constructor: Constructor<T>): this;
-  provide<T>(token: Token<T>, provider: Provider<T>): this;
-  provide(entries: readonly (Constructor<any> | [Token<any>, Provider<any>])[]): this;
+  provide<T>(token: TokenLike<T>, provider: Provider<T>): this;
+  provide(entries: readonly (Constructor<any> | [TokenLike<any>, Provider<any>])[]): this;
   use(module: ModuleRef): this;
   createScope(name?: string): ScopeRef;
   resolve<T>(target: TokenLike<T>): Promise<T>;
@@ -144,6 +146,7 @@ class Container {
 
 Only `resolve(...)` is used to obtain instances.
 `provide(constructor)` is a no-op registration used to ensure constructor import/visibility.
+`provide(tokenLike, provider)` accepts both `Token<T>` and external constructors (e.g. `Sequelize`) as registration keys.
 
 ## 5. Provider categories
 
@@ -162,7 +165,18 @@ const SequelizeToken = token<Sequelize>({
 });
 ```
 
-### 5.3 Collection + conditional selector provider
+### 5.3 Method provider via `@Provide(...)`
+
+```ts
+class DatabaseModule {
+  @Provide(Sequelize)
+  public getSequelize(): Sequelize {
+    return new Sequelize('postgres://localhost/example');
+  }
+}
+```
+
+### 5.4 Collection + conditional selector provider
 
 ```ts
 @Component()
@@ -189,7 +203,7 @@ Named bindings are declared through `@Component({ name })` and support both `str
 With `collection(...)`, `container.provide([Dog, Cat])` is not required for collection injection.
 `container.provide(Dog)` / `container.provide(Cat)` are valid import-assurance calls when only named-resolution (`injectNamed(PetCollection, ...)`) paths are used.
 
-### 5.4 Dynamic registry provider (selector-based)
+### 5.5 Dynamic registry provider (selector-based)
 
 ```ts
 const DriverRegistry = registry<Driver>();
@@ -219,6 +233,7 @@ Lifecycle order:
 import {
   Container,
   Component,
+  Provide,
   token,
   collection,
   selector,
@@ -251,6 +266,7 @@ const PetSelector = selector(
 );
 
 interface Driver { query(sql: string): Promise<string>; }
+class Sequelize { constructor(public readonly url: string) {} }
 class PsqlDriver implements Driver { async query(sql: string) { return `psql:${sql}`; } }
 class MysqlDriver implements Driver { async query(sql: string) { return `mysql:${sql}`; } }
 
@@ -268,11 +284,19 @@ const LoggerToken = token<{ info(data: unknown): void }>({
 
 const MetricsToken = token<{ emit(name: string): void }>();
 
+class DatabaseModule {
+  @Provide(Sequelize)
+  public getSequelize(): Sequelize {
+    return new Sequelize('postgres://localhost/example');
+  }
+}
+
 @Component()
 class AppService {
   constructor(
     private readonly selectedPet = inject(PetSelector),
     private readonly driver = inject(DriverSelector),
+    private readonly sequelize = inject(Sequelize),
     private readonly pets = injectMap(PetCollection),
     private readonly maybeMetrics = injectOptional(MetricsToken),
     private readonly loggerPromise = injectLazy(LoggerToken),
@@ -285,6 +309,7 @@ class AppService {
     logger.info({
       db,
       dog: this.dog.speak(),
+      sequelizeUrl: this.sequelize.url,
       availablePets: Array.from(this.pets.keys()),
       hasMetrics: !!this.maybeMetrics,
     });
@@ -296,6 +321,7 @@ registerPsql();
 registerMysql();
 const app = new Container();
 app.provide(SelectedDriverNameToken, { useValue: 'psql' });
+app.provide(Sequelize, { useFactory: () => new Sequelize('postgres://localhost/example') });
 
 const service = await app.resolve(AppService);
 console.log(await service.run());
