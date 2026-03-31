@@ -69,13 +69,8 @@ export interface Registry<T> {
   getOrThrow(name: string): Constructor<T>;
 }
 
-type LegacyClassDecorator = (target: Function) => void | Function;
-interface TC39ClassDecoratorContext {
-  kind: 'class';
-  name: string;
-}
-type TC39ClassDecorator = (value: Function, context: TC39ClassDecoratorContext) => Function | void;
-export type HybridClassDecorator = LegacyClassDecorator & TC39ClassDecorator;
+type TC39ClassDecorator = (value: Function, context: ClassDecoratorContext) => Function | void;
+export type HybridClassDecorator = ClassDecorator | TC39ClassDecorator;
 export type ProviderScope = 'singleton' | 'scoped' | 'transient';
 export type CollectionOrder = 'topological' | 'provided' | 'alphabetical';
 
