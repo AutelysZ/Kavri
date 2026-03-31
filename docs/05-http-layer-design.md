@@ -83,7 +83,7 @@ const AppModule = defineModule({
   setup(container) {
     container.use(createConfigModule({ files: ['application.yaml'], cli: process.argv }));
     container.use(createHttpModule({ controllers: [UserController] }));
-    container.provide(UserService, Bootstrap);
+    container.provide([UserService, Bootstrap]);
   },
 });
 

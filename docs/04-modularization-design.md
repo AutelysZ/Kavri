@@ -17,7 +17,11 @@ type Constructor<T> = abstract new () => T;
 type TokenLike<T> = Token<T> | Constructor<T>;
 type Provider<T> = ValueProvider<T> | FactoryProvider<T>;
 
-interface Token<T> { readonly kind: 'token'; readonly id: symbol; }
+interface Token<T> {
+  readonly kind: 'token';
+  readonly id: symbol;
+  readonly provide: Provider<T> | undefined;
+}
 interface ModuleRef { kind: 'module'; name: string; }
 interface ValueProvider<T> { useValue: T; }
 interface FactoryProvider<T> {

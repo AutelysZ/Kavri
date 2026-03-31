@@ -1,13 +1,13 @@
 # Overview
 
-Kavri is a TypeScript IoC framework focused on explicit dependency wiring and config-aware provider selection.
+Kavri is a TypeScript IoC framework focused on explicit dependency wiring with optional upper-layer integrations.
 
 ## Priorities
 
 1. Explicit graph (no reflection requirement)
 2. Robust provider model (component, token, selector, registry)
-3. Config as first-class runtime input
-4. Simple startup path with optional modularization
+3. Simple startup path with optional modularization
+4. Config as first-class runtime input (via dedicated config layer)
 5. Optional HTTP upper layer on top of IoC
 
 ## Document map
