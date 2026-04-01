@@ -200,18 +200,18 @@ class Dog extends Pet {}
 @Component({ name: 'cat' })
 class Cat extends Pet {}
 
-const PetCollection = collection<Pet>([Dog, Cat], { order: 'provided' });
+const AllPets = collection<Pet>([Dog, Cat], { order: 'provided' });
 const SelectedPetNameToken = token<string | symbol>('cat');
 
-const PetComputed = computed(
-  () => PetCollection.get(inject(SelectedPetNameToken)),
+const SelectedPet = computed(
+  () => AllPets.get(inject(SelectedPetNameToken)),
 );
 ```
 
 The computed token is not bound to a single provider source and can extract from any runtime condition.
 Named bindings are declared through `@Component({ name })` and support both `string` and `symbol`.
 With `collection(...)`, `container.provide([Dog, Cat])` is not required for collection injection.
-`container.provide(Dog)` / `container.provide(Cat)` are valid import-assurance calls when only named-resolution (`injectNamed(PetCollection, ...)`) paths are used.
+`container.provide(Dog)` / `container.provide(Cat)` are valid import-assurance calls when only named-resolution (`injectNamed(AllPets, ...)`) paths are used.
 
 ### 5.5 Dynamic registry provider (computed-based)
 
@@ -270,10 +270,10 @@ class Dog extends Pet { speak() { return 'woof'; } }
 @Component({ name: 'cat' })
 class Cat extends Pet { speak() { return 'meow'; } }
 
-const PetCollection = collection<Pet>([Dog, Cat], { order: 'provided' });
+const AllPets = collection<Pet>([Dog, Cat], { order: 'provided' });
 
-const PetComputed = computed(
-  () => PetCollection.get(inject(SelectedPetNameToken)),
+const SelectedPet = computed(
+  () => AllPets.get(inject(SelectedPetNameToken)),
 );
 
 interface Driver { query(sql: string): Promise<string>; }
@@ -311,13 +311,13 @@ const DatabaseModule = defineModule({
 @Component()
 class AppService {
   constructor(
-    private readonly selectedPet = inject(PetComputed),
+    private readonly selectedPet = inject(SelectedPet),
     private readonly driver = inject(DriverComputed),
     private readonly sequelize = inject(Sequelize),
-    private readonly pets = injectMap(PetCollection),
+    private readonly pets = injectMap(AllPets),
     private readonly maybeMetrics = injectOptional(MetricsToken),
     private readonly loggerPromise = injectLazy(LoggerToken),
-    private readonly dog = injectNamed(PetCollection, PET_DOG),
+    private readonly dog = injectNamed(AllPets, PET_DOG),
   ) {}
 
   async run() {
