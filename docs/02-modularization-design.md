@@ -2,9 +2,9 @@
 
 ## 1. Purpose
 
-Modules group cohesive sets of providers, imports, and side-effect components. A module is **not** a special construct — it's a plain class with `@Provide` methods and/or `@Import`/`@Use` decorators.
+Modules group cohesive sets of providers, imports, and side-effect components. A module is simply a `@Component()` class that uses `@Provide` methods and/or `@Import`/`@Use` decorators to organize related providers.
 
-There is no root/local module hierarchy. ESM already handles physical modularization. Kavri modules are purely logical groupings for provider organization.
+There is no root/local module hierarchy. ESM already handles physical modularization. Kavri modules are purely logical groupings for provider organization. `@Provide` is not limited to modules — any `@Component()` class can use it.
 
 ## 2. Core APIs
 
@@ -26,7 +26,7 @@ Import does not instantiate — it only registers.
 
 Ensures the listed injectables are **instantiated** (and their `@Provide` methods processed) before the decorated class is resolved. Use for:
 
-- Module classes with `@Provide` methods that must run.
+- Components with `@Provide` methods that must run.
 - Side-effect components (event subscribers, background workers).
 - Any dependency that must be alive for correct behavior.
 
@@ -43,10 +43,10 @@ These are the imperative equivalents of the decorators. Use them when configurat
 
 ## 3. What is a module?
 
-A module is any class that contains `@Provide` methods. It may also use `@Import` and `@Use` decorators to declare its dependencies.
+A module is a `@Component()` class that contains `@Provide` methods. It may also use `@Import` and `@Use` decorators to declare its dependencies.
 
 ```ts
-// a module class — no special decorator needed
+@Component()
 @Import(PsqlDriver, MysqlDriver)
 class DatabaseModule {
   @Provide(DataSource, { onDestroy: 'close' })
@@ -80,7 +80,7 @@ class Application { ... }
 |---|---|---|
 | **What it does** | Registers injectable (makes it available) | Instantiates injectable (triggers side effects) |
 | **Processes `@Provide`?** | No | Yes |
-| **When to use** | Concrete implementations for collections | Module classes, side-effect components |
+| **When to use** | Concrete implementations for collections | Components with @Provide, side-effect components |
 | **Ordering guarantee** | No (just registration) | Yes (instantiated before dependant) |
 
 ## 6. Full example
@@ -129,6 +129,7 @@ const SelectedDriver = computed<Driver>(
   (cfg = injectConfig(DbConfig), d = inject(Driver, cfg.driver)) => d,
 );
 
+@Component()
 @Import(PsqlDriver, MysqlDriver)
 class DriverModule {}
 
@@ -143,6 +144,7 @@ const RedisUrl = token<string>(() => {
   throw new Error('RedisUrl must be provided');
 });
 
+@Component()
 class CacheModule {
   @Provide(Redis, { onDestroy: 'disconnect' })
   async createRedis(url = inject(RedisUrl)): Promise<Redis> {

@@ -296,6 +296,7 @@ declare class Redis {
   disconnect(): Promise<void>;
 }
 
+@Component()
 class CacheModule {
   @Provide(Redis, { onDestroy: 'disconnect' })
   async createRedis(cfg = injectConfig(CacheConfig)): Promise<Redis> {

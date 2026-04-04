@@ -120,7 +120,7 @@ declare function Provide<T>(
 ): MethodDecorator;
 ```
 
-A class containing `@Provide` methods is called a *module class*. It doesn't need a special decorator — any class can contain `@Provide` methods.
+`@Provide` can be used in any `@Component()` class — it is not limited to a specific "module" concept. Any component can provide external class instances.
 
 ## 6. Injection APIs
 
@@ -150,11 +150,11 @@ declare class Ref<T> {
   get(): T;
 }
 
-declare function injectRef<T>(func: () => Injectable<T>): Ref<T>;
-declare function injectRef<T>(func: () => Injectable<T>, optional: true): Ref<T> | undefined;
+declare function injectRef<T>(injectable: Injectable<T>): Ref<T>;
+declare function injectRef<T>(injectable: Injectable<T>, optional: true): Ref<T> | undefined;
 ```
 
-The callback is deferred — the injectable is resolved after the requesting component's construction. Calling `ref.get()` during construction throws.
+Since `injectRef` is called in default parameters, the evaluation is already deferred — no wrapper function needed. The injectable is resolved after the requesting component's construction. Calling `ref.get()` during construction throws.
 
 ### 6.3 Collection injection
 
@@ -334,6 +334,7 @@ declare class Redis {
   disconnect(): Promise<void>;
 }
 
+@Component()
 class RedisModule {
   @Provide(Redis, { onDestroy: 'disconnect' })
   async createRedis(): Promise<Redis> {

@@ -188,7 +188,10 @@ interface ProvideOptions<T> extends ComponentOptions {
  * Use @Provide when you need to instantiate a class you don't own (third-party libraries),
  * or when construction requires complex setup logic.
  *
+ * @Provide can be used in any @Component() class — it is not limited to "module" classes.
+ *
  * @example
+ * @Component()
  * class DatabaseModule {
  *     @Provide(Sequelize, { onDestroy: 'close' })
  *     createSequelize(config = injectConfig(DbConfig)): Sequelize {
@@ -249,12 +252,12 @@ declare function inject<T>(injectable: Injectable<T>, name: Qualifier, optional:
  * @example
  * @Component()
  * class ServiceA {
- *     constructor(private readonly b = injectRef(() => ServiceB)) {}
+ *     constructor(private readonly b = injectRef(ServiceB)) {}
  *     useB() { this.b.get().doSomething(); }
  * }
  */
-declare function injectRef<T>(func: () => Injectable<T>): Ref<T>
-declare function injectRef<T>(func: () => Injectable<T>, optional: true): Ref<T> | undefined
+declare function injectRef<T>(injectable: Injectable<T>): Ref<T>
+declare function injectRef<T>(injectable: Injectable<T>, optional: true): Ref<T> | undefined
 
 /**
  * Injects all @Component-decorated subclasses/implementations of the target.
@@ -297,10 +300,11 @@ declare function getComponentMetadata<T>(target: Injectable<T> | T): ProvideOpti
  * This is especially important for collection injection (injectAll/injectMap/injectSet)
  * where each implementation must be explicitly imported.
  *
- * A module is simply a class with @Provide methods and/or @Import/@Use decorators.
- * No special @Module decorator is needed — any class can serve as a module.
+ * A module is simply a @Component() class with @Provide methods and/or @Import/@Use decorators.
+ * No special @Module decorator is needed — any @Component can serve as a module.
  *
  * @example
+ * @Component()
  * @Import(MysqlDriver, PsqlDriver)
  * class DatabaseModule {
  *     @Provide(DataSource, { onDestroy: 'close' })
@@ -314,7 +318,7 @@ declare function Import(...injectables: Injectable<any>[]): ClassDecorator;
  * @Provide methods processed) before this class is resolved.
  *
  * Use @Use for:
- * - Module classes with @Provide methods that must be processed
+ * - Components with @Provide methods that must be processed
  * - Side-effect components (event subscribers, metric collectors, scheduled tasks)
  * - Any component that must be alive before the decorated class runs
  *
@@ -798,7 +802,8 @@ class RedisConfiguration {
     url!: string;
 }
 
-// a module is just a class with @Provide methods
+// @Provide can be used in any @Component class
+@Component()
 class InfraModule {
     @Provide(Sequelize, { onDestroy: 'close' })
     async createSequelize(dbUrl = inject(DatabaseUrl)): Promise<Sequelize> {
@@ -823,7 +828,7 @@ class InfraModule {
 @Component()
 class OrderService {
     // forward reference to break circular dependency
-    constructor(private readonly inventoryRef = injectRef(() => InventoryService)) {}
+    constructor(private readonly inventoryRef = injectRef(InventoryService)) {}
 
     async createOrder(productId: string, qty: number) {
         // access the reference only after construction
@@ -834,7 +839,7 @@ class OrderService {
 
 @Component()
 class InventoryService {
-    constructor(private readonly orderRef = injectRef(() => OrderService)) {}
+    constructor(private readonly orderRef = injectRef(OrderService)) {}
 
     async checkStock(productId: string, qty: number): Promise<boolean> {
         return Promise.resolve(true);
@@ -1116,7 +1121,8 @@ const DefaultSerializer = computed<Serializer>(
 // Example 12: Module System — @Import, @Use, and Container APIs
 // ============================================================
 
-// module: a class with @Provide methods
+// any @Component can have @Provide methods
+@Component()
 class CacheModule {
     @Provide(Redis, { onDestroy: 'disconnect' })
     async createRedis(config = injectConfig(RedisConfiguration)): Promise<Redis> {
@@ -1126,7 +1132,7 @@ class CacheModule {
     }
 }
 
-// another module
+@Component()
 @Import(MysqlDriver, PsqlDriver)
 class DatabaseModule {
     @Provide(Sequelize, { onDestroy: 'close' })
@@ -1374,6 +1380,7 @@ class RedisSubscriber {
     }
 }
 
+@Component()
 class RedisModule {
     @Provide(Redis, { onDestroy: 'disconnect' })
     async createRedis(url = inject(RedisUrl)): Promise<Redis> {
