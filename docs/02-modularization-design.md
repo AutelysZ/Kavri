@@ -2,126 +2,210 @@
 
 ## 1. Purpose
 
-Module is a lightweight wrapper over a component set plus optional init/destroy logic.
-There is no root/local module hierarchy model; ESM already handles physical modularization.
+Modules group cohesive sets of providers, imports, and side-effect components. A module is **not** a special construct — it's a plain class with `@Provide` methods and/or `@Import`/`@Use` decorators.
 
-`defineModule(...)` is used to:
+There is no root/local module hierarchy. ESM already handles physical modularization. Kavri modules are purely logical groupings for provider organization.
 
-1. register a cohesive set of components/providers
-2. run custom init/destroy logic (for example loading configuration files)
-
-## 2. Types used in this document
+## 2. Core APIs
 
 ```ts
-type Constructor<T> = abstract new () => T;
-type TokenLike<T> = Token<T> | Constructor<T>;
-type Provider<T> = ValueProvider<T> | FactoryProvider<T>;
-
-class Token<T> {
-  readonly provide: Provider<T> | undefined;
-}
-interface ModuleRef { kind: 'module'; name: string; }
-interface ValueProvider<T> { useValue: T; }
-interface FactoryProvider<T> {
-  useFactory: () => T | Promise<T>;
-  scope?: 'singleton' | 'scoped' | 'transient';
-}
-
-interface ModuleSetupContext {
-  provide<T>(constructor: Constructor<T>): void;
-  provide<T>(token: Token<T>, provider: Provider<T>): void;
-  provide(entries: readonly (Constructor<any> | [Token<any>, Provider<any>])[]): void;
-  use(module: ModuleRef): void;
-}
-
-interface ModuleSpec {
-  name: string;
-  providers?: readonly (Constructor<any> | [Token<any>, Provider<any>])[];
-  setup?: (container: ModuleSetupContext) => void | Promise<void>;
-  teardown?: () => void | Promise<void>;
-}
-
-declare function defineModule(spec: ModuleSpec): ModuleRef;
+declare function Import(...injectables: Injectable<any>[]): ClassDecorator;
+declare function Use(...injectables: Injectable<any>[]): ClassDecorator;
 ```
 
-## 3. Rules
+### `@Import(...injectables)`
 
-- Module is optional for small applications.
-- Module does not change provider resolution or lifecycle semantics.
-- Module can register providers and run init/destroy hooks.
-- Use module factory functions (`createXxxModule(params)`) for dynamic module behavior.
+Ensures the listed injectables are **registered** when the decorated class is resolved. This is necessary for:
 
-## 4. Full example
+- Making specific implementations available for collection injection (`injectAll`/`injectMap`/`injectSet`).
+- Declaring which concrete classes a module exposes.
+
+Import does not instantiate — it only registers.
+
+### `@Use(...injectables)`
+
+Ensures the listed injectables are **instantiated** (and their `@Provide` methods processed) before the decorated class is resolved. Use for:
+
+- Module classes with `@Provide` methods that must run.
+- Side-effect components (event subscribers, background workers).
+- Any dependency that must be alive for correct behavior.
+
+### Container equivalents
+
+```ts
+class Container {
+  import(...injectables: Injectable<any>[]): void;
+  use(...injectables: Injectable<any>[]): void;
+}
+```
+
+These are the imperative equivalents of the decorators. Use them when configuration is dynamic or happens at the container level.
+
+## 3. What is a module?
+
+A module is any class that contains `@Provide` methods. It may also use `@Import` and `@Use` decorators to declare its dependencies.
+
+```ts
+// a module class — no special decorator needed
+@Import(PsqlDriver, MysqlDriver)
+class DatabaseModule {
+  @Provide(DataSource, { onDestroy: 'close' })
+  async createDataSource(cfg = injectConfig(DbConfig)): Promise<DataSource> {
+    return new DataSource(cfg.url);
+  }
+}
+```
+
+To activate a module, pass it to `container.use()` or reference it in `@Use(...)`:
+
+```ts
+container.use(DatabaseModule);
+// or
+@Use(DatabaseModule)
+class Application { ... }
+```
+
+## 4. Rules
+
+- **Module is optional.** Small applications can use `Container.provide()` and `Container.import()` directly.
+- **Module does not change resolution semantics.** Provider scope, lifecycle, and injection behavior are identical whether a provider is registered via a module or directly.
+- **Modules can compose.** A module can `@Use` other modules.
+- **No circular module dependencies.** If module A uses module B and B uses A, startup fails.
+- **`@Import` is additive.** Importing the same injectable multiple times is safe (idempotent).
+- **`@Use` guarantees ordering.** Components listed in `@Use` are instantiated before the decorated class.
+
+## 5. Import vs Use
+
+| | `@Import` / `container.import()` | `@Use` / `container.use()` |
+|---|---|---|
+| **What it does** | Registers injectable (makes it available) | Instantiates injectable (triggers side effects) |
+| **Processes `@Provide`?** | No | Yes |
+| **When to use** | Concrete implementations for collections | Module classes, side-effect components |
+| **Ordering guarantee** | No (just registration) | Yes (instantiated before dependant) |
+
+## 6. Full example
 
 ```ts
 import {
   Container,
   Component,
-  defineModule,
-  token,
+  Provide,
+  Import,
+  Use,
+  OnDestroy,
+  EventDispatcher,
+  EventListener,
+  EventData,
   inject,
-} from '@kavri/core';
-import { createConfigModule, defineZodConfig, injectConfig } from '@kavri/config';
-import { z } from 'zod';
+  injectAll,
+  token,
+  computed,
+} from 'kavri';
+import { Configuration, injectConfig } from 'kavri/config';
 
-const DbConfig = defineZodConfig('db', z.object({ url: z.string() }));
-const DbToken = token<{ query(sql: string): Promise<string> }>();
+// ---- driver module ----
 
-function createDatabaseModule() {
-  const DbProvider = {
-    useFactory: (cfg = injectConfig(DbConfig)) => ({
-      async query(sql: string) {
-        return `query(${sql})@${cfg.url}`;
-      },
-    }),
-  };
-
-  return defineModule({
-    name: 'database',
-    providers: [[DbToken, DbProvider]],
-  });
+@Configuration("database")
+class DbConfig {
+  driver!: string;
+  url!: string;
 }
+
+abstract class Driver {
+  abstract query(sql: string): Promise<any>;
+}
+
+@Component({ name: 'psql' })
+class PsqlDriver extends Driver {
+  async query(sql: string) { return `psql:${sql}`; }
+}
+
+@Component({ name: 'mysql' })
+class MysqlDriver extends Driver {
+  async query(sql: string) { return `mysql:${sql}`; }
+}
+
+const SelectedDriver = computed<Driver>(
+  (cfg = injectConfig(DbConfig), d = inject(Driver, cfg.driver)) => d,
+);
+
+@Import(PsqlDriver, MysqlDriver)
+class DriverModule {}
+
+// ---- cache module ----
+
+declare class Redis {
+  connect(url: string): Promise<void>;
+  disconnect(): Promise<void>;
+}
+
+const RedisUrl = token<string>(() => {
+  throw new Error('RedisUrl must be provided');
+});
+
+class CacheModule {
+  @Provide(Redis, { onDestroy: 'disconnect' })
+  async createRedis(url = inject(RedisUrl)): Promise<Redis> {
+    const r = new Redis();
+    await r.connect(url);
+    return r;
+  }
+}
+
+// ---- notification module (side-effect) ----
+
+@EventData('user.registered')
+class UserRegisteredEvent {
+  constructor(public readonly email: string) {}
+}
+
+@Component()
+class EmailNotifier {
+  @EventListener(UserRegisteredEvent)
+  async onUserRegistered(ev: UserRegisteredEvent) {
+    console.log(`welcome email sent to ${ev.email}`);
+  }
+}
+
+// ---- user module ----
 
 @Component()
 class UserService {
-  constructor(private readonly db = inject(DbToken)) {}
+  constructor(
+    private readonly driver = inject(SelectedDriver),
+    private readonly events = inject(EventDispatcher),
+  ) {}
 
-  async getUser(id: string) {
-    await this.db.query(`select * from users where id='${id}'`);
-    return { id, name: 'mock' };
+  async register(email: string) {
+    await this.driver.query(`insert into users ...`);
+    await this.events.dispatch(new UserRegisteredEvent(email));
   }
 }
 
-function createUserModule() {
-  return defineModule({
-    name: 'user',
-    providers: [UserService],
-  });
-}
+// ---- application root ----
 
-@Component()
-class AppService {
-  constructor(private readonly users = inject(UserService)) {}
+@Use(DriverModule, CacheModule)    // process @Provide methods, register imports
+@Use(EmailNotifier)                // start side-effect listener
+class Application {
+  constructor(
+    private readonly users = inject(UserService),
+    private readonly drivers = injectAll(Driver, 'alphabetical'),
+  ) {}
 
   async run() {
-    return this.users.getUser('u1');
+    console.log(`available drivers: ${this.drivers.length}`);
+    await this.users.register('alice@example.com');
   }
 }
 
-const AppModule = defineModule({
-  name: 'app',
-  setup(container) {
-    container.use(createDatabaseModule());
-    container.use(createUserModule());
-    container.provide(AppService);
-  },
-});
+// ---- bootstrap ----
 
 const container = new Container();
-container.use(createConfigModule({ files: ['application.yaml'] }));
-container.use(AppModule);
 
-const app = await container.resolve(AppService);
-console.log(await app.run());
+// provide the redis URL that CacheModule needs
+container.provide(RedisUrl, () => 'redis://localhost:6379');
+
+const app = await container.resolve(Application);
+await app.run();
 await container.destroy();
 ```

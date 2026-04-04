@@ -2,344 +2,418 @@
 
 ## 1. Scope
 
-This document defines the implementation-ready IoC core API with explicit provider registration, conditional selection, and deterministic lifecycle behavior.
+This document defines the implementation-ready IoC core API: explicit provider registration, injection via constructor default parameters, lifecycle hooks, event pub/sub, scoped containers, and deterministic async resolution.
 
-## 2. Canonical type declarations
-
-All key types used by the IoC API are declared here.
+## 2. Core types
 
 ```ts
-export type Constructor<T> = abstract new () => T;
-export type AnyConstructor<T> = abstract new (...args: any[]) => T;
-export type NoArgumentsMethodKeyof<T> = {
-  [K in keyof T]: T[K] extends (...args: never[]) => any ? K : never
-}[keyof T];
-
-export class Token<T> {
-  readonly defaultValue: T;
-}
-
-export type ComputedExtractor<T> = () => TokenLike<T> | undefined;
-
-export class Computed<T> {
-  readonly extractor: ComputedExtractor<T>;
-}
-
-export class Collection<T> {
-  get(name: string | symbol): Constructor<T> | undefined;
-  set(): ReadonlySet<Constructor<T>>;
-  map(): ReadonlyMap<string | symbol, Constructor<T>>;
-  list(options?: CollectionListOptions): readonly Constructor<T>[]; // default order: 'provided'
-}
-
-export type TokenLike<T> = Token<T> | Computed<T> | Constructor<T>;
-
-export interface ModuleRef {
-  readonly kind: 'module';
-  readonly name: string;
-}
-
-export interface ModuleSpec {
-  name: string;
-  providers?: readonly Constructor<any>[];
-}
-
-export interface ScopeRef {
-  readonly kind: 'scope';
-  readonly name: string;
-  resolve<T>(target: TokenLike<T>): Promise<T>;
-  destroy(): Promise<void>;
-}
-
-export type ProviderFactory<T> = () => T | Promise<T>;
-
-export interface ValueProvider<T> {
-  useValue: T;
-}
-
-export interface FactoryProvider<T> {
-  useFactory: ProviderFactory<T>;
-  scope?: 'singleton' | 'scoped' | 'transient';
-  onInit?: (value: T) => void | Promise<void>;
-  onDestroy?: (value: T) => void | Promise<void>;
-}
-
-export type Provider<T = unknown> = ValueProvider<T> | FactoryProvider<T>;
-
-export interface Registry<T> {
-  register(name: string, impl: Constructor<T>): () => void;
-  get(name: string): Constructor<T> | undefined;
-  getOrThrow(name: string): Constructor<T>;
-}
-
-type TC39ClassDecorator = (value: Function, context: ClassDecoratorContext) => Function | void;
-export type HybridClassDecorator = ClassDecorator | TC39ClassDecorator;
+export type Qualifier = string | symbol;
 export type ProviderScope = 'singleton' | 'scoped' | 'transient';
+export type Awaitable<T> = T | Promise<T>;
 export type CollectionOrder = 'topological' | 'provided' | 'alphabetical';
 
-export interface CollectionListOptions {
-  order?: CollectionOrder;
-}
+export type ClassDecorator =
+  globalThis.ClassDecorator &
+  ((target: Function, context: ClassDecoratorContext) => void);
 
-export interface ComponentOptions {
-  name?: string | symbol;
+export type MethodDecorator =
+  globalThis.MethodDecorator &
+  ((target: Function, context: ClassMethodDecoratorContext) => void);
+
+export type AnyConstructor<T> = abstract new (...args: any[]) => T;
+export type Constructor<T> = abstract new () => T;
+export type NoArgsMethodKeyof<T> = {
+  [P in keyof T]-?: T[P] extends () => any ? P : never;
+}[keyof T];
+```
+
+### Injectable type
+
+The universal type accepted by all injection and container APIs:
+
+```ts
+export type Injectable<T> =
+  | AnyConstructor<T>
+  | Constructor<T>
+  | Token<T>
+  | Computed<T>;
+```
+
+## 3. Component decorator
+
+```ts
+interface ComponentOptions {
+  name?: Qualifier;
   scope?: ProviderScope;
-  predicate?: () => boolean;
+  condition?: () => Awaitable<boolean>;
 }
+
+declare function Component(options?: ComponentOptions): ClassDecorator;
 ```
 
-## 3. Decorators and injection APIs
+- `name` — qualifier for named resolution via `inject(Base, name)`.
+- `scope` — defaults to `'singleton'`.
+- `condition` — evaluated during container init. Runs in an inject context (can use `inject()`/`injectConfig()` in default params). If false, the component is excluded.
+
+## 4. Lifecycle decorators
 
 ```ts
-declare function Component(options?: ComponentOptions): HybridClassDecorator;
-declare function Provide<T>(
-  constructor: AnyConstructor<T>,
-  options?: {
-    destroyMethod?: NoArgumentsMethodKeyof<T>;
-    onDestroy?: (inst: T) => void | Promise<void>;
-  },
-): MethodDecorator;
-declare function defineModule(spec: ModuleSpec): ModuleRef;
-
-declare function token<T>(defaultValue: T): Token<T>;
-declare function collection<T>(
-  constructors: readonly Constructor<T>[],
-  options?: CollectionListOptions,
-): Collection<T>;
-declare function computed<T>(
-  extractor: ComputedExtractor<T>,
-): Computed<T>;
-declare function registry<T>(): Registry<T>;
-
-declare function inject<T>(target: TokenLike<T>): T;
-declare function injectOptional<T>(target: TokenLike<T>): T | undefined;
-
-declare function injectLazy<T>(target: TokenLike<T>): Promise<T>;
-declare function injectOptionalLazy<T>(target: TokenLike<T>): Promise<T | undefined>;
-
-declare function injectNamed<T>(collection: Collection<T>, name: string | symbol): T;
-declare function injectOptionalNamed<T>(collection: Collection<T>, name: string | symbol): T | undefined;
-declare function injectAll<T>(decorator: ClassDecorator): readonly T[];
-
-declare function injectMap<T>(collection: Collection<T>): ReadonlyMap<string | symbol, T>;
-declare function injectSet<T>(collection: Collection<T>): ReadonlySet<T>;
-declare function injectList<T>(
-  collection: Collection<T>,
-  options?: CollectionListOptions,
-): readonly T[];
+declare function OnConstruct(): MethodDecorator;
+declare function OnApplicationReady(): MethodDecorator;
+declare function OnDestroy(): MethodDecorator;
 ```
-
-Notes:
-
-- No chained methods on `inject`.
-- Optional injection is exposed via dedicated `injectOptionalXxx(...)` APIs (no options object).
-- `inject*` APIs may only be used in constructor parameter defaults, `computed(...)` extractors, and token/class lifecycle default parameters.
-- `computed(...)` extractor signature is strict: `() => TokenLike<T> | undefined`.
-- `Collection<T>` is not `TokenLike<T>` and cannot be resolved directly; it is only used with `injectMap`, `injectSet`, and `injectList`.
-- `collection(...)` defaults to `'provided'` order when `options.order` is omitted.
-- `collection(...)` validates named components at runtime and throws if a constructor is not decorated with `@Component({ name })`.
-- External constructors are valid `TokenLike` targets for `inject*` and `container.provide(tokenLike, provider)`.
-
-## 4. Container API
-
-```ts
-class Container {
-  provide<T>(constructor: Constructor<T>): this;
-  provide<T>(token: TokenLike<T>, provider: Provider<T>): this;
-  provide(entries: readonly (Constructor<any> | [TokenLike<any>, Provider<any>])[]): this;
-  use(module: ModuleRef): this;
-  createScope(name?: string): ScopeRef;
-  resolve<T>(target: TokenLike<T>): Promise<T>;
-  destroy(): Promise<void>;
-}
-```
-
-Only `resolve(...)` is used to obtain instances.
-`provide(constructor)` is a no-op registration used to ensure constructor import/visibility.
-`provide(tokenLike, provider)` accepts both `Token<T>` and external constructors (e.g. `Sequelize`) as registration keys.
-
-## 5. Provider categories
-
-### 5.1 Component provider (constructor directly)
-
-```ts
-@Component()
-class UserService {}
-```
-
-### 5.2 Token provider
-
-```ts
-const SequelizeToken = token<Sequelize>(
-  new Sequelize('postgres://localhost/example'),
-);
-```
-
-### 5.3 Method provider via `@Provide(...)`
-
-```ts
-class DatabaseModule {
-  @Provide(Sequelize)
-  public getSequelize(): Sequelize {
-    return new Sequelize('postgres://localhost/example');
-  }
-}
-```
-
-### 5.4 Collection + conditional computed provider
-
-```ts
-@Component()
-abstract class Pet {}
-
-const PET_DOG = Symbol('dog');
-
-@Component({ name: PET_DOG })
-class Dog extends Pet {}
-
-@Component({ name: 'cat' })
-class Cat extends Pet {}
-
-const AllPets = collection<Pet>([Dog, Cat], { order: 'provided' });
-const SelectedPetNameToken = token<string | symbol>('cat');
-
-const SelectedPet = computed(
-  () => AllPets.get(inject(SelectedPetNameToken)),
-);
-```
-
-The computed token is not bound to a single provider source and can extract from any runtime condition.
-Named bindings are declared through `@Component({ name })` and support both `string` and `symbol`.
-With `collection(...)`, `container.provide([Dog, Cat])` is not required for collection injection.
-`container.provide(Dog)` / `container.provide(Cat)` are valid import-assurance calls when only named-resolution (`injectNamed(AllPets, ...)`) paths are used.
-
-### 5.5 Dynamic registry provider (computed-based)
-
-```ts
-const DriverRegistry = registry<Driver>();
-export const registerPsql = DriverRegistry.register('psql', PsqlDriver);
-export const SelectedDriverNameToken = token<string>('psql');
-
-const DriverComputed = computed(
-  () => DriverRegistry.get(inject(SelectedDriverNameToken)),
-);
-```
-
-## 6. Scopes and lifecycle
-
-- `singleton`: container lifetime
-- `scoped`: child-scope lifetime
-- `transient`: per-resolution lifetime
 
 Lifecycle order:
 
-1. provider created
-2. optional `onInit` / `@PostConstruct`
-3. `onDestroy` / `@BeforeDestroy` in reverse dependency order during scope/container destroy
+1. **Construction** — constructor runs, default params call `inject()`.
+2. **`@OnConstruct()`** — async post-construction initializer. Container waits for completion.
+3. **`@OnApplicationReady()`** — fires after the entire dependency graph of a `resolve()` call is wired. All components are available.
+4. **`@OnDestroy()`** — fires during `container.destroy()` or `scope.destroy()`, in **reverse dependency order**.
 
-## 7. Full example
+## 5. Providers
+
+### 5.1 Token
+
+A typed named value with a factory default. Used for non-class injectables (primitives, interfaces, external classes).
+
+```ts
+declare class Token<T> {
+  readonly factory: () => Awaitable<T>;
+}
+
+declare function token<T>(
+  factory: () => Awaitable<T>,
+  options?: ProvideOptions<T>,
+): Token<T>;
+```
+
+The factory runs in an inject context.
+
+### 5.2 Computed
+
+A dynamic provider that resolves based on runtime conditions. Primary mechanism for config-driven selection.
+
+```ts
+declare class Computed<T> {
+  readonly resolve: () => Awaitable<T>;
+}
+
+declare function computed<T>(
+  resolve: () => Awaitable<T>,
+): Computed<T>;
+```
+
+### 5.3 Method provider (`@Provide`)
+
+For external classes whose constructors you don't control.
+
+```ts
+interface ProvideOptions<T> extends ComponentOptions {
+  onConstruct?: NoArgsMethodKeyof<T> | ((instance: T) => Awaitable<void>);
+  onApplicationReady?: NoArgsMethodKeyof<T> | ((instance: T) => Awaitable<void>);
+  onDestroy?: NoArgsMethodKeyof<T> | ((instance: T) => Awaitable<void>);
+}
+
+declare function Provide<T>(
+  clazz: AnyConstructor<T>,
+  options?: ProvideOptions<T>,
+): MethodDecorator;
+```
+
+A class containing `@Provide` methods is called a *module class*. It doesn't need a special decorator — any class can contain `@Provide` methods.
+
+## 6. Injection APIs
+
+### 6.1 `inject()`
+
+```ts
+declare function inject<T>(injectable: Injectable<T>): T;
+declare function inject<T>(injectable: Injectable<T>, name: Qualifier): T;
+declare function inject<T>(injectable: Injectable<T>, optional: true): T | undefined;
+declare function inject<T>(injectable: Injectable<T>, name: Qualifier, optional: true): T | undefined;
+```
+
+**Inject points** — `inject()` may only be called in default parameters at:
+
+1. `@Component` class constructors
+2. `token()` factory functions
+3. `computed()` resolve functions
+4. `@Provide` method parameters
+5. `ComponentOptions.condition` functions
+
+Calling `inject()` outside these points throws a runtime error.
+
+### 6.2 `injectRef()` — circular references
+
+```ts
+declare class Ref<T> {
+  get(): T;
+}
+
+declare function injectRef<T>(func: () => Injectable<T>): Ref<T>;
+declare function injectRef<T>(func: () => Injectable<T>, optional: true): Ref<T> | undefined;
+```
+
+The callback is deferred — the injectable is resolved after the requesting component's construction. Calling `ref.get()` during construction throws.
+
+### 6.3 Collection injection
+
+```ts
+declare function injectAll<T>(injectable: Injectable<T>, order?: CollectionOrder): readonly T[];
+declare function injectSet<T>(injectable: Injectable<T>): ReadonlySet<T>;
+declare function injectMap<T>(injectable: Injectable<T>): ReadonlyMap<Qualifier, T>;
+```
+
+Returns all `@Component`-decorated subclasses/implementations of the target that are registered in the container. Only explicitly imported components are included.
+
+- `injectAll` defaults to `'provided'` order.
+- `injectMap` keys by `ComponentOptions.name`. Components without a name are excluded from the map.
+
+### 6.4 Notes
+
+- No chained methods or options objects on `inject`.
+- Optional injection uses `true` literal as a flag, not a separate function.
+- Named injection uses `Qualifier` (string or symbol), not a separate function.
+- Collections are implicit — derived from class hierarchy + `@Component` registration. No explicit `collection()` or `registry()` needed.
+
+## 7. Reflection
+
+```ts
+declare function getComponentMetadata<T>(
+  target: Injectable<T> | T,
+): ProvideOptions<T>;
+```
+
+Returns the metadata attached by `@Component` or `@Provide`. Useful for reading the component name at runtime.
+
+## 8. Event system
+
+Two event definition styles: class-based (named) and token-based (typed).
+
+```ts
+// class-based
+declare function EventData(name: string): ClassDecorator;
+
+// token-based
+declare class Event<T> {
+  readonly data: T;
+}
+declare function event<T>(): Event<T>;
+
+// listener
+declare function EventListener<T>(
+  data: AnyConstructor<T> | Event<T>,
+): MethodDecorator;
+
+// dispatcher (built-in component, inject via inject(EventDispatcher))
+declare class EventDispatcher {
+  dispatch<T>(data: T): Promise<void>;
+  dispatch<T>(event: Event<T>, data: T): Promise<void>;
+}
+```
+
+- Class-based events: define a class with `@EventData(name)`, dispatch instances.
+- Token-based events: define with `event<T>()`, dispatch with `dispatch(token, data)`.
+- Listeners are called in dependency order.
+- `dispatch()` is async and waits for all listeners.
+
+## 9. Container & scope
+
+```ts
+declare class Container {
+  provide<T>(
+    target: Injectable<T>,
+    factory: () => Awaitable<T>,
+    options?: ProvideOptions<T>,
+  ): void;
+
+  import(...injectables: Injectable<any>[]): void;
+  use(...injectables: Injectable<any>[]): void;
+
+  resolve<T>(injectable: Injectable<T>): Promise<T>;
+
+  createScope(name?: string): Scope;
+
+  destroy(): Promise<void>;
+}
+
+declare class Scope {
+  resolve<T>(injectable: Injectable<T>): Promise<T>;
+  destroy(): Promise<void>;
+}
+```
+
+- `provide()` — override or register a provider. Factory runs in inject context.
+- `import()` — ensure injectables are registered. Needed for collection injection.
+- `use()` — ensure injectables are instantiated and `@Provide` methods processed before `resolve()`.
+- `resolve()` — resolve an injectable. Triggers async init chain.
+- `createScope()` — create a child scope. Scoped providers get fresh instances; singletons are shared.
+- `destroy()` — teardown. Calls `@OnDestroy` in reverse dependency order.
+
+### Scope semantics
+
+| Scope | Container | Child Scope |
+|---|---|---|
+| `singleton` | Shared instance | Same instance as parent |
+| `scoped` | Error if resolved from root | Fresh instance per scope |
+| `transient` | New per injection | New per injection |
+
+## 10. Async resolution — Suspense style
+
+All `inject()` calls are synchronous. Async providers (token with async factory, `@OnConstruct` async method) are handled via a Suspense-style mechanism:
+
+1. When `inject()` encounters an unresolved async provider, it throws a `Promise`.
+2. The container catches the Promise, awaits it, then re-invokes the factory from the top.
+3. On retry, previously resolved dependencies return cached values.
+4. This repeats until the factory completes without throwing.
+
+**Assumption:** all `inject()` calls happen before any side effects in the factory. Default parameters satisfy this naturally.
+
+## 11. Full example
 
 ```ts
 import {
   Container,
   Component,
   Provide,
-  defineModule,
+  OnConstruct,
+  OnApplicationReady,
+  OnDestroy,
+  EventData,
+  EventListener,
+  EventDispatcher,
+  event,
   token,
-  collection,
   computed,
-  registry,
   inject,
-  injectOptional,
+  injectRef,
+  injectAll,
   injectMap,
-  injectLazy,
-  injectNamed,
-} from '@kavri/core';
+  getComponentMetadata,
+} from 'kavri';
+import { Configuration, createConfigSchema, injectConfig } from 'kavri/config';
+import { z } from 'zod';
 
-const SelectedPetNameToken = token<string | symbol>('cat');
-const SelectedDriverNameToken = token<string>('psql');
+// --- config ---
 
-@Component()
-abstract class Pet { abstract speak(): string; }
-
-const PET_DOG = Symbol('dog');
-
-@Component({ name: PET_DOG })
-class Dog extends Pet { speak() { return 'woof'; } }
-
-@Component({ name: 'cat' })
-class Cat extends Pet { speak() { return 'meow'; } }
-
-const AllPets = collection<Pet>([Dog, Cat], { order: 'provided' });
-
-const SelectedPet = computed(
-  () => AllPets.get(inject(SelectedPetNameToken)),
-);
-
-interface Driver { query(sql: string): Promise<string>; }
-class Sequelize {
-  constructor(public readonly url: string) {}
-  close() {}
+@Configuration("database")
+class DbConfig {
+  driver!: string;
+  host!: string;
+  port!: number;
 }
-class PsqlDriver implements Driver { async query(sql: string) { return `psql:${sql}`; } }
-class MysqlDriver implements Driver { async query(sql: string) { return `mysql:${sql}`; } }
 
-const DriverRegistry = registry<Driver>();
-const registerPsql = DriverRegistry.register('psql', PsqlDriver);
-const registerMysql = DriverRegistry.register('mysql', MysqlDriver);
+const AppConfig = createConfigSchema('app', z.object({
+  name: z.string().default('demo'),
+}));
 
-const DriverComputed = computed(
-  () => DriverRegistry.get(inject(SelectedDriverNameToken)),
+// --- providers ---
+
+abstract class Driver {
+  abstract query(sql: string): Promise<any>;
+}
+
+@Component({ name: 'psql' })
+class PsqlDriver extends Driver {
+  async query(sql: string) { return `psql:${sql}`; }
+}
+
+@Component({ name: 'mysql' })
+class MysqlDriver extends Driver {
+  async query(sql: string) { return `mysql:${sql}`; }
+}
+
+const SelectedDriver = computed<Driver>(
+  (cfg = injectConfig(DbConfig), d = inject(Driver, cfg.driver)) => d,
 );
 
-const LoggerToken = token<{ info(data: unknown): void }>({ info: console.log });
+// --- external class via @Provide ---
 
-const MetricsToken = token<{ emit(name: string): void } | undefined>(undefined);
+declare class Redis {
+  connect(url: string): Promise<void>;
+  disconnect(): Promise<void>;
+}
 
-class DatabaseProviders {
-  @Provide(Sequelize, { destroyMethod: 'close' })
-  public getSequelize(): Sequelize {
-    return new Sequelize('postgres://localhost/example');
+class RedisModule {
+  @Provide(Redis, { onDestroy: 'disconnect' })
+  async createRedis(): Promise<Redis> {
+    const r = new Redis();
+    await r.connect('redis://localhost');
+    return r;
   }
 }
 
-const DatabaseModule = defineModule({
-  name: 'database',
-  providers: [DatabaseProviders],
-});
+// --- events ---
+
+@EventData('user.created')
+class UserCreatedEvent {
+  constructor(public readonly userId: string) {}
+}
+
+const CacheCleared = event<{ scope: string }>();
+
+// --- components ---
 
 @Component()
-class AppService {
+class UserService {
   constructor(
-    private readonly selectedPet = inject(SelectedPet),
-    private readonly driver = inject(DriverComputed),
-    private readonly sequelize = inject(Sequelize),
-    private readonly pets = injectMap(AllPets),
-    private readonly maybeMetrics = injectOptional(MetricsToken),
-    private readonly loggerPromise = injectLazy(LoggerToken),
-    private readonly dog = injectNamed(AllPets, PET_DOG),
+    private readonly driver = inject(SelectedDriver),
+    private readonly events = inject(EventDispatcher),
+    private readonly redis = inject(Redis),
   ) {}
 
-  async run() {
-    const db = await this.driver.query('select 1');
-    const logger = await this.loggerPromise;
-    logger.info({
-      db,
-      dog: this.dog.speak(),
-      sequelizeUrl: this.sequelize.url,
-      availablePets: Array.from(this.pets.keys()),
-      hasMetrics: !!this.maybeMetrics,
-    });
-    return `${this.selectedPet.speak()} | ${db}`;
+  @OnConstruct()
+  async init() { /* warm cache */ }
+
+  async createUser(name: string) {
+    await this.driver.query(`insert into users ...`);
+    await this.events.dispatch(new UserCreatedEvent('u1'));
+    await this.events.dispatch(CacheCleared, { scope: 'users' });
   }
 }
 
-registerPsql();
-registerMysql();
-const app = new Container();
-app.use(DatabaseModule);
+@Component()
+class AuditLogger {
+  @EventListener(UserCreatedEvent)
+  async onUserCreated(ev: UserCreatedEvent) {
+    console.log(`audit: user ${ev.userId} created`);
+  }
 
-const service = await app.resolve(AppService);
-console.log(await service.run());
-await app.destroy();
+  @EventListener(CacheCleared)
+  onCacheCleared(data: { scope: string }) {
+    console.log(`audit: cache cleared for ${data.scope}`);
+  }
+}
+
+// --- bootstrap ---
+
+@Import(PsqlDriver)
+@Use(RedisModule, AuditLogger)
+class App {
+  constructor(
+    private readonly config = injectConfig(AppConfig),
+    private readonly users = inject(UserService),
+    private readonly drivers = injectMap(Driver),
+  ) {}
+
+  @OnApplicationReady()
+  async ready() {
+    console.log(`${this.config.name} ready, drivers: ${[...this.drivers.keys()]}`);
+  }
+
+  @OnDestroy()
+  async shutdown() {
+    console.log('shutting down');
+  }
+}
+
+const container = new Container();
+container.provide(ConfigOptions, (cfg = inject(ConfigOptions)) => ({
+  ...cfg,
+  configFiles: ['app.yaml'],
+}));
+
+const app = await container.resolve(App);
+await app.users.createUser('alice');
+await container.destroy();
 ```
