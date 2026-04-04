@@ -4,36 +4,9 @@
 
 Configuration is a first-class subsystem because it controls provider factories, computed selectors, and conditional components at runtime. The config module is built on the IoC core and follows the same injection patterns.
 
-## 2. Schema definition
+## 2. Schema definition — Zod only
 
-Two styles: class-based (`@Configuration`) and zod-based (`createConfigSchema`). Both produce schemas that can be injected via `injectConfig()`.
-
-### 2.1 Class-based — `@Configuration(prefix)`
-
-```ts
-declare function Configuration(prefix: string): ClassDecorator;
-```
-
-Marks a class as a typed configuration schema bound to a config key prefix. Properties are populated from config sources. Supports class-validator decorators for validation.
-
-```ts
-@Configuration("database")
-class DatabaseConfig {
-  driver!: string;       // database.driver
-  host!: string;         // database.host
-  port!: number;         // database.port
-  username!: string;     // database.username
-  password!: string;     // database.password
-}
-
-@Configuration("app.feature")
-class FeatureFlags {
-  metricsEnabled!: boolean;   // app.feature.metricsEnabled
-  betaMode!: boolean;         // app.feature.betaMode
-}
-```
-
-### 2.2 Zod-based — `createConfigSchema(prefix, schema)`
+All config schemas are defined using Zod. The schema is bound to a config key prefix.
 
 ```ts
 declare type ZodSchema<T> = unknown;
@@ -49,37 +22,45 @@ declare function createConfigSchema<T>(
 ): ConfigSchema<T>;
 ```
 
+The prefix maps to a nested key path in config files:
+
 ```ts
 import { z } from 'zod';
 
+// reads from `database:` in YAML
+const DatabaseConfig = createConfigSchema('database', z.object({
+  driver: z.string(),
+  host: z.string(),
+  port: z.number().default(5432),
+  username: z.string(),
+  password: z.string(),
+  database: z.string(),
+}));
+
+// reads from `app:` in YAML
 const AppConfig = createConfigSchema('app', z.object({
   name: z.string().default('my-app'),
   env: z.enum(['dev', 'staging', 'prod']).default('dev'),
   debug: z.boolean().default(false),
-}));
-
-const CorsConfig = createConfigSchema('cors', z.object({
-  origins: z.array(z.string()).default(['*']),
-  credentials: z.boolean().default(false),
 }));
 ```
 
 ## 3. Config injection
 
 ```ts
-declare function injectConfig<T>(node: Constructor<T> | ConfigSchema<T>): T;
-declare function injectConfig<T>(node: Constructor<T> | ConfigSchema<T>, optional: true): T | undefined;
+declare function injectConfig<T>(schema: ConfigSchema<T>): T;
+declare function injectConfig<T>(schema: ConfigSchema<T>, optional: true): T | undefined;
 ```
 
-`injectConfig()` follows the same inject-point rules as `inject()` — it may only be called in constructor default params, token factories, computed resolvers, `@Provide` method params, and condition functions.
+Follows the same inject-point rules as `inject()`.
 
 ```ts
 @Component()
 class AppService {
   constructor(
-    private readonly db = injectConfig(DatabaseConfig),         // required
-    private readonly app = injectConfig(AppConfig),             // required
-    private readonly flags = injectConfig(FeatureFlags, true),  // optional
+    private readonly db = injectConfig(DatabaseConfig),       // required
+    private readonly app = injectConfig(AppConfig),           // required
+    private readonly telemetry = injectConfig(TelemetryConfig, true), // optional
   ) {}
 }
 ```
@@ -88,11 +69,11 @@ class AppService {
 
 Sources are resolved in order (highest priority wins):
 
-1. **Runtime override** — `Container.provide()` on the config schema
+1. **`container.provide()` / `@Provide`** — runtime override of the config schema
 2. **CLI arguments** — matched by `argvPrefix` (e.g., `--app.name=foo`)
 3. **Environment variables** — matched by `envPrefix` (e.g., `APP_NAME=foo`)
-4. **Config files** — YAML, JSON, or TOML. Loaded in order; later files override earlier ones.
-5. **Schema defaults** — class property defaults or zod `.default()` values
+4. **Config files** — YAML, JSON, or TOML. Loaded in order; later files override.
+5. **Zod defaults** — `.default()` values in the schema
 
 ## 5. ConfigOptions — customizing sources
 
@@ -108,68 +89,53 @@ interface ConfigOptions {
 declare const ConfigOptions: Token<ConfigOptions>;
 ```
 
-Override `ConfigOptions` via `Container.provide()` to customize where config values come from:
+Use `container.decorate()` or `@Decorate` to customize:
 
 ```ts
-const container = new Container();
-container.provide(ConfigOptions, (defaults = inject(ConfigOptions)) => ({
-  ...defaults,
-  configFiles: ['config/app.yaml', 'config/app.local.yaml'],
-  env: process.env as Record<string, string>,
-  argv: process.argv,
+// imperative
+container.decorate(ConfigOptions, (prev) => ({
+  ...prev,
+  configFiles: ['config/app.yaml'],
   envPrefix: 'MYAPP_',
-  argvPrefix: '--myapp.',
 }));
+
+// declarative
+@Component()
+@Decorate(ConfigOptions, (prev) => ({
+  ...prev,
+  configFiles: ['config/app.yaml'],
+}))
+class ConfigModule {}
 ```
 
 ## 6. Validation & failure semantics
 
 - **Missing required values** — startup fails with a clear error naming the missing key.
-- **Parse/validation errors** — startup fails with validation details (zod errors or class-validator errors).
-- **Type coercion** — env vars and CLI args are strings. The config system coerces to target types (number, boolean, arrays) based on the schema.
-- **Unknown keys** — ignored by default. Can be made strict per schema if needed.
+- **Parse/validation errors** — startup fails with zod validation details.
+- **Type coercion** — env vars and CLI args are strings; coerced to target types based on the schema.
+- **Unknown keys** — ignored by default.
 
 ## 7. Config-driven component selection
 
-The primary pattern for selecting providers based on config is `computed()`:
+Use `computed()` + `inject(Base, name)`:
 
 ```ts
-@Configuration("database")
-class DbConfig {
-  driver!: string;  // 'psql' | 'mysql'
-}
+const DbConfig = createConfigSchema('database', z.object({
+  driver: z.string(),
+}));
 
-abstract class Driver {
-  abstract query(sql: string): Promise<any>;
-}
-
-@Component({ name: 'psql' })
-class PsqlDriver extends Driver { ... }
-
-@Component({ name: 'mysql' })
-class MysqlDriver extends Driver { ... }
-
-// computed selects the driver based on config at resolution time
 const SelectedDriver = computed<Driver>(
   (cfg = injectConfig(DbConfig), d = inject(Driver, cfg.driver)) => d,
 );
-
-@Component()
-class Repository {
-  constructor(private readonly driver = inject(SelectedDriver)) {}
-}
 ```
-
-This pattern replaces the need for dedicated `configSelector()` or `configRegistry()` helpers — `computed()` + `inject(Base, name)` covers all config-driven selection.
 
 ## 8. Conditional components via config
 
 ```ts
-@Configuration("telemetry")
-class TelemetryConfig {
-  enabled!: boolean;
-  endpoint!: string;
-}
+const TelemetryConfig = createConfigSchema('telemetry', z.object({
+  enabled: z.boolean().default(false),
+  endpoint: z.string().optional(),
+}));
 
 @Component({
   condition: (cfg = injectConfig(TelemetryConfig, true)) => cfg?.enabled ?? false,
@@ -179,28 +145,19 @@ class TelemetryService {
   send(metric: string, value: number) {}
 }
 
-// consumers use optional injection since telemetry may be disabled
 @Component()
 class AppService {
   constructor(private readonly telemetry = inject(TelemetryService, true)) {}
-
-  doWork() {
-    this.telemetry?.send('work.done', 1);
-  }
 }
 ```
 
 ## 9. Introspection
 
 ```ts
-declare function getAllRegisteredConfigurationNodes(): (Constructor<any> | ConfigSchema<any>)[];
+declare function getAllRegisteredConfigurationNodes(): ConfigSchema<any>[];
 ```
 
-Returns all registered config schemas. Static — does not require a container instance. Use for:
-
-- Generating JSON Schema documentation
-- Generating CLI `--help` text
-- Config validation tooling
+Returns all registered config schemas. Static — no container needed. Use for generating JSON Schema documentation or CLI help text.
 
 ## 10. Full example
 
@@ -209,16 +166,15 @@ import {
   Container,
   Component,
   Provide,
-  Import,
+  Decorate,
+  Touch,
   Use,
-  OnApplicationReady,
   inject,
   injectAll,
   computed,
   token,
 } from 'kavri';
 import {
-  Configuration,
   ConfigOptions,
   ConfigSchema,
   createConfigSchema,
@@ -227,25 +183,7 @@ import {
 } from 'kavri/config';
 import { z } from 'zod';
 
-// ---- class-based config ----
-
-@Configuration("database")
-class DbConfig {
-  driver!: string;
-  host!: string;
-  port!: number;
-  username!: string;
-  password!: string;
-  database!: string;
-}
-
-@Configuration("telemetry")
-class TelemetryConfig {
-  enabled!: boolean;
-  endpoint!: string;
-}
-
-// ---- zod-based config ----
+// ---- config schemas ----
 
 const AppConfig = createConfigSchema('app', z.object({
   name: z.string().default('demo'),
@@ -253,9 +191,23 @@ const AppConfig = createConfigSchema('app', z.object({
   debug: z.boolean().default(false),
 }));
 
+const DbConfig = createConfigSchema('database', z.object({
+  driver: z.string(),
+  host: z.string(),
+  port: z.number().default(5432),
+  username: z.string(),
+  password: z.string(),
+  database: z.string(),
+}));
+
 const CacheConfig = createConfigSchema('cache', z.object({
   url: z.string(),
   ttl: z.number().default(3600),
+}));
+
+const TelemetryConfig = createConfigSchema('telemetry', z.object({
+  enabled: z.boolean().default(false),
+  endpoint: z.string().optional(),
 }));
 
 // ---- drivers ----
@@ -274,7 +226,6 @@ class MysqlDriver extends Driver {
   async query(sql: string) { return `mysql:${sql}`; }
 }
 
-// config-driven driver selection
 const SelectedDriver = computed<Driver>(
   (cfg = injectConfig(DbConfig), d = inject(Driver, cfg.driver)) => d,
 );
@@ -297,19 +248,29 @@ declare class Redis {
 }
 
 @Component()
-class CacheModule {
-  @Provide(Redis, { onDestroy: 'disconnect' })
-  async createRedis(cfg = injectConfig(CacheConfig)): Promise<Redis> {
-    const r = new Redis();
-    await r.connect(cfg.url);
-    return r;
-  }
-}
+@Provide(Redis, async (cfg = injectConfig(CacheConfig)) => {
+  const r = new Redis();
+  await r.connect(cfg.url);
+  return r;
+}, { onDestroy: 'disconnect' })
+class CacheModule {}
+
+// ---- config module ----
+
+@Component()
+@Decorate(ConfigOptions, (prev) => ({
+  ...prev,
+  configFiles: ['config/app.yaml'],
+  env: process.env as Record<string, string>,
+  argv: process.argv,
+  envPrefix: 'MYAPP_',
+}))
+class ConfigModule {}
 
 // ---- application ----
 
-@Import(PsqlDriver, MysqlDriver)
-@Use(CacheModule)
+@Touch(PsqlDriver, MysqlDriver)
+@Use(ConfigModule, CacheModule)
 class Application {
   constructor(
     private readonly appConfig = injectConfig(AppConfig),
@@ -319,16 +280,9 @@ class Application {
     private readonly drivers = injectAll(Driver, 'alphabetical'),
   ) {}
 
-  @OnApplicationReady()
-  async ready() {
-    const driverNames = this.drivers.length;
-    console.log(`${this.appConfig.name} ready (${this.appConfig.env}), ${driverNames} drivers`);
-    this.telemetry?.send('app.ready', 1);
-  }
-
   async run() {
     const result = await this.driver.query('select 1');
-    console.log(result);
+    console.log(`${this.appConfig.name} (${this.appConfig.env}): ${result}`);
     this.telemetry?.send('query.executed', 1);
   }
 }
@@ -336,38 +290,11 @@ class Application {
 // ---- introspection ----
 
 const allSchemas = getAllRegisteredConfigurationNodes();
-// returns: [DbConfig, TelemetryConfig, AppConfig, CacheConfig]
+// [AppConfig, DbConfig, CacheConfig, TelemetryConfig]
 
 // ---- bootstrap ----
 
-// config file: config/app.yaml
-// ---
-// app:
-//   name: my-app
-//   env: prod
-// database:
-//   driver: psql
-//   host: db.example.com
-//   port: 5432
-//   username: admin
-//   password: secret
-//   database: mydb
-// cache:
-//   url: redis://localhost:6379
-// telemetry:
-//   enabled: true
-//   endpoint: https://telemetry.example.com
-
 const container = new Container();
-
-container.provide(ConfigOptions, (defaults = inject(ConfigOptions)) => ({
-  ...defaults,
-  configFiles: ['config/app.yaml'],
-  env: process.env as Record<string, string>,
-  argv: process.argv,
-  envPrefix: 'MYAPP_',
-}));
-
 const app = await container.resolve(Application);
 await app.run();
 await container.destroy();

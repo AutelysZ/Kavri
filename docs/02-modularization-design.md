@@ -2,114 +2,109 @@
 
 ## 1. Purpose
 
-Modules group cohesive sets of providers, imports, and side-effect components. A module is simply a `@Component()` class that uses `@Provide` methods and/or `@Import`/`@Use` decorators to organize related providers.
+Modules group cohesive sets of providers and component registrations. A module is a `@Component()` class that uses `@Provide`, `@Decorate`, `@Touch`, and/or `@Use` decorators.
 
-There is no root/local module hierarchy. ESM already handles physical modularization. Kavri modules are purely logical groupings for provider organization. `@Provide` is not limited to modules — any `@Component()` class can use it.
+There is no root/local module hierarchy. ESM already handles physical modularization. Kavri modules are purely logical groupings for provider organization.
 
 ## 2. Core APIs
 
+### `@Touch(...injectables)` — register without instantiating
+
+Ensures the listed injectables are **registered** when the decorated class is resolved. Like Unix `touch` — acknowledge existence, nothing more.
+
 ```ts
-declare function Import(...injectables: Injectable<any>[]): ClassDecorator;
+declare function Touch(...injectables: Injectable<any>[]): ClassDecorator;
+```
+
+Use for making implementations available for collection injection (`injectAll`/`injectMap`/`injectSet`). In ESM, classes that are never imported are invisible to the container — `@Touch` is how you declare "this implementation exists."
+
+### `@Use(...injectables)` — instantiate and activate
+
+Ensures the listed injectables are **instantiated** (and their `@Provide`/`@Decorate` decorators processed) before the decorated class is resolved.
+
+```ts
 declare function Use(...injectables: Injectable<any>[]): ClassDecorator;
 ```
 
-### `@Import(...injectables)`
-
-Ensures the listed injectables are **registered** when the decorated class is resolved. This is necessary for:
-
-- Making specific implementations available for collection injection (`injectAll`/`injectMap`/`injectSet`).
-- Declaring which concrete classes a module exposes.
-
-Import does not instantiate — it only registers.
-
-### `@Use(...injectables)`
-
-Ensures the listed injectables are **instantiated** (and their `@Provide` methods processed) before the decorated class is resolved. Use for:
-
-- Components with `@Provide` methods that must run.
-- Side-effect components (event subscribers, background workers).
-- Any dependency that must be alive for correct behavior.
+Use for:
+- Components with `@Provide`/`@Decorate` that must be processed
+- Side-effect components (event subscribers, background workers)
 
 ### Container equivalents
 
 ```ts
 class Container {
-  import(...injectables: Injectable<any>[]): void;
+  touch(...injectables: Injectable<any>[]): void;
   use(...injectables: Injectable<any>[]): void;
 }
 ```
 
-These are the imperative equivalents of the decorators. Use them when configuration is dynamic or happens at the container level.
+### `@Provide` and `@Decorate` on modules
 
-## 3. What is a module?
-
-A module is a `@Component()` class that contains `@Provide` methods. It may also use `@Import` and `@Use` decorators to declare its dependencies.
+Modules use `@Provide` and `@Decorate` as class decorators to register and wrap providers:
 
 ```ts
 @Component()
-@Import(PsqlDriver, MysqlDriver)
-class DatabaseModule {
-  @Provide(DataSource, { onDestroy: 'close' })
-  async createDataSource(cfg = injectConfig(DbConfig)): Promise<DataSource> {
-    return new DataSource(cfg.url);
-  }
-}
+@Provide(Redis, async (config = injectConfig(RedisConfig)) => {
+  const r = new Redis();
+  await r.connect(config.url);
+  return r;
+}, { onDestroy: 'disconnect' })
+@Decorate(ConfigOptions, (prev) => ({
+  ...prev,
+  configFiles: ['app.yaml'],
+}))
+class AppModule {}
 ```
 
-To activate a module, pass it to `container.use()` or reference it in `@Use(...)`:
+`@Provide`/`@Decorate` can be used on **any** `@Component()` class, not just dedicated module classes.
 
-```ts
-container.use(DatabaseModule);
-// or
-@Use(DatabaseModule)
-class Application { ... }
-```
+## 3. Touch vs Use
+
+| | `@Touch` / `container.touch()` | `@Use` / `container.use()` |
+|---|---|---|
+| **What it does** | Registers injectable (makes it known) | Instantiates injectable (triggers side effects) |
+| **Processes `@Provide`/`@Decorate`?** | No | Yes |
+| **When to use** | Implementations for collections | Modules, side-effect components |
+| **Ordering guarantee** | No (just registration) | Yes (instantiated before dependant) |
 
 ## 4. Rules
 
-- **Module is optional.** Small applications can use `Container.provide()` and `Container.import()` directly.
-- **Module does not change resolution semantics.** Provider scope, lifecycle, and injection behavior are identical whether a provider is registered via a module or directly.
+- **Module is optional.** Small applications can use `container.provide()` and `container.touch()` directly.
+- **Module does not change resolution semantics.** Provider scope, lifecycle, and injection behavior are identical whether registered via a module or directly.
 - **Modules can compose.** A module can `@Use` other modules.
 - **No circular module dependencies.** If module A uses module B and B uses A, startup fails.
-- **`@Import` is additive.** Importing the same injectable multiple times is safe (idempotent).
+- **`@Touch` is additive.** Touching the same injectable multiple times is idempotent.
 - **`@Use` guarantees ordering.** Components listed in `@Use` are instantiated before the decorated class.
 
-## 5. Import vs Use
-
-| | `@Import` / `container.import()` | `@Use` / `container.use()` |
-|---|---|---|
-| **What it does** | Registers injectable (makes it available) | Instantiates injectable (triggers side effects) |
-| **Processes `@Provide`?** | No | Yes |
-| **When to use** | Concrete implementations for collections | Components with @Provide, side-effect components |
-| **Ordering guarantee** | No (just registration) | Yes (instantiated before dependant) |
-
-## 6. Full example
+## 5. Full example
 
 ```ts
 import {
   Container,
   Component,
   Provide,
-  Import,
+  Decorate,
+  Touch,
   Use,
-  OnDestroy,
-  EventBus,
   OnEvent,
+  OnDestroy,
   Event,
+  EventBus,
   inject,
   injectAll,
   token,
   computed,
 } from 'kavri';
-import { Configuration, injectConfig } from 'kavri/config';
+import { createConfigSchema, ConfigOptions, injectConfig } from 'kavri/config';
+import { z } from 'zod';
 
 // ---- driver module ----
 
-@Configuration("database")
-class DbConfig {
-  driver!: string;
-  url!: string;
-}
+const DbConfig = createConfigSchema('database', z.object({
+  driver: z.string(),
+  url: z.string(),
+}));
 
 abstract class Driver {
   abstract query(sql: string): Promise<any>;
@@ -130,7 +125,7 @@ const SelectedDriver = computed<Driver>(
 );
 
 @Component()
-@Import(PsqlDriver, MysqlDriver)
+@Touch(PsqlDriver, MysqlDriver)
 class DriverModule {}
 
 // ---- cache module ----
@@ -145,14 +140,21 @@ const RedisUrl = token<string>(() => {
 });
 
 @Component()
-class CacheModule {
-  @Provide(Redis, { onDestroy: 'disconnect' })
-  async createRedis(url = inject(RedisUrl)): Promise<Redis> {
-    const r = new Redis();
-    await r.connect(url);
-    return r;
-  }
-}
+@Provide(Redis, async (url = inject(RedisUrl)) => {
+  const r = new Redis();
+  await r.connect(url);
+  return r;
+}, { onDestroy: 'disconnect' })
+class CacheModule {}
+
+// ---- config module ----
+
+@Component()
+@Decorate(ConfigOptions, (prev) => ({
+  ...prev,
+  configFiles: ['application.yaml'],
+}))
+class ConfigModule {}
 
 // ---- notification module (side-effect) ----
 
@@ -186,8 +188,8 @@ class UserService {
 
 // ---- application root ----
 
-@Use(DriverModule, CacheModule)    // process @Provide methods, register imports
-@Use(EmailNotifier)                // start side-effect listener
+@Use(ConfigModule, DriverModule, CacheModule)
+@Use(EmailNotifier)
 class Application {
   constructor(
     private readonly users = inject(UserService),
@@ -203,8 +205,6 @@ class Application {
 // ---- bootstrap ----
 
 const container = new Container();
-
-// provide the redis URL that CacheModule needs
 container.provide(RedisUrl, () => 'redis://localhost:6379');
 
 const app = await container.resolve(Application);

@@ -2,7 +2,7 @@
 
 ## 1. Scope
 
-This document defines the implementation-ready IoC core API: explicit provider registration, injection via constructor default parameters, lifecycle hooks, event pub/sub, scoped containers, and deterministic async resolution.
+This document defines the implementation-ready IoC core API: explicit provider registration, injection via constructor default parameters, lifecycle hooks, metadata system, scoped containers, and deterministic async resolution.
 
 ## 2. Core types
 
@@ -23,13 +23,11 @@ export type MethodDecorator =
 export type AnyConstructor<T> = abstract new (...args: any[]) => T;
 export type Constructor<T> = abstract new () => T;
 export type NoArgsMethodKeyof<T> = {
-  [P in keyof T]-?: T[P] extends () => any ? P : never;
+  [P in keyof T]-?: T[P] extends (...args: never[]) => any ? P : never;
 }[keyof T];
 ```
 
 ### Injectable type
-
-The universal type accepted by all injection and container APIs:
 
 ```ts
 export type Injectable<T> =
@@ -51,15 +49,10 @@ interface ComponentOptions {
 declare function Component(options?: ComponentOptions): ClassDecorator;
 ```
 
-- `name` — qualifier for named resolution via `inject(Base, name)`.
-- `scope` — defaults to `'singleton'`.
-- `condition` — evaluated during container init. Runs in an inject context (can use `inject()`/`injectConfig()` in default params). If false, the component is excluded.
-
 ## 4. Lifecycle decorators
 
 ```ts
 declare function OnConstruct(): MethodDecorator;
-declare function OnApplicationReady(): MethodDecorator;
 declare function OnDestroy(): MethodDecorator;
 ```
 
@@ -67,14 +60,11 @@ Lifecycle order:
 
 1. **Construction** — constructor runs, default params call `inject()`.
 2. **`@OnConstruct()`** — async post-construction initializer. Container waits for completion.
-3. **`@OnApplicationReady()`** — fires after the entire dependency graph of a `resolve()` call is wired. All components are available.
-4. **`@OnDestroy()`** — fires during `container.destroy()` or `scope.destroy()`, in **reverse dependency order**.
+3. **`@OnDestroy()`** — fires during `container.destroy()` or `scope.destroy()`, in **reverse dependency order**.
 
 ## 5. Providers
 
 ### 5.1 Token
-
-A typed named value with a factory default. Used for non-class injectables (primitives, interfaces, external classes).
 
 ```ts
 declare class Token<T> {
@@ -87,40 +77,43 @@ declare function token<T>(
 ): Token<T>;
 ```
 
-The factory runs in an inject context.
-
 ### 5.2 Computed
-
-A dynamic provider that resolves based on runtime conditions. Primary mechanism for config-driven selection.
 
 ```ts
 declare class Computed<T> {
   readonly resolve: () => Awaitable<T>;
 }
 
-declare function computed<T>(
-  resolve: () => Awaitable<T>,
-): Computed<T>;
+declare function computed<T>(resolve: () => Awaitable<T>): Computed<T>;
 ```
 
-### 5.3 Method provider (`@Provide`)
+### 5.3 `@Provide` — class decorator
 
-For external classes whose constructors you don't control.
+Registers a provider for a class or token. Declarative equivalent of `container.provide()`. Multiple `@Provide` decorators can be stacked. Providers are registered when the class is used (via `@Use` or `container.use()`).
 
 ```ts
 interface ProvideOptions<T> extends ComponentOptions {
   onConstruct?: NoArgsMethodKeyof<T> | ((instance: T) => Awaitable<void>);
-  onApplicationReady?: NoArgsMethodKeyof<T> | ((instance: T) => Awaitable<void>);
   onDestroy?: NoArgsMethodKeyof<T> | ((instance: T) => Awaitable<void>);
 }
 
 declare function Provide<T>(
-  clazz: AnyConstructor<T>,
+  target: Injectable<T>,
+  factory: () => Awaitable<T>,
   options?: ProvideOptions<T>,
-): MethodDecorator;
+): ClassDecorator;
 ```
 
-`@Provide` can be used in any `@Component()` class — it is not limited to a specific "module" concept. Any component can provide external class instances.
+### 5.4 `@Decorate` — class decorator
+
+Wraps an existing provider. Declarative equivalent of `container.decorate()`. The decorator receives the previously resolved value and returns the new value.
+
+```ts
+declare function Decorate<T>(
+  target: Injectable<T>,
+  decorator: (previous: T) => Awaitable<T>,
+): ClassDecorator;
+```
 
 ## 6. Injection APIs
 
@@ -138,10 +131,8 @@ declare function inject<T>(injectable: Injectable<T>, name: Qualifier, optional:
 1. `@Component` class constructors
 2. `token()` factory functions
 3. `computed()` resolve functions
-4. `@Provide` method parameters
+4. `@Provide` / `@Decorate` factory parameters
 5. `ComponentOptions.condition` functions
-
-Calling `inject()` outside these points throws a runtime error.
 
 ### 6.2 `injectRef()` — circular references
 
@@ -154,7 +145,7 @@ declare function injectRef<T>(injectable: Injectable<T>): Ref<T>;
 declare function injectRef<T>(injectable: Injectable<T>, optional: true): Ref<T> | undefined;
 ```
 
-Since `injectRef` is called in default parameters, the evaluation is already deferred — no wrapper function needed. The injectable is resolved after the requesting component's construction. Calling `ref.get()` during construction throws.
+Since `injectRef` is called in default parameters, evaluation is already deferred — no wrapper function needed. The injectable is resolved after the requesting component's construction. Calling `ref.get()` during construction throws.
 
 ### 6.3 Collection injection
 
@@ -164,45 +155,50 @@ declare function injectSet<T>(injectable: Injectable<T>): ReadonlySet<T>;
 declare function injectMap<T>(injectable: Injectable<T>): ReadonlyMap<Qualifier, T>;
 ```
 
-Returns all `@Component`-decorated subclasses/implementations of the target that are registered in the container. Only explicitly imported components are included.
+Returns all `@Component`-decorated subclasses/implementations that are registered in the container. Only explicitly touched components are included.
 
-- `injectAll` defaults to `'provided'` order.
-- `injectMap` keys by `ComponentOptions.name`. Components without a name are excluded from the map.
+## 7. Metadata system
 
-### 6.4 Notes
-
-- No chained methods or options objects on `inject`.
-- Optional injection uses `true` literal as a flag, not a separate function.
-- Named injection uses `Qualifier` (string or symbol), not a separate function.
-- Collections are implicit — derived from class hierarchy + `@Component` registration. No explicit `collection()` or `registry()` needed.
-
-## 7. Reflection
+General-purpose metadata storage for classes and methods. Foundation for all decorator metadata in Kavri.
 
 ```ts
-declare function getComponentMetadata<T>(
-  target: Injectable<T> | T,
-): ProvideOptions<T>;
-```
+declare interface Metadata<T> {
+  readonly name?: string;
 
-Returns the metadata attached by `@Component` or `@Provide`. Useful for reading the component name at runtime.
+  // Decorator factory
+  (value: T): ClassDecorator & MethodDecorator;
+
+  // Class-level
+  set(target: object, value: T): void;
+  of(target: object): T | undefined;
+  has(target: object): boolean;
+
+  // Method-level
+  set(target: object, method: string | symbol, value: T): void;
+  of(target: object, method: string | symbol): T | undefined;
+  has(target: object, method: string | symbol): boolean;
+  methods(target: object): ReadonlyMap<string | symbol, T>;
+}
+
+declare function defineMetadata<T>(name?: string): Metadata<T>;
+
+// Built-in (set by @Component)
+declare const componentName: Metadata<Qualifier>;
+declare const componentScope: Metadata<ProviderScope>;
+```
 
 ## 8. Container & scope
 
 ```ts
 declare class Container {
-  provide<T>(
-    target: Injectable<T>,
-    factory: () => Awaitable<T>,
-    options?: ProvideOptions<T>,
-  ): void;
+  provide<T>(target: Injectable<T>, factory: () => Awaitable<T>, options?: ProvideOptions<T>): void;
+  decorate<T>(target: Injectable<T>, decorator: (previous: T) => Awaitable<T>): void;
 
-  import(...injectables: Injectable<any>[]): void;
+  touch(...injectables: Injectable<any>[]): void;
   use(...injectables: Injectable<any>[]): void;
 
   resolve<T>(injectable: Injectable<T>): Promise<T>;
-
   createScope(name?: string): Scope;
-
   destroy(): Promise<void>;
 }
 
@@ -212,12 +208,12 @@ declare class Scope {
 }
 ```
 
-- `provide()` — override or register a provider. Factory runs in inject context.
-- `import()` — ensure injectables are registered. Needed for collection injection.
-- `use()` — ensure injectables are instantiated and `@Provide` methods processed before `resolve()`.
+- `provide()` — register or replace a provider. Clears any decorators for this target.
+- `decorate()` — wrap an existing provider. Multiple decorators applied in order.
+- `touch()` — register injectables without instantiating. Needed for collection injection.
+- `use()` — instantiate injectables, process their `@Provide`/`@Decorate` decorators.
 - `resolve()` — resolve an injectable. Triggers async init chain.
-- `createScope()` — create a child scope. Scoped providers get fresh instances; singletons are shared.
-- `destroy()` — teardown. Calls `@OnDestroy` in reverse dependency order.
+- `createScope()` — child scope. Scoped providers get fresh instances; singletons shared.
 
 ### Scope semantics
 
@@ -229,14 +225,14 @@ declare class Scope {
 
 ## 9. Async resolution — Suspense style
 
-All `inject()` calls are synchronous. Async providers (token with async factory, `@OnConstruct` async method) are handled via a Suspense-style mechanism:
+All `inject()` calls are synchronous. Async providers are handled via throw-and-retry:
 
 1. When `inject()` encounters an unresolved async provider, it throws a `Promise`.
-2. The container catches the Promise, awaits it, then re-invokes the factory from the top.
+2. The container catches the Promise, awaits it, then re-invokes the factory.
 3. On retry, previously resolved dependencies return cached values.
-4. This repeats until the factory completes without throwing.
+4. Repeats until the factory completes without throwing.
 
-**Assumption:** all `inject()` calls happen before any side effects in the factory. Default parameters satisfy this naturally.
+**Assumption:** all `inject()` calls happen before any side effects. Default parameters satisfy this naturally.
 
 ## 10. Full example
 
@@ -245,28 +241,28 @@ import {
   Container,
   Component,
   Provide,
+  Decorate,
   OnConstruct,
-  OnApplicationReady,
   OnDestroy,
+  Touch,
+  Use,
   token,
   computed,
   inject,
-  injectRef,
   injectAll,
   injectMap,
-  getComponentMetadata,
+  defineMetadata,
+  componentName,
 } from 'kavri';
-import { Configuration, createConfigSchema, injectConfig } from 'kavri/config';
+import { createConfigSchema, ConfigOptions, injectConfig } from 'kavri/config';
 import { z } from 'zod';
 
 // --- config ---
 
-@Configuration("database")
-class DbConfig {
-  driver!: string;
-  host!: string;
-  port!: number;
-}
+const DbConfig = createConfigSchema('database', z.object({
+  driver: z.string(),
+  url: z.string(),
+}));
 
 const AppConfig = createConfigSchema('app', z.object({
   name: z.string().default('demo'),
@@ -300,14 +296,21 @@ declare class Redis {
 }
 
 @Component()
-class RedisModule {
-  @Provide(Redis, { onDestroy: 'disconnect' })
-  async createRedis(): Promise<Redis> {
-    const r = new Redis();
-    await r.connect('redis://localhost');
-    return r;
-  }
-}
+@Provide(Redis, async () => {
+  const r = new Redis();
+  await r.connect('redis://localhost');
+  return r;
+}, { onDestroy: 'disconnect' })
+class RedisModule {}
+
+// --- config customization via @Decorate ---
+
+@Component()
+@Decorate(ConfigOptions, (prev) => ({
+  ...prev,
+  configFiles: ['app.yaml'],
+}))
+class ConfigModule {}
 
 // --- components ---
 
@@ -326,10 +329,22 @@ class UserService {
   }
 }
 
+// --- custom metadata ---
+
+const Audited = defineMetadata<boolean>('audited');
+
+@Component()
+@Audited(true)
+class AuditedService {
+  doWork() {
+    console.log(`audited: ${Audited.of(this)}`); // true
+  }
+}
+
 // --- bootstrap ---
 
-@Import(PsqlDriver)
-@Use(RedisModule)
+@Touch(PsqlDriver)
+@Use(RedisModule, ConfigModule)
 class App {
   constructor(
     private readonly config = injectConfig(AppConfig),
@@ -337,23 +352,11 @@ class App {
     private readonly drivers = injectMap(Driver),
   ) {}
 
-  @OnApplicationReady()
-  async ready() {
-    console.log(`${this.config.name} ready, drivers: ${[...this.drivers.keys()]}`);
-  }
-
   @OnDestroy()
-  async shutdown() {
-    console.log('shutting down');
-  }
+  async shutdown() { console.log('shutting down'); }
 }
 
 const container = new Container();
-container.provide(ConfigOptions, (cfg = inject(ConfigOptions)) => ({
-  ...cfg,
-  configFiles: ['app.yaml'],
-}));
-
 const app = await container.resolve(App);
 await app.users.createUser('alice');
 await container.destroy();
