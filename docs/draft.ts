@@ -424,69 +424,79 @@ declare class Scope {
 // Section 11: Event System
 // ============================================================
 
-// Two ways to define events: class-based (with @EventData) or token-based (with event<T>()).
+// Two ways to define events:
+// 1. Class-based: mark with @Event(name?) — emitting an undecorated class is a runtime error.
+// 2. Key-based: defineEvent<T>(name?) for lightweight typed events without a class.
 
 /**
- * Marks a class as event data with a string identifier.
- * Instances of this class can be dispatched via EventDispatcher.dispatch(instance).
+ * Marks a class as an event type. Required for class-based events.
+ * Emitting an instance of an undecorated class is a runtime error — this prevents
+ * accidental dispatch of arbitrary objects.
+ *
+ * @param name Optional string identifier for logging, serialization, and debugging.
  *
  * @example
- * @EventData('order.created')
+ * @Event('order.created')
  * class OrderCreatedEvent {
- *     constructor(public readonly orderId: string, public readonly total: number) {}
+ *     constructor(public readonly orderId: string) {}
+ * }
+ *
+ * @Event() // name is optional
+ * class UserLoggedInEvent {
+ *     constructor(public readonly userId: string) {}
  * }
  */
-declare function EventData(name: string): ClassDecorator;
+declare function Event(name?: string): ClassDecorator;
 
 /**
  * Marks a method as a listener for a specific event type.
- * The method is invoked when a matching event is dispatched.
+ * The method is invoked when a matching event is emitted.
  * Listeners are called in dependency order (components resolved first are called first).
  *
  * @example
  * @Component()
  * class OrderNotifier {
- *     @EventListener(OrderCreatedEvent)
+ *     @OnEvent(OrderCreatedEvent)
  *     async onOrderCreated(event: OrderCreatedEvent) {
  *         await sendEmail(event.orderId);
  *     }
  *
- *     @EventListener(CacheInvalidated)
+ *     @OnEvent(CacheInvalidated)
  *     onCacheInvalidated(data: { key: string }) {
  *         clearLocalCache(data.key);
  *     }
  * }
  */
-declare function EventListener<T>(data: AnyConstructor<T> | Event<T>): MethodDecorator;
+declare function OnEvent<T>(event: AnyConstructor<T> | EventKey<T>): MethodDecorator;
 
 /**
- * A typed event channel for token-based events.
+ * A typed event key for key-based events.
  * Use when you want lightweight pub/sub without defining a class.
  */
-declare class Event<T> {
-    readonly data: T;
+declare class EventKey<T> {
+    readonly name?: string;
 }
 
 /**
- * Creates a typed event channel.
+ * Creates a typed event key. The optional name is used for logging/debugging.
  *
  * @example
- * const CacheInvalidated = event<{ key: string }>();
- * const ShutdownRequested = event<{ reason: string; timeout: number }>();
+ * const CacheInvalidated = defineEvent<{ key: string }>('cache.invalidated');
+ * const ShutdownRequested = defineEvent<{ reason: string; timeout: number }>('shutdown');
  */
-declare function event<T>(): Event<T>;
+declare function defineEvent<T>(name?: string): EventKey<T>;
 
 /**
- * Built-in component for dispatching events.
- * Inject via inject(EventDispatcher).
- * All @EventListener methods for the matching event type are invoked.
- * Dispatch is async — it waits for all listeners to complete.
+ * Built-in component for emitting events.
+ * Inject via inject(EventBus).
+ * All @OnEvent methods for the matching event type are invoked.
+ * Emit is async — it waits for all listeners to complete.
  */
-declare class EventDispatcher {
-    /** Dispatch a class-based event. The event class must be decorated with @EventData. */
-    dispatch<T>(data: T): Promise<void>;
-    /** Dispatch a token-based event with data. */
-    dispatch<T>(event: Event<T>, data: T): Promise<void>;
+declare class EventBus {
+    /** Emit a class-based event. The class must be decorated with @Event(). */
+    emit<T>(event: T): Promise<void>;
+    /** Emit a key-based event with data. */
+    emit<T>(key: EventKey<T>, data: T): Promise<void>;
 }
 
 // ============================================================
@@ -975,9 +985,9 @@ class AppService {
 // Example 10: Event System — Class-based and Token-based
 // ============================================================
 
-// --- class-based events ---
+// --- class-based events (must be decorated with @Event) ---
 
-@EventData('job.started')
+@Event('job.started')
 class JobStartedEvent {
     constructor(
         public readonly jobId: string,
@@ -985,7 +995,7 @@ class JobStartedEvent {
     ) {}
 }
 
-@EventData('job.completed')
+@Event('job.completed')
 class JobCompletedEvent {
     constructor(
         public readonly jobId: string,
@@ -993,7 +1003,7 @@ class JobCompletedEvent {
     ) {}
 }
 
-@EventData('job.failed')
+@Event('job.failed')
 class JobFailedEvent {
     constructor(
         public readonly jobId: string,
@@ -1003,8 +1013,8 @@ class JobFailedEvent {
 
 // --- token-based events ---
 
-const CacheInvalidated = event<{ key: string; reason: string }>();
-const SystemShutdown = event<{ timeout: number }>();
+const CacheInvalidated = defineEvent<{ key: string; reason: string }>('cache.invalidated');
+const SystemShutdown = defineEvent<{ timeout: number }>('system.shutdown');
 
 // --- listeners ---
 
@@ -1012,17 +1022,17 @@ const SystemShutdown = event<{ timeout: number }>();
 class JobMetricsListener {
     constructor(private readonly telemetry = inject(TelemetryService, true)) {}
 
-    @EventListener(JobStartedEvent)
+    @OnEvent(JobStartedEvent)
     onJobStarted(ev: JobStartedEvent) {
         this.telemetry?.send('job.started', 1);
     }
 
-    @EventListener(JobCompletedEvent)
+    @OnEvent(JobCompletedEvent)
     onJobCompleted(ev: JobCompletedEvent) {
         this.telemetry?.send('job.completed', 1);
     }
 
-    @EventListener(JobFailedEvent)
+    @OnEvent(JobFailedEvent)
     onJobFailed(ev: JobFailedEvent) {
         this.telemetry?.send('job.failed', 1);
     }
@@ -1032,12 +1042,12 @@ class JobMetricsListener {
 class CacheManager {
     private readonly cache = new Map<string, any>();
 
-    @EventListener(CacheInvalidated)
+    @OnEvent(CacheInvalidated)
     onCacheInvalidated(data: { key: string; reason: string }) {
         this.cache.delete(data.key);
     }
 
-    @EventListener(SystemShutdown)
+    @OnEvent(SystemShutdown)
     onShutdown(data: { timeout: number }) {
         this.cache.clear();
     }
@@ -1047,21 +1057,21 @@ class CacheManager {
 
 @Component()
 class JobRunner {
-    constructor(private readonly events = inject(EventDispatcher)) {}
+    constructor(private readonly events = inject(EventBus)) {}
 
     async run(jobId: string) {
-        await this.events.dispatch(new JobStartedEvent(jobId));
+        await this.events.emit(new JobStartedEvent(jobId));
         try {
             const result = {};
-            await this.events.dispatch(new JobCompletedEvent(jobId, result));
+            await this.events.emit(new JobCompletedEvent(jobId, result));
         } catch (err: any) {
-            await this.events.dispatch(new JobFailedEvent(jobId, err));
+            await this.events.emit(new JobFailedEvent(jobId, err));
             throw err;
         }
     }
 
     async invalidateCache(key: string) {
-        await this.events.dispatch(CacheInvalidated, { key, reason: 'manual' });
+        await this.events.emit(CacheInvalidated, { key, reason: 'manual' });
     }
 }
 
@@ -1150,7 +1160,7 @@ class RedisEventSubscriber {
 
     constructor(
         private readonly redis = inject(Redis),
-        private readonly events = inject(EventDispatcher),
+        private readonly events = inject(EventBus),
     ) {
         this.unsub = () => {}; // redis.subscribe(...)
     }
@@ -1170,7 +1180,7 @@ class Application {
         private readonly appConfig = injectConfig(AppConfig),
         private readonly serializers = injectAll(Serializer, 'alphabetical'),
         private readonly jobs = inject(JobRunner),
-        private readonly events = inject(EventDispatcher),
+        private readonly events = inject(EventBus),
     ) {}
 
     @OnApplicationReady()
@@ -1180,7 +1190,7 @@ class Application {
 
     @OnDestroy()
     async onShutdown() {
-        await this.events.dispatch(SystemShutdown, { timeout: 5000 });
+        await this.events.emit(SystemShutdown, { timeout: 5000 });
     }
 }
 
@@ -1256,7 +1266,7 @@ async function testEventDispatching() {
     // listener that captures events
     @Component()
     class TestJobListener {
-        @EventListener(JobStartedEvent)
+        @OnEvent(JobStartedEvent)
         onStart(ev: JobStartedEvent) {
             received.push(ev);
         }
@@ -1265,8 +1275,8 @@ async function testEventDispatching() {
     container.import(TestJobListener);
     container.use(TestJobListener);
 
-    const dispatcher = await container.resolve(EventDispatcher);
-    await dispatcher.dispatch(new JobStartedEvent('test-job'));
+    const bus = await container.resolve(EventBus);
+    await bus.emit(new JobStartedEvent('test-job'));
 
     console.assert(received.length === 1);
     console.assert(received[0].jobId === 'test-job');
@@ -1354,7 +1364,7 @@ const RedisUrl = token<string>(
     (config = injectConfig(RedisConfiguration)) => config.url
 );
 
-const RedisEvent = event<{ event: string; data: any }>();
+const RedisEvent = defineEvent<{ event: string; data: any }>('redis');
 
 @Component()
 class RedisPublisher {
@@ -1369,7 +1379,7 @@ class RedisPublisher {
 class RedisSubscriber {
     constructor(
         private readonly redis = inject(Redis),
-        private readonly events = inject(EventDispatcher),
+        private readonly events = inject(EventBus),
     ) {
         // subscribe to redis channel and forward to event dispatcher
     }
@@ -1392,7 +1402,7 @@ class RedisModule {
 
 // --- application events ---
 
-@EventData('pet.adopted')
+@Event('pet.adopted')
 class PetAdoptedEvent {
     constructor(
         public readonly petId: string,
@@ -1421,7 +1431,7 @@ class PetStoreApplication {
         private readonly petRepo = inject(PetRepository),
         private readonly allPets = injectAll(Pet, 'alphabetical'),
         private readonly defaultPet = inject(Pet, config.defaultPet),
-        private readonly events = inject(EventDispatcher),
+        private readonly events = inject(EventBus),
         private readonly publisher = inject(RedisPublisher),
         private readonly telemetry = inject(TelemetryService, true),
     ) {}
@@ -1450,13 +1460,13 @@ class PetStoreApplication {
             greeting: pet.speech(),
         });
 
-        await this.events.dispatch(new PetAdoptedEvent(record.id, species));
+        await this.events.emit(new PetAdoptedEvent(record.id, species));
         return record;
     }
 
     @OnDestroy()
     async shutdown() {
-        await this.events.dispatch(SystemShutdown, { timeout: 5000 });
+        await this.events.emit(SystemShutdown, { timeout: 5000 });
     }
 }
 

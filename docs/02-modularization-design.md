@@ -93,9 +93,9 @@ import {
   Import,
   Use,
   OnDestroy,
-  EventDispatcher,
-  EventListener,
-  EventData,
+  EventBus,
+  OnEvent,
+  Event,
   inject,
   injectAll,
   token,
@@ -156,14 +156,14 @@ class CacheModule {
 
 // ---- notification module (side-effect) ----
 
-@EventData('user.registered')
+@Event('user.registered')
 class UserRegisteredEvent {
   constructor(public readonly email: string) {}
 }
 
 @Component()
 class EmailNotifier {
-  @EventListener(UserRegisteredEvent)
+  @OnEvent(UserRegisteredEvent)
   async onUserRegistered(ev: UserRegisteredEvent) {
     console.log(`welcome email sent to ${ev.email}`);
   }
@@ -175,12 +175,12 @@ class EmailNotifier {
 class UserService {
   constructor(
     private readonly driver = inject(SelectedDriver),
-    private readonly events = inject(EventDispatcher),
+    private readonly events = inject(EventBus),
   ) {}
 
   async register(email: string) {
     await this.driver.query(`insert into users ...`);
-    await this.events.dispatch(new UserRegisteredEvent(email));
+    await this.events.emit(new UserRegisteredEvent(email));
   }
 }
 

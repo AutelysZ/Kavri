@@ -10,7 +10,7 @@ Kavri is a TypeScript IoC framework focused on explicit dependency wiring with o
 4. **Robust provider model** — `@Component`, `token()`, `computed()`, `@Provide` cover all injection patterns.
 5. **Simple module system** — modules are `@Component()` classes with `@Provide` methods. `@Import`/`@Use` decorators for composition. No module hierarchy. `@Provide` works in any `@Component`.
 6. **Config as first-class input** — `@Configuration` classes and zod schemas drive provider selection, conditional components, and runtime behavior.
-7. **Event pub/sub** — `@EventData`/`@EventListener` for decoupled communication between components.
+7. **Event pub/sub** — `@Event`/`@OnEvent`/`defineEvent` for decoupled communication between components.
 8. **Optional HTTP upper layer** — built on IoC core but not required.
 
 ## Document map
@@ -20,7 +20,8 @@ Kavri is a TypeScript IoC framework focused on explicit dependency wiring with o
 | [`01-ioc-core-design.md`](./01-ioc-core-design.md) | Core types, `@Component`, lifecycle, providers, injection APIs, events, container, scopes |
 | [`02-modularization-design.md`](./02-modularization-design.md) | `@Import`, `@Use`, module classes, composition patterns |
 | [`03-configuration-design.md`](./03-configuration-design.md) | `@Configuration`, `createConfigSchema`, `injectConfig`, sources, precedence |
-| [`04-http-layer-design.md`](./04-http-layer-design.md) | Optional HTTP layer: controllers, request scoping, middleware |
+| [`04-event-design.md`](./04-event-design.md) | `@Event`, `@OnEvent`, `defineEvent`, `EventBus` |
+| [`05-http-layer-design.md`](./05-http-layer-design.md) | Optional HTTP layer: controllers, request scoping, middleware |
 | [`draft.ts`](./draft.ts) | Complete API declarations with comprehensive usage examples |
 
 ## Current focus

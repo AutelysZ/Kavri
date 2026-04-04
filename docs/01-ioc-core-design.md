@@ -186,38 +186,7 @@ declare function getComponentMetadata<T>(
 
 Returns the metadata attached by `@Component` or `@Provide`. Useful for reading the component name at runtime.
 
-## 8. Event system
-
-Two event definition styles: class-based (named) and token-based (typed).
-
-```ts
-// class-based
-declare function EventData(name: string): ClassDecorator;
-
-// token-based
-declare class Event<T> {
-  readonly data: T;
-}
-declare function event<T>(): Event<T>;
-
-// listener
-declare function EventListener<T>(
-  data: AnyConstructor<T> | Event<T>,
-): MethodDecorator;
-
-// dispatcher (built-in component, inject via inject(EventDispatcher))
-declare class EventDispatcher {
-  dispatch<T>(data: T): Promise<void>;
-  dispatch<T>(event: Event<T>, data: T): Promise<void>;
-}
-```
-
-- Class-based events: define a class with `@EventData(name)`, dispatch instances.
-- Token-based events: define with `event<T>()`, dispatch with `dispatch(token, data)`.
-- Listeners are called in dependency order.
-- `dispatch()` is async and waits for all listeners.
-
-## 9. Container & scope
+## 8. Container & scope
 
 ```ts
 declare class Container {
@@ -258,7 +227,7 @@ declare class Scope {
 | `scoped` | Error if resolved from root | Fresh instance per scope |
 | `transient` | New per injection | New per injection |
 
-## 10. Async resolution — Suspense style
+## 9. Async resolution — Suspense style
 
 All `inject()` calls are synchronous. Async providers (token with async factory, `@OnConstruct` async method) are handled via a Suspense-style mechanism:
 
@@ -269,7 +238,7 @@ All `inject()` calls are synchronous. Async providers (token with async factory,
 
 **Assumption:** all `inject()` calls happen before any side effects in the factory. Default parameters satisfy this naturally.
 
-## 11. Full example
+## 10. Full example
 
 ```ts
 import {
@@ -279,10 +248,6 @@ import {
   OnConstruct,
   OnApplicationReady,
   OnDestroy,
-  EventData,
-  EventListener,
-  EventDispatcher,
-  event,
   token,
   computed,
   inject,
@@ -344,22 +309,12 @@ class RedisModule {
   }
 }
 
-// --- events ---
-
-@EventData('user.created')
-class UserCreatedEvent {
-  constructor(public readonly userId: string) {}
-}
-
-const CacheCleared = event<{ scope: string }>();
-
 // --- components ---
 
 @Component()
 class UserService {
   constructor(
     private readonly driver = inject(SelectedDriver),
-    private readonly events = inject(EventDispatcher),
     private readonly redis = inject(Redis),
   ) {}
 
@@ -368,28 +323,13 @@ class UserService {
 
   async createUser(name: string) {
     await this.driver.query(`insert into users ...`);
-    await this.events.dispatch(new UserCreatedEvent('u1'));
-    await this.events.dispatch(CacheCleared, { scope: 'users' });
-  }
-}
-
-@Component()
-class AuditLogger {
-  @EventListener(UserCreatedEvent)
-  async onUserCreated(ev: UserCreatedEvent) {
-    console.log(`audit: user ${ev.userId} created`);
-  }
-
-  @EventListener(CacheCleared)
-  onCacheCleared(data: { scope: string }) {
-    console.log(`audit: cache cleared for ${data.scope}`);
   }
 }
 
 // --- bootstrap ---
 
 @Import(PsqlDriver)
-@Use(RedisModule, AuditLogger)
+@Use(RedisModule)
 class App {
   constructor(
     private readonly config = injectConfig(AppConfig),
