@@ -281,15 +281,15 @@ declare function Use(...injectables: Injectable<any>[]): ClassDecorator<readonly
  *   The container instantiates them serially in order: ...deps, target.
  *   For each target being instantiated:
  *     1. Check condition. If disabled, skip (inject optional → undefined, inject required → throw).
- *     2. Process @Touch: register listed classes.
- *     3. Process @Use: recursively instantiate listed deps (depth-first).
- *     4. Process @Provide: register providers. Duplicate target → DuplicateProviderError
+ *     2. Register all decorator metadata: @Touch, @Provide, @Decorate (no order dependency,
+ *        all are pure registration). Duplicate @Provide → DuplicateProviderError
  *        (unless exactly one is { primary: true }).
- *     5. Call the factory (inject context active for default params).
- *     6. Call onConstruct / @OnConstruct() methods in declaration order, serially.
- *     7. Apply all @Decorate wrappers in registration order.
+ *     3. Process @Use: recursively instantiate listed deps (depth-first).
+ *     4. Call the factory (inject context active for default params).
+ *     5. Call onConstruct / @OnConstruct() methods in declaration order, serially.
+ *     6. Apply all @Decorate wrappers targeting this class, in registration order.
  *        @Decorate on a target without a provider is silently ignored.
- *     8. Mark the target as instantiated.
+ *     7. Mark the target as instantiated.
  *
  *   @OnDestroy: if @Decorate provides DecorateOptions.onDestroy, it overrides
  *   (not supplements) the original provider's onDestroy for that target.
