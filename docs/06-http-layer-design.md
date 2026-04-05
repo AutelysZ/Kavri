@@ -40,7 +40,7 @@ Normal handler return → JSON serialized with 200. Return `Redirect`, `FileResp
 ## 3. RequestContext
 
 ```ts
-class RequestContext {
+declare class RequestContext {
     readonly method: string;
     readonly url: string;
     readonly headers: ReadonlyMap<string, string>;
@@ -51,13 +51,13 @@ class RequestContext {
     // Key-value store (for interceptors to pass data to handlers)
     get<T>(key: string): T | undefined;
     set<T>(key: string, value: T): void;
-}
 
-/** Token that reads from AsyncLocalStorage. Usable in any singleton. */
-declare const RequestContext: Token<RequestContext>;
+    /** Get the current request context. Reads from AsyncLocalStorage. */
+    static get(): RequestContext;
+}
 ```
 
-`RequestContext` is NOT a `@Component`. The framework creates it per-request and stores it in `AsyncLocalStorage`. The `RequestContext` token's factory reads from the storage — any singleton (controllers, services, interceptors) can `inject(RequestContext)` to access the current request.
+`RequestContext` is a static API backed by `AsyncLocalStorage`. Not injectable, not a component. The framework creates it per-request and stores it in `AsyncLocalStorage`. Access it anywhere via `RequestContext.get()`.
 
 No scoped scope needed. All components remain singletons.
 
@@ -109,22 +109,17 @@ class UserController {
         private readonly userRepo = inject(UserRepository),
     ) {}
 
-    // Handler receives: (parsedInput, requestContext)
-    // Or inject RequestContext anywhere — it reads from AsyncLocalStorage.
+    // Handler receives parsed input. Access request via RequestContext.get().
     @Get('/:id', GetUserParams, UserResponse)
-    async getUser(input: GetUserParams, ctx: RequestContext): Promise<User> {
+    async getUser(input: GetUserParams): Promise<User> {
         return this.userRepo.findById(input.id);
     }
 
     @Post('/', CreateUserBody, UserResponse)
-    async createUser(input: CreateUserBody, ctx: RequestContext): Promise<User> {
-        const userId = ctx.get<string>('userId'); // set by AuthInterceptor
+    async createUser(input: CreateUserBody): Promise<User> {
+        const userId = RequestContext.get().get<string>('userId'); // set by AuthInterceptor
         return this.userRepo.create({ ...input, createdBy: userId });
     }
-
-    // Alternative: inject RequestContext via inject() in any singleton
-    // private readonly ctx = inject(RequestContext);
-    // Works because the token reads from AsyncLocalStorage.
 
     @Get('/old/:id', RedirectParams)
     async redirectOld(input: RedirectParams): Promise<Redirect> {
@@ -144,10 +139,10 @@ Handler receives parsed `input` as first param. Returns typed response or a spec
 
 ```ts
 interface InterceptorContext {
-    readonly request: RequestContext;
     readonly controller: AnyConstructor<any>;
     readonly method: string | symbol;
     readonly endpoint: EndpointMetadata;
+    // Access request via RequestContext.get()
 }
 
 abstract class Interceptor {
@@ -173,7 +168,7 @@ class LoggingInterceptor extends Interceptor {
         try {
             return await next();
         } finally {
-            console.log(`${ctx.endpoint.method} ${ctx.request.url} ${Date.now() - start}ms`);
+            console.log(`${ctx.endpoint.method} ${RequestContext.get().url} ${Date.now() - start}ms`);
         }
     }
 }
@@ -195,7 +190,7 @@ class BasicAuthInterceptor extends Interceptor {
     constructor(private readonly config = inject(BasicAuthConfig)) { super(); }
 
     async intercept(ctx: InterceptorContext, next: () => Promise<unknown>) {
-        const auth = ctx.request.headers.get('authorization');
+        const auth = RequestContext.get().headers.get('authorization');
         // parse Basic auth, compare, throw HttpException(401) on failure
         return next();
     }
@@ -289,8 +284,8 @@ class StaticFileInterceptor extends Interceptor {
     constructor(private readonly config = inject(StaticConfig)) { super(); }
 
     async intercept(ctx: InterceptorContext, next: () => Promise<unknown>) {
-        if (ctx.request.url.startsWith(this.config.prefix)) {
-            const filePath = resolve(this.config.root, ctx.request.url.slice(this.config.prefix.length));
+        if (RequestContext.get().url.startsWith(this.config.prefix)) {
+            const filePath = resolve(this.config.root, RequestContext.get().url.slice(this.config.prefix.length));
             return new FileResponse(filePath);
         }
         return next();
@@ -425,7 +420,7 @@ declare class WebApplication {
 2. Route matching → find controller instance (singleton) + method + endpoint metadata
 3. Parse request: extract params, query, body. Validate with `requestSchema`.
 4. Create `RequestContext`, store in `AsyncLocalStorage`
-5. Run interceptor chain → call handler with `(parsedInput, requestContext)`
+5. Run interceptor chain → call handler with `(parsedInput)`
 6. Handler returns typed value or special response
 7. If `responseSchema`, validate response. Serialize as JSON with 200.
 8. If special response (`Redirect`, `FileResponse`, etc.), handle accordingly.
@@ -488,17 +483,17 @@ const UserServiceDef = createService('/user')
 class UserController extends createController(UserServiceDef) {
     constructor(private readonly repo = inject(UserRepository)) { super(); }
 
-    override async getUser(input: z.infer<typeof GetUserParams>, ctx: RequestContext) {
+    override async getUser(input: z.infer<typeof GetUserParams>) {
         const user = await this.repo.findById(input.id);
         if (!user) throw new HttpException(404, 'User not found');
         return user;
     }
 
-    override async createUser(input: z.infer<typeof CreateUserBody>, ctx: RequestContext) {
+    override async createUser(input: z.infer<typeof CreateUserBody>) {
         return this.repo.create(input);
     }
 
-    override async deleteUser(input: z.infer<typeof GetUserParams>, ctx: RequestContext) {
+    override async deleteUser(input: z.infer<typeof GetUserParams>) {
         await this.repo.delete(input.id);
     }
 }
@@ -508,9 +503,9 @@ class UserController extends createController(UserServiceDef) {
 @Component()
 class AuthInterceptor extends Interceptor {
     async intercept(ctx, next) {
-        const token = ctx.request.headers.get('authorization');
+        const token = RequestContext.get().headers.get('authorization');
         if (!token) throw new HttpException(401);
-        ctx.request.set('userId', verifyToken(token));
+        RequestContext.get().set('userId', verifyToken(token));
         return next();
     }
 }
