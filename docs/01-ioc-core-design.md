@@ -87,7 +87,7 @@ declare function computed<T>(resolve: () => Awaitable<T>): Computed<T>;
 
 ### 5.3 `@Provide` — class decorator
 
-Registers a provider. Declarative equivalent of `container.provide()`.
+Registers a provider for a class or token.
 
 ```ts
 interface ProvideOptions<T> extends ComponentOptions {
@@ -109,8 +109,7 @@ declare function Provide<T>(
 
 ### 5.4 `@Decorate` — class decorator
 
-Wraps an existing provider. Declarative equivalent of `container.decorate()`.
-If the target has no provider, the decoration is silently ignored.
+Wraps an existing provider. If the target has no provider, the decoration is silently ignored.
 
 ```ts
 interface DecorateMetadata<T> {
@@ -164,12 +163,10 @@ declare function injectMap<T>(injectable: Injectable<T> | ClassDecoratorFactory<
 
 ## 7. Container & scope
 
+All configuration is done via decorators (`@Provide`, `@Decorate`, `@Touch`, `@Use`). The container only resolves and destroys.
+
 ```ts
 declare class Container {
-  provide<T>(target: Injectable<T>, factory: () => Awaitable<T>, options?: ProvideOptions<T>): void;
-  decorate<T>(target: Injectable<T>, decorator: (previous: T) => Awaitable<T>): void;
-  touch(...injectables: Injectable<any>[]): void;
-  use(...injectables: Injectable<any>[]): void;
   resolve<T>(injectable: Injectable<T>): Promise<T>;
   createScope(name?: string): Scope;
   destroy(): Promise<void>;
@@ -193,18 +190,18 @@ declare class Scope {
 
 When `container.resolve(target)` is called:
 
-1. All `container.use()` deps and the target itself are treated as entrypoints.
+1. All `@Use` deps and the target itself are treated as entrypoints.
 2. The container instantiates them **serially** in order: `...deps, target`.
 3. For each target being instantiated:
    1. Find the last registered provider (factory) for it.
    2. Call the factory (inject context active for default params).
    3. Call `onConstruct` / `@OnConstruct()` on the instance.
-   4. Apply all `@Decorate` / `container.decorate()` wrappers in registration order.
+   4. Apply all `@Decorate` wrappers in registration order.
    5. Mark the target as instantiated.
 
-### `container.decorate()` on target without provider
+### `@Decorate` on target without provider
 
-If `container.decorate()` (or `@Decorate`) is called for a target that has no registered provider, the decoration is **silently ignored**. If `provide()` is called after `decorate()`, previously registered decorators are cleared.
+If `@Decorate` is applied for a target that has no registered provider, the decoration is **silently ignored**.
 
 ## 8. Error types
 

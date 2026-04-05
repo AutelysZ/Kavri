@@ -51,7 +51,7 @@ class AppService {
 
 ## 4. Config sources & precedence
 
-1. **`container.provide()` / `@Provide`** — runtime override
+1. **`@Provide`** — runtime override
 2. **CLI arguments** — matched by `argvPrefix`
 3. **Environment variables** — matched by `envPrefix`
 4. **Config files** — YAML, JSON, TOML (loaded in order, later overrides)
@@ -71,7 +71,7 @@ interface ConfigOptions {
 declare const ConfigOptions: Token<ConfigOptions>;
 ```
 
-Customize via `container.decorate()` or `@Decorate`:
+Customize via `@Decorate`:
 
 ```ts
 @Component()

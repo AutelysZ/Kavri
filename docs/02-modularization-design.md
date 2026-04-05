@@ -30,15 +30,6 @@ Use for:
 - Components with `@Provide`/`@Decorate` that must be processed
 - Side-effect components (event subscribers, background workers)
 
-### Container equivalents
-
-```ts
-class Container {
-  touch(...injectables: Injectable<any>[]): void;
-  use(...injectables: Injectable<any>[]): void;
-}
-```
-
 ### `@Provide` and `@Decorate` on modules
 
 Modules use `@Provide` and `@Decorate` as class decorators to register and wrap providers:
@@ -61,7 +52,7 @@ class AppModule {}
 
 ## 3. Touch vs Use
 
-| | `@Touch` / `container.touch()` | `@Use` / `container.use()` |
+| | `@Touch` | `@Use` |
 |---|---|---|
 | **What it does** | Registers injectable (makes it known) | Instantiates injectable (triggers side effects) |
 | **Processes `@Provide`/`@Decorate`?** | No | Yes |
@@ -70,7 +61,7 @@ class AppModule {}
 
 ## 4. Rules
 
-- **Module is optional.** Small applications can use `container.provide()` and `container.touch()` directly.
+- **Module is optional.** Small applications can put `@Provide`/`@Touch` directly on the entrypoint class.
 - **Module does not change resolution semantics.** Provider scope, lifecycle, and injection behavior are identical whether registered via a module or directly.
 - **Modules can compose.** A module can `@Use` other modules.
 - **No circular module dependencies.** If module A uses module B and B uses A, startup fails.
@@ -190,8 +181,7 @@ class UserService {
 
 // ---- application root ----
 
-@Use(ConfigModule, DriverModule, CacheModule)
-@Use(EmailNotifier)
+@Component()
 class Application {
   constructor(
     private readonly users = inject(UserService),
@@ -206,10 +196,17 @@ class Application {
 
 // ---- bootstrap ----
 
-const container = new Container();
-container.provide(RedisUrl, () => 'redis://localhost:6379');
+@Component()
+@Provide(RedisUrl, () => 'redis://localhost:6379')
+@Use(ConfigModule, DriverModule, CacheModule)
+@Use(EmailNotifier)
+class Bootstrap {
+  constructor(private readonly app = inject(Application)) {}
+  async run() { return this.app.run(); }
+}
 
-const app = await container.resolve(Application);
-await app.run();
+const container = new Container();
+const boot = await container.resolve(Bootstrap);
+await boot.run();
 await container.destroy();
 ```

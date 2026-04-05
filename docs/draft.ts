@@ -122,9 +122,8 @@ interface ProvideMetadata<T> extends ProvideOptions<T> {
 
 /**
  * Class decorator: registers a provider for a class or token.
- * Declarative equivalent of container.provide().
  * Multiple @Provide decorators can be stacked.
- * Providers are registered when the class is used (via @Use or container.use()).
+ * Providers are registered when the class is used (via @Use).
  *
  * @example
  * @Component()
@@ -144,7 +143,6 @@ interface DecorateMetadata<T> {
 
 /**
  * Class decorator: wraps an existing provider.
- * Declarative equivalent of container.decorate().
  * If the target has no provider, the decoration is silently ignored.
  * Applied after the provider's @OnConstruct, in registration order.
  *
@@ -255,43 +253,27 @@ declare function Use(...injectables: Injectable<any>[]): ClassDecorator<readonly
 /**
  * The root IoC container.
  *
+ * All configuration is done via decorators on @Component classes:
+ * @Provide, @Decorate, @Touch, @Use. The container only resolves and destroys.
+ *
  * Typical lifecycle:
  *   1. new Container()
- *   2. provide()/decorate()/touch()/use() to configure
- *   3. resolve() to bootstrap
- *   4. destroy() for graceful shutdown
+ *   2. resolve(entrypoint) to bootstrap
+ *   3. destroy() for graceful shutdown
  *
  * Resolution order for container.resolve(target):
- *   All container.use() deps and target are treated as entrypoints.
+ *   All @Use deps and target are treated as entrypoints.
  *   The container instantiates them serially in order: ...deps, target.
  *   For each target being instantiated:
  *     1. Find the last registered provider (factory) for it.
  *     2. Call the factory (inject context active for default params).
  *     3. Call onConstruct / @OnConstruct() on the instance.
- *     4. Apply all @Decorate / container.decorate() wrappers in registration order.
+ *     4. Apply all @Decorate wrappers in registration order.
  *     5. Mark the target as instantiated.
+ *
+ * @Decorate on a target without a provider is silently ignored.
  */
 declare class Container {
-    /**
-     * Register or replace a provider for an injectable.
-     * Replaces any previous provider and clears any decorators for this target.
-     */
-    provide<T>(target: Injectable<T>, factory: () => Awaitable<T>, options?: ProvideOptions<T>): void;
-
-    /**
-     * Wrap an existing provider. The decorator receives the previous resolved value.
-     * Multiple decorators are applied in registration order.
-     * If the target has no provider, the decoration is silently ignored.
-     * If provide() is called after decorate(), decorators are cleared.
-     */
-    decorate<T>(target: Injectable<T>, decorator: (previous: T) => Awaitable<T>): void;
-
-    /** Register injectables without instantiating. For collection injection. */
-    touch(...injectables: Injectable<any>[]): void;
-
-    /** Ensure injectables are instantiated and their @Provide/@Decorate processed. */
-    use(...injectables: Injectable<any>[]): void;
-
     /** Resolve an injectable. Triggers the full instantiation chain. */
     resolve<T>(injectable: Injectable<T>): Promise<T>;
 
@@ -371,7 +353,7 @@ declare function Configuration<T>(prefix: string, schema: ZodSchema<T>): ClassDe
  * The factory parses the node at `prefix` using the zod schema.
  *
  * Source precedence (highest → lowest):
- *   1. container.provide() / @Provide runtime overrides
+ *   1. @Provide runtime overrides
  *   2. CLI arguments (matched by argvPrefix)
  *   3. Environment variables (matched by envPrefix)
  *   4. Config files (yaml/json/toml)
@@ -577,7 +559,7 @@ const HttpClient = token<ExternalHttpClient>(
 );
 
 const SecretKey = token<string>(() => {
-    throw new Error('SecretKey must be provided via container.provide()');
+    throw new Error('SecretKey must be provided via @Provide');
 });
 
 
@@ -924,25 +906,35 @@ declare var console: { assert(value: boolean): void; }
 // ============================================================
 
 async function testUserService() {
-    const container = new Container();
-    container.provide(Logger, () => ({ info() {}, error() {} }));
-    container.provide(UserRepository, () => ({
+    @Component()
+    @Provide(Logger, () => ({ info() {}, error() {} }))
+    @Provide(UserRepository, () => ({
         findById: async (id: string) => ({id, name: 'Test User'}),
         findAll: async () => [{id: '1', name: 'Test User'}],
         save: async () => {},
-    }));
+    }))
+    @Use(UserService)
+    class TestHarness {
+        constructor(private readonly service = inject(UserService)) {}
+    }
 
-    const service = await container.resolve(UserService);
-    const user = await service.getUser('1');
+    const container = new Container();
+    const harness = await container.resolve(TestHarness);
+    const user = await harness.service.getUser('1');
     console.assert(user.name === 'Test User');
     await container.destroy();
 }
 
 async function testConditionalComponent() {
+    @Component()
+    @Provide(TelemetryConfig, () => ({ enabled: true, endpoint: 'http://localhost:9090' }))
+    class TestHarness {
+        constructor(readonly telemetry = inject(TelemetryService)) {}
+    }
+
     const container = new Container();
-    container.provide(TelemetryConfig, () => ({ enabled: true, endpoint: 'http://localhost:9090' }));
-    const telemetry = await container.resolve(TelemetryService);
-    telemetry.send('test.metric', 42);
+    const harness = await container.resolve(TestHarness);
+    harness.telemetry.send('test.metric', 42);
     await container.destroy();
 }
 
@@ -1025,6 +1017,11 @@ class RedisModule {}
 @Touch(PsqlDriver)
 @Use(RedisModule)
 @Use(RedisEventSubscriber, JobMetricsListener)
+@Decorate(ConfigOptions, (prev) => ({
+    ...prev,
+    configFiles: ['config/app.yaml', 'config/app.local.yaml'],
+    envPrefix: 'PETSTORE_',
+}))
 class PetStoreApplication {
     constructor(
         private readonly config = inject(PetStoreConfig),
@@ -1061,13 +1058,6 @@ class PetStoreApplication {
 }
 
 const container = new Container();
-
-container.decorate(ConfigOptions, (prev) => ({
-    ...prev,
-    configFiles: ['config/app.yaml', 'config/app.local.yaml'],
-    envPrefix: 'PETSTORE_',
-}));
-
 const app = await container.resolve(PetStoreApplication);
 await app.adoptPet('user-1', 'cat');
 await container.destroy();
