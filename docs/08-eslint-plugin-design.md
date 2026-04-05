@@ -2,7 +2,7 @@
 
 ## 1. Purpose
 
-Kavri's `inject()`, `injectConfig()`, `injectAll()`, `injectMap()`, `injectSet()`, and `injectRef()` must only be called inside designated inject points. Calling them elsewhere is a runtime error. This ESLint plugin catches violations at lint time.
+Kavri's `inject()`, `injectAll()`, and `injectRef()` must only be called inside designated inject points. Calling them elsewhere is a runtime error. This ESLint plugin catches violations at lint time.
 
 Package name: `eslint-plugin-kavri`
 
@@ -27,7 +27,7 @@ An inject call is valid **only** as a **default parameter value** in:
 
    ```ts
    const DbUrl = token<string>(
-       (config = injectConfig(DbConfig)) => config.url // ok
+       (config = inject(DbConfig)) => config.url // ok
    );
    ```
 
@@ -35,14 +35,14 @@ An inject call is valid **only** as a **default parameter value** in:
 
    ```ts
    const Selected = computed<Driver>(
-       (cfg = injectConfig(DbConfig), d = inject(Driver, cfg.driver)) => d // ok
+       (cfg = inject(DbConfig), d = inject(Driver, cfg.driver)) => d // ok
    );
    ```
 
 4. **`@Provide` factory parameters**
 
    ```ts
-   @Provide(Redis, async (config = injectConfig(RedisConfig)) => { // ok
+   @Provide(Redis, async (config = inject(RedisConfig)) => { // ok
        const r = new Redis();
        await r.connect(config.url);
        return r;
@@ -53,7 +53,7 @@ An inject call is valid **only** as a **default parameter value** in:
 5. **`@Decorate` decorator parameters**
 
    ```ts
-   @Decorate(ConfigOptions, (prev, extra = injectConfig(AppConfig)) => ({ // ok
+   @Decorate(ConfigOptions, (prev, extra = inject(AppConfig)) => ({ // ok
        ...prev,
        configFiles: [extra.configDir + '/app.yaml'],
    }))
@@ -64,7 +64,7 @@ An inject call is valid **only** as a **default parameter value** in:
 
    ```ts
    @Component({
-       condition: (cfg = injectConfig(FeatureFlags)) => cfg.enabled, // ok
+       condition: (cfg = inject(FeatureFlags)) => cfg.enabled, // ok
    })
    class ConditionalService {}
    ```
@@ -128,9 +128,6 @@ The rule applies to these function names (configurable):
 - `inject`
 - `injectRef`
 - `injectAll`
-- `injectSet`
-- `injectMap`
-- `injectConfig`
 
 ### Configuration
 
@@ -172,7 +169,7 @@ const T = token<Conn>((id = crypto.randomUUID(), db = inject(Database)) => db.ge
 
 ### Detection logic
 
-In a factory function's parameter list, if a default parameter calls an inject function, all preceding default parameters must also be inject calls (or pure expressions). A parameter with a function call that isn't `inject*` or `injectConfig` preceding an inject call triggers the warning.
+In a factory function's parameter list, if a default parameter calls an inject function, all preceding default parameters must also be inject calls (or pure expressions). A parameter with a function call that isn't `inject*` preceding an inject call triggers the warning.
 
 ### Configuration
 

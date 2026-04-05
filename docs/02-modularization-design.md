@@ -45,7 +45,7 @@ Modules use `@Provide` and `@Decorate` as class decorators to register and wrap 
 
 ```ts
 @Component()
-@Provide(Redis, async (config = injectConfig(RedisConfig)) => {
+@Provide(Redis, async (config = inject(RedisConfig)) => {
   const r = new Redis();
   await r.connect(config.url);
   return r;
@@ -96,7 +96,7 @@ import {
   token,
   computed,
 } from 'kavri';
-import { createConfigSchema, ConfigOptions, injectConfig } from 'kavri/config';
+import { createConfigSchema, ConfigOptions } from 'kavri/config';
 import { z } from 'zod';
 
 // ---- driver module ----
@@ -121,7 +121,7 @@ class MysqlDriver extends Driver {
 }
 
 const SelectedDriver = computed<Driver>(
-  (cfg = injectConfig(DbConfig), d = inject(Driver, cfg.driver)) => d,
+  (cfg = inject(DbConfig), d = inject(Driver, cfg.driver)) => d,
 );
 
 @Component()
