@@ -4,17 +4,6 @@
 
 Kavri uses default parameters as the injection mechanism. No reflection, no parameter decorators, no `emitDecoratorMetadata`. Works with both TC39 and TypeScript decorators.
 
-```ts
-@Component()
-class OrderService {
-    constructor(
-        private readonly db = inject(Database),
-        private readonly config = inject(AppConfig),
-        private readonly cache = inject(Redis, true),  // optional
-    ) {}
-}
-```
-
 ## What's different
 
 **Default parameters are the DI wire.** Every other TypeScript DI framework needs reflect-metadata or explicit parameter decorators. Kavri doesn't — constructor defaults are the injection points, and the container evaluates them in a controlled context.
@@ -23,58 +12,59 @@ class OrderService {
 
 **All decorators are metadata.** Every decorator — built-in or custom — carries typed metadata readable via `Metadata.of()`. No reflect-metadata, no `Map<string, any>` side channels.
 
-```ts
-// Create a custom decorator with one line
-function Cacheable(opts: { ttl: number }): ClassDecorator<{ ttl: number }> {
-    return createClassDecorator(Cacheable, opts);
-}
-
-@Cacheable({ ttl: 3600 })
-class UserService {}
-
-Metadata.of(Cacheable, UserService); // [{ ttl: 3600 }]
-```
-
 **Config is just injection.** Configuration schemas produce tokens — injected with the same `inject()` as any other dependency. No special config API.
 
-```ts
-const DbConfig = createConfigSchema('database', z.object({
-    driver: z.string(),
-    host: z.string(),
-    port: z.number().default(5432),
-}));
-
-@Component()
-class Repo {
-    constructor(private readonly config = inject(DbConfig)) {}
-}
-```
-
-## Minimal example
+## Example
 
 ```ts
-import { Container, Component, Provide, Use, inject, token } from 'kavri';
+import { Container, Component, Provide, Decorate, Touch, Use, inject, computed, token } from 'kavri';
 import { createConfigSchema, ConfigOptions } from 'kavri/config';
 import { z } from 'zod';
 
-const AppConfig = createConfigSchema('app', z.object({
-    greeting: z.string().default('Hello'),
+// config
+const DbConfig = createConfigSchema('database', z.object({
+    driver: z.enum(['psql', 'mysql']),
+    url: z.string(),
 }));
 
+// components
+abstract class Driver {
+    abstract query(sql: string): Promise<any>;
+}
+
+@Component({ name: 'psql' })
+class PsqlDriver extends Driver {
+    async query(sql: string) { return `psql:${sql}`; }
+}
+
+const SelectedDriver = computed<Driver>(
+    (cfg = inject(DbConfig), d = inject(Driver, cfg.driver)) => d
+);
+
+// external class via @Provide
+declare class Redis { connect(url: string): Promise<void>; disconnect(): Promise<void>; }
+
 @Component()
-class Greeter {
-    constructor(private readonly config = inject(AppConfig)) {}
-    greet(name: string) { return `${this.config.greeting}, ${name}!`; }
+@Provide(Redis, async () => { const r = new Redis(); await r.connect('redis://localhost'); return r; }, { onDestroy: 'disconnect' })
+@Decorate(ConfigOptions, (prev) => ({ ...prev, configFiles: ['app.yaml'] }))
+class AppModule {}
+
+// application
+@Component()
+@Touch(PsqlDriver)
+@Use(AppModule)
+class App {
+    constructor(
+        private readonly driver = inject(SelectedDriver),
+        private readonly redis = inject(Redis),
+    ) {}
+
+    async run() { console.log(await this.driver.query('select 1')); }
 }
 
 const container = new Container();
-container.decorate(ConfigOptions, (prev) => ({
-    ...prev,
-    configFiles: ['app.yaml'],
-}));
-
-const greeter = await container.resolve(Greeter);
-console.log(greeter.greet('world')); // Hello, world!
+const app = await container.resolve(App);
+await app.run();
 await container.destroy();
 ```
 
