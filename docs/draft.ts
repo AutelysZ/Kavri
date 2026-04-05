@@ -42,6 +42,12 @@ declare function createMethodDecorator<T>(factory: MethodDecoratorFactory<T>, me
 interface ComponentOptions {
     name?: Qualifier;
     scope?: ProviderScope;
+    /**
+     * Async condition evaluated lazily on first inject(). Result is cached.
+     * Runs in an inject context — can use inject() in default params.
+     * If false, the component is excluded (inject optional returns undefined,
+     * inject required throws MissingProviderError).
+     */
     condition?: () => Awaitable<boolean>;
 }
 
@@ -49,37 +55,31 @@ interface ComponentMetadata {
     options: ComponentOptions;
 }
 
-/**
- * Marks a class as a container-managed component.
- * Constructor parameters use default values with inject() for dependency injection.
- *
- * @example
- * @Component()
- * class UserService {
- *     constructor(private readonly db = inject(Database)) {}
- * }
- *
- * @Component({ name: 'mysql', scope: 'singleton' })
- * class MysqlDriver extends Driver { ... }
- */
 declare function Component(options?: ComponentOptions): ClassDecorator<ComponentMetadata>;
 
 // ============================================================
 // Section 3: Lifecycle Decorators
 // ============================================================
 
-/** Called after construction and injection. May be async. */
+/**
+ * Called after construction and injection. May be async.
+ * Multiple @OnConstruct on one class: called in declaration order, serially.
+ */
 declare function OnConstruct(): MethodDecorator<{}>;
 
-/** Called during container/scope destroy, in reverse dependency order. */
+/**
+ * Called during container/scope destroy, in reverse dependency order.
+ * Multiple @OnDestroy on one class: called in declaration order, serially.
+ */
 declare function OnDestroy(): MethodDecorator<{}>;
 
 // ============================================================
-// Section 4: Providers — Token & Computed
+// Section 4: Providers — Token
 // ============================================================
 
 declare class Token<T> {
-    readonly factory: () => Awaitable<T>;
+    /** Phantom field for TypeScript type inference. Not accessible at runtime. */
+    private readonly __type: T;
 }
 
 /**
@@ -89,22 +89,13 @@ declare class Token<T> {
  * @example
  * const AppName = token<string>(() => 'my-app');
  * const DbUrl = token<string>((config = inject(DatabaseConfig)) => config.url);
- */
-declare function token<T>(factory: () => Awaitable<T>, options?: ProvideOptions<T>): Token<T>;
-
-declare class Computed<T> {
-    readonly resolve: () => Awaitable<T>;
-}
-
-/**
- * Creates a computed injectable. The resolver runs in an inject context.
  *
- * @example
- * const SelectedDriver = computed<Driver>(
+ * // config-driven selection (replaces computed())
+ * const SelectedDriver = token<Driver>(
  *     (config = inject(DbConfig), driver = inject(Driver, config.driver)) => driver
  * );
  */
-declare function computed<T>(resolve: () => Awaitable<T>): Computed<T>;
+declare function token<T>(factory: () => Awaitable<T>, options?: ProvideOptions<T>): Token<T>;
 
 // ============================================================
 // Section 5: Providers — @Provide & @Decorate
@@ -113,6 +104,8 @@ declare function computed<T>(resolve: () => Awaitable<T>): Computed<T>;
 interface ProvideOptions<T> extends ComponentOptions {
     onConstruct?: NoArgsMethodKeyof<T> | ((instance: T) => Awaitable<void>);
     onDestroy?: NoArgsMethodKeyof<T> | ((instance: T) => Awaitable<void>);
+    /** If true, this provider takes precedence when multiple providers exist for the same target. */
+    primary?: boolean;
 }
 
 interface ProvideMetadata<T> extends ProvideOptions<T> {
@@ -122,8 +115,14 @@ interface ProvideMetadata<T> extends ProvideOptions<T> {
 
 /**
  * Class decorator: registers a provider for a class or token.
- * Multiple @Provide decorators can be stacked.
+ * Multiple @Provide decorators can be stacked on one class.
  * Providers are registered when the class is used (via @Use).
+ *
+ * Duplicate providers for the same target throw DuplicateProviderError
+ * unless exactly one is marked { primary: true }.
+ *
+ * @Use/@Provide/@Decorate on a class are only processed if that class
+ * is enabled (not disabled by its @Component({ condition })).
  *
  * @example
  * @Component()
@@ -136,15 +135,25 @@ declare function Provide<T>(
     options?: ProvideOptions<T>,
 ): ClassDecorator<ProvideMetadata<T>>;
 
+interface DecorateOptions<T> {
+    /** Called during destroy on the decorated value (in reverse dependency order). */
+    onDestroy?: NoArgsMethodKeyof<T> | ((instance: T) => Awaitable<void>);
+}
+
 interface DecorateMetadata<T> {
     target: Injectable<T>;
     decorator: (previous: T) => Awaitable<T>;
+    options?: DecorateOptions<T>;
 }
 
 /**
  * Class decorator: wraps an existing provider.
  * If the target has no provider, the decoration is silently ignored.
  * Applied after the provider's @OnConstruct, in registration order.
+ *
+ * If the decorator returns a new instance, the container uses the decorated
+ * value for @OnDestroy. To specify destroy behavior for the decorated value,
+ * use the options parameter.
  *
  * @example
  * @Component()
@@ -154,6 +163,7 @@ interface DecorateMetadata<T> {
 declare function Decorate<T>(
     target: Injectable<T>,
     decorator: (previous: T) => Awaitable<T>,
+    options?: DecorateOptions<T>,
 ): ClassDecorator<DecorateMetadata<T>>;
 
 // ============================================================
@@ -161,7 +171,7 @@ declare function Decorate<T>(
 // ============================================================
 
 /** Union of all injectable targets. */
-type Injectable<T> = AnyConstructor<T> | Token<T> | Computed<T>;
+type Injectable<T> = AnyConstructor<T> | Token<T>;
 
 declare class Ref<T> {
     /** Returns the resolved instance. Throws if accessed during construction. */
@@ -172,9 +182,8 @@ declare class Ref<T> {
  * Injects a dependency. MUST only be called in inject points via default parameters:
  *   1. @Component class constructors
  *   2. token() factory functions
- *   3. computed() resolve functions
- *   4. @Provide / @Decorate factory parameters
- *   5. ComponentOptions.condition functions
+ *   3. @Provide / @Decorate factory parameters
+ *   4. ComponentOptions.condition functions
  *
  * Async resolution: Suspense-style. If a dependency is not ready, inject() throws
  * a Promise. The container catches it, awaits, re-invokes the factory. Repeats
@@ -193,8 +202,11 @@ declare function injectRef<T>(injectable: Injectable<T>, optional: true): Ref<T>
 
 /**
  * Injects all @Component-decorated subclasses/implementations of the target,
- * or all classes decorated with a specific ClassDecoratorFactory.
+ * or all instances of injectables decorated with a specific ClassDecoratorFactory.
  * Only components that are touched/registered in the container are included.
+ *
+ * When using ClassDecoratorFactory: all decorated classes must be injectable
+ * (@Component). If any is not, throws at resolution time.
  */
 declare function injectAll<T>(injectable: Injectable<T> | ClassDecoratorFactory<any>, order?: CollectionOrder): readonly T[]
 
@@ -221,7 +233,6 @@ declare const Metadata: {
     of<T>(factory: ClassDecoratorFactory<T>, instance: object): readonly T[];
     of<T>(factory: MethodDecoratorFactory<T>, target: Injectable<any>, key: Qualifier): readonly T[];
     of<T>(factory: MethodDecoratorFactory<T>, instance: object, key: Qualifier): readonly T[];
-    of<T>(factory: MethodDecoratorFactory<T>, method: Function): readonly T[];
 
     apply<T>(factory: ClassDecoratorFactory<T>, target: Injectable<any>, metadata: T): void;
     apply<T>(factory: MethodDecoratorFactory<T>, target: Injectable<any>, key: Qualifier, metadata: T): void;
@@ -232,17 +243,22 @@ declare const Metadata: {
 // ============================================================
 
 /**
- * Class decorator: makes the container aware of the listed injectables
+ * Class decorator: makes the container aware of the listed classes
  * without instantiating them. Like Unix `touch`.
  *
  * Needed for collection injection (injectAll/injectSet/injectMap)
  * where each implementation must be explicitly touched.
+ *
+ * Only accepts class constructors (not tokens).
  */
-declare function Touch(...injectables: Injectable<any>[]): ClassDecorator<readonly Injectable<any>[]>;
+declare function Touch(...classes: AnyConstructor<any>[]): ClassDecorator<readonly AnyConstructor<any>[]>;
 
 /**
  * Class decorator: ensures the listed injectables are instantiated
  * (and their @Provide/@Decorate processed) before this class is resolved.
+ *
+ * @Use/@Provide/@Decorate on a class are only processed if that class
+ * is enabled (not disabled by its @Component({ condition })).
  */
 declare function Use(...injectables: Injectable<any>[]): ClassDecorator<readonly Injectable<any>[]>;
 
@@ -253,8 +269,8 @@ declare function Use(...injectables: Injectable<any>[]): ClassDecorator<readonly
 /**
  * The root IoC container.
  *
- * All configuration is done via decorators on @Component classes:
- * @Provide, @Decorate, @Touch, @Use. The container only resolves and destroys.
+ * All configuration is done via decorators on @Component classes.
+ * The container only resolves and destroys.
  *
  * Typical lifecycle:
  *   1. new Container()
@@ -265,13 +281,20 @@ declare function Use(...injectables: Injectable<any>[]): ClassDecorator<readonly
  *   All @Use deps and target are treated as entrypoints.
  *   The container instantiates them serially in order: ...deps, target.
  *   For each target being instantiated:
- *     1. Find the last registered provider (factory) for it.
- *     2. Call the factory (inject context active for default params).
- *     3. Call onConstruct / @OnConstruct() on the instance.
- *     4. Apply all @Decorate wrappers in registration order.
- *     5. Mark the target as instantiated.
+ *     1. Check condition. If disabled, skip (inject optional → undefined, inject required → throw).
+ *     2. Process @Touch: register listed classes.
+ *     3. Process @Use: recursively instantiate listed deps (depth-first).
+ *     4. Process @Provide: register providers. Duplicate target → DuplicateProviderError
+ *        (unless exactly one is { primary: true }).
+ *     5. Call the factory (inject context active for default params).
+ *     6. Call onConstruct / @OnConstruct() methods in declaration order, serially.
+ *     7. Apply all @Decorate wrappers in registration order.
+ *        @Decorate on a target without a provider is silently ignored.
+ *     8. Mark the target as instantiated.
  *
- * @Decorate on a target without a provider is silently ignored.
+ *   @OnDestroy: called on the final decorated value. If @Decorate returns a new
+ *   instance, the DecorateOptions.onDestroy is used for the decorated value.
+ *   The original provider's onDestroy is still called on the original instance.
  */
 declare class Container {
     /** Resolve an injectable. Triggers the full instantiation chain. */
@@ -293,27 +316,19 @@ declare class Scope {
 // Section 10: Event System
 // ============================================================
 
-/**
- * Marks a class as an event type. Required for class-based events.
- * Emitting an instance of an undecorated class is a runtime error.
- */
 declare function EventType(name?: string): ClassDecorator<{ name: string | undefined }>;
 
-/** Marks a method as a listener. Listeners are called in dependency order. */
 declare function OnEvent<T>(event: AnyConstructor<T> | EventKey<T>): MethodDecorator<{
     event: AnyConstructor<T> | EventKey<T>
 }>;
 
-/** A typed event key for key-based events (no class needed). */
 declare class EventKey<T> {
     readonly name?: string;
     private readonly __brand: T;
 }
 
-/** Creates a typed event key. */
 declare function defineEvent<T>(name?: string): EventKey<T>;
 
-/** Built-in component. Inject via inject(EventBus). emit() waits for all listeners. */
 declare class EventBus {
     emit<T extends object>(event: T): Promise<void>;
     emit<T>(key: EventKey<T>, data: T): Promise<void>;
@@ -341,62 +356,38 @@ interface ConfigurationMetadata<T> {
     schema: ZodSchema<T>;
 }
 
-/** Marks a token as a configuration schema. Used internally by createConfigSchema(). */
 declare function Configuration<T>(prefix: string, schema: ZodSchema<T>): ClassDecorator<ConfigurationMetadata<T>>;
 
-/**
- * Creates a config token bound to a prefix.
- * Returns a Token<T> decorated with @Configuration.
- *
- * Internally, the token's factory depends on ConfigRegistry (which uses
- * ConfigOptions to load all config sources as raw key-value pairs).
- * The factory parses the node at `prefix` using the zod schema.
- *
- * Source precedence (highest → lowest):
- *   1. @Provide runtime overrides
- *   2. CLI arguments (matched by argvPrefix)
- *   3. Environment variables (matched by envPrefix)
- *   4. Config files (yaml/json/toml)
- *   5. Zod schema defaults
- *
- * @example
- * const DatabaseConfig = createConfigSchema('database', z.object({
- *     driver: z.string(),
- *     host: z.string(),
- *     port: z.number().default(5432),
- * }));
- */
 declare function createConfigSchema<T>(prefix: string, schema: ZodSchema<T>): Token<T>;
 
 // ============================================================
 // Section 12: Error Types
 // ============================================================
 
-/** Thrown when a circular dependency is detected during resolution. */
 declare class CircularDependencyError extends Error {
     readonly chain: Injectable<any>[];
 }
 
-/** Thrown when inject() is called for a target with no registered provider (non-optional). */
 declare class MissingProviderError extends Error {
     readonly injectable: Injectable<any>;
 }
 
-/** Thrown when inject() is called outside a valid inject point. */
 declare class InjectContextError extends Error {}
 
-/** Thrown when a scoped provider is resolved from the root container. */
 declare class ScopeError extends Error {
     readonly injectable: Injectable<any>;
 }
 
-/** Thrown when the container is used after destroy(). */
 declare class DestroyedContainerError extends Error {}
 
-/** Thrown when a config schema fails zod validation during resolution. */
 declare class ConfigValidationError extends Error {
     readonly prefix: string;
     readonly issues: unknown;
+}
+
+/** Thrown when multiple providers register for the same target without a primary. */
+declare class DuplicateProviderError extends Error {
+    readonly injectable: Injectable<any>;
 }
 
 
@@ -413,7 +404,6 @@ declare class ConfigValidationError extends Error {
 // Example: Custom Decorator Creation
 // ============================================================
 
-// Class decorator — @Controller composes @Component
 interface ControllerMetadata {
     path: string;
 }
@@ -422,7 +412,6 @@ function Controller(path: string, options?: ComponentOptions): ClassDecorator<Co
     return createClassDecorator<ControllerMetadata>(Controller, {path}, [Component(options)])
 }
 
-// Method decorator — @RateLimit
 interface RateLimitMetadata {
     maxRequests: number;
     windowMs: number;
@@ -431,11 +420,6 @@ interface RateLimitMetadata {
 function RateLimit(opts: RateLimitMetadata): MethodDecorator<RateLimitMetadata> {
     return createMethodDecorator<RateLimitMetadata>(RateLimit, opts);
 }
-
-// Reading metadata
-// Metadata.of(Controller, UserController);          // [{ path: '/users' }]
-// Metadata.of(Component, UserController);           // [{ options: {} }] — also a Component via compose
-// Metadata.of(RateLimit, ApiService, 'search');     // [{ maxRequests: 100, windowMs: 60000 }]
 
 
 // ============================================================
@@ -564,7 +548,7 @@ const SecretKey = token<string>(() => {
 
 
 // ============================================================
-// Example 4: Computed Providers
+// Example 4: Config-driven Selection (token replaces computed)
 // ============================================================
 
 abstract class Driver<TConn> {
@@ -587,7 +571,8 @@ class PsqlDriver extends Driver<unknown> {
     close(conn: unknown) { return Promise.resolve(); }
 }
 
-const SelectedDriver = computed<Driver<any>>(
+// token with dynamic selection — same pattern as old computed()
+const SelectedDriver = token<Driver<any>>(
     (config = inject(DatabaseConfig), driver = inject(Driver, config.driver)) => driver
 );
 
@@ -597,7 +582,7 @@ const Connection = token<any>(
 
 
 // ============================================================
-// Example 5: @Provide & @Decorate
+// Example 5: @Provide, @Decorate, and primary
 // ============================================================
 
 declare class Sequelize {
@@ -631,6 +616,7 @@ const RedisConfig = createConfigSchema<{ url: string }>('redis', z.object({
 }, {onDestroy: 'disconnect'})
 class InfraModule {}
 
+// @Decorate with onDestroy for the decorated value
 @Component()
 @Decorate(ConfigOptions, (prev) => ({
     ...prev,
@@ -638,6 +624,18 @@ class InfraModule {}
     envPrefix: 'MYAPP_',
 }))
 class AppConfigModule {}
+
+// primary example: two modules provide Driver, one is primary
+@Component()
+@Provide(Driver, () => new PsqlDriver(), {primary: true})
+class PrimaryDriverModule {}
+
+@Component()
+@Provide(Driver, () => new MysqlDriver())
+class FallbackDriverModule {}
+
+// PrimaryDriverModule's provider wins because primary: true
+// Without primary, having both @Use'd would throw DuplicateProviderError
 
 
 // ============================================================
@@ -680,7 +678,7 @@ class TraceSpan {
 
 
 // ============================================================
-// Example 8: Lifecycle Hooks
+// Example 8: Lifecycle Hooks (multiple allowed)
 // ============================================================
 
 @Component()
@@ -688,15 +686,21 @@ class ConnectionPool {
     private pool: any;
 
     @OnConstruct()
-    async init() { this.pool = {}; }
+    async initPool() { this.pool = {}; }
+
+    @OnConstruct()
+    async warmPool() { /* pre-populate */ }
 
     @OnDestroy()
-    async drain() {}
+    async drainPool() { /* drain */ }
+
+    @OnDestroy()
+    async logShutdown() { /* log */ }
 }
 
 
 // ============================================================
-// Example 9: Conditional Components
+// Example 9: Conditional Components (lazy evaluation)
 // ============================================================
 
 const TelemetryConfig = createConfigSchema<{
@@ -707,6 +711,7 @@ const TelemetryConfig = createConfigSchema<{
     endpoint: z.string().optional(),
 }));
 
+// condition is evaluated lazily on first inject(), result is cached
 @Component({
     condition: (config = inject(TelemetryConfig, true)) => config?.enabled ?? false,
 })
@@ -832,7 +837,7 @@ const SelectedFormat = createConfigSchema<{ format: string }>('export', z.object
     format: z.enum(['json', 'xml', 'yaml']).default('json'),
 }));
 
-const DefaultSerializer = computed<Serializer>(
+const DefaultSerializer = token<Serializer>(
     (config = inject(SelectedFormat), s = inject(Serializer, config.format)) => s
 );
 
@@ -915,7 +920,7 @@ async function testUserService() {
     }))
     @Use(UserService)
     class TestHarness {
-        constructor(private readonly service = inject(UserService)) {}
+        constructor(readonly service = inject(UserService)) {}
     }
 
     const container = new Container();

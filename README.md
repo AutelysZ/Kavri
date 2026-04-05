@@ -17,7 +17,7 @@ Kavri uses default parameters as the injection mechanism. No reflection, no para
 ## Example
 
 ```ts
-import { Container, Component, Provide, Decorate, Touch, Use, inject, computed, token } from 'kavri';
+import { Container, Component, Provide, Decorate, Touch, Use, inject, token } from 'kavri';
 import { createConfigSchema, ConfigOptions } from 'kavri/config';
 import { z } from 'zod';
 
@@ -37,7 +37,7 @@ class PsqlDriver extends Driver {
     async query(sql: string) { return `psql:${sql}`; }
 }
 
-const SelectedDriver = computed<Driver>(
+const SelectedDriver = token<Driver>(
     (cfg = inject(DbConfig), d = inject(Driver, cfg.driver)) => d
 );
 
