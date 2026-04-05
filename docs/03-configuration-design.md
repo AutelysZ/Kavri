@@ -2,23 +2,27 @@
 
 ## 1. Position
 
-Configuration is a first-class subsystem with pluggable loaders, resolvers, and parsers. Config values are tokens -- injected with `inject()` like any other dependency.
+Configuration is a first-class subsystem with pluggable loaders, import resolvers, and parsers. Config values are tokens — injected with `inject()` like any other dependency. Follows Spring Boot conventions: profile-based config files, external secret imports, and `${...}` variable substitution.
 
 ## 2. Architecture
 
 ```
 Bootstrap phase (env/cli only):
-  createBootstrapOption() -> ConfigOptions, AwsResolverOptions, ...
+  createBootstrapOption() → ConfigOptions, AwsResolverOptions, ...
 
-Load phase:
-  injectAll(Loader)    -> parse config files (json, yaml, toml, .env, ...)
-  injectAll(Resolver)  -> resolve ${prefix:key} placeholders
+Load phase (ConfigRegistry @OnConstruct):
+  1. @ConfigDefault code defaults
+  2. Load config files ({configBase}.{ext}, {configBase}-{profile}.{ext})
+  3. Merge: code defaults < config files < env < cli
+  4. Build env context (process.env + imported external sources)
+  5. Read kavri.config.import → load external sources via Resolvers
+  6. Resolve ${...} variables from env context
 
-Config phase (all sources):
-  createConfigSchema() -> DatabaseConfig, AppConfig, ...
+Config phase:
+  registry.parse(token) → extract prefix, validate with parser
 ```
 
-## 3. Parser (pluggable validation)
+## 3. Parser
 
 ```ts
 interface ConfigParser<T> {
@@ -26,110 +30,70 @@ interface ConfigParser<T> {
 }
 ```
 
-Zod schemas satisfy this naturally (they have `.parse()`). Custom parsers can be created for class-validator, joi, etc. Both `createConfigSchema` and `createBootstrapOption` accept `ConfigParser<T>`.
+Zod schemas satisfy this. Custom parsers for class-validator, joi, etc.
 
-## 4. Loader (pluggable file formats)
+## 4. Loader
 
 ```ts
 @Component()
 abstract class Loader {
-  abstract supports(): string[];  // file extensions, e.g. ['.yaml', '.yml']
+  abstract supports(): string[];  // file extensions
   abstract load(content: string): Record<string, unknown>;
 }
 ```
 
-Built-in (touched by config module internally): `JsonLoader`, `YamlLoader`, `TomlLoader`.
+Built-in (touched by config module): `JsonLoader`, `YamlLoader`, `TomlLoader`. Third-party loaders added via `@Touch`.
 
-Third-party loaders are added via `@Touch`:
+ConfigRegistry discovers extensions from `injectAll(Loader)` and tries `{configBase}.{ext}` for each, using the first found.
 
-```ts
-@Component()
-class EnvFileLoader extends Loader {
-  supports() { return ['.env']; }
-  load(content: string) { return dotenv.parse(content); }
-}
-
-@Component()
-@Touch(EnvFileLoader)
-class AppModule {}
-```
-
-Config module uses `injectAll(Loader)` to discover all loaders at resolution time.
-
-## 5. Resolver (pluggable variable resolvers)
+## 5. Resolver (import resolvers)
 
 ```ts
 @Component()
 abstract class Resolver {
-  abstract prefix(): string;    // for ${prefix:key} syntax
-  abstract resolve(key: string): Awaitable<string | undefined>;
+  abstract load(resource: string): Awaitable<Record<string, string>>;
 }
 ```
 
-Built-in (touched by config module internally): `EnvResolver` (resolves `${env:KEY}`).
+Resolvers handle `kavri.config.import` entries. Each resolver MUST have `@Component({ name })` — the name is the protocol selector. ConfigRegistry uses `injectMap(Resolver)` to find resolvers by name.
 
-Custom resolvers are `@Component` classes added via `@Touch`. They can inject bootstrap options but NOT regular config schemas (which haven't loaded yet).
-
-```ts
-@Component()
-class AwsResolver extends Resolver {
-  private readonly client: SecretsManagerClient;
-
-  constructor(opts = inject(AwsResolverOptions)) {
-    super();
-    this.client = new SecretsManagerClient(opts);
-  }
-
-  prefix() { return 'aws'; }
-
-  async resolve(key: string) {
-    const result = await this.client.getSecretValue({ SecretId: key });
-    return result.SecretString;
-  }
-}
+```yaml
+kavri:
+  config:
+    import:
+      - "aws-secretmanager:prod/db-secrets?prefix=database"
+      - "vault:secret/redis"
 ```
 
-Config module uses `injectAll(Resolver)` to discover all resolvers at resolution time.
+For `aws-secretmanager:prod/db-secrets?prefix=database`:
+- Protocol: `aws-secretmanager` → finds resolver via `injectMap(Resolver).get('aws-secretmanager')`
+- Resource: `prod/db-secrets?prefix=database` → passed to `resolver.load()`
+- Result: key-value pairs merged into env context for `${...}` substitution
+
+`injectMap(Resolver)` requires all Resolver subclasses to have `@Component({ name })`. If any doesn't, it throws.
 
 ## 6. Bootstrap options
-
-Options needed before config files load (ConfigOptions, AwsResolverOptions). Resolved from env/cli only.
 
 ```ts
 declare function createBootstrapOption<T>(prefix: string, parser: ConfigParser<T>): Token<T>;
 ```
 
-Env mapping: prefix uppercased, dots become underscores. `'aws'` -> `AWS_REGION`.
-CLI mapping: prefix as-is with `--` prepended. `'aws'` -> `--aws.region`.
+Resolved before config files. Precedence: `@Provide > cli > env > @ConfigDefault > parser defaults`.
 
-Precedence (highest -> lowest):
-1. **@Provide** -- bypasses resolution (testing escape hatch)
-2. **CLI arguments**
-3. **Environment variables**
-4. **@ConfigDefault** -- code-level defaults
-5. **Parser defaults**
-
-```ts
-const AwsResolverOptions = createBootstrapOption('aws', z.object({
-  region: z.string().default('us-east-1'),
-  accessKeyId: z.string().optional(),
-  secretAccessKey: z.string().optional(),
-}));
-```
-
-`ConfigOptions` is a built-in bootstrap option (`createBootstrapOption('config', ...)`):
+### ConfigOptions
 
 ```ts
 interface ConfigOptions {
-  configFiles: string[];  // glob patterns, first match per element
+  configBase: string;       // base path, default: './config/config'
+  profiles: string[];       // active profiles, default: []
   env: Record<string, string>;
   argv: string[];
   envPrefix: string;
-  argvPrefix: string;     // without '--'
+  argvPrefix: string;
 }
 ```
 
-Defaults: `configFiles=['config.{yaml,yml,json,toml}']`, `env=process.env`, `argv=process.argv`, empty prefixes.
+Config file discovery: try `{configBase}.{ext}` for each extension from `injectAll(Loader)`, use first found. Then for each profile: `{configBase}-{profile}.{ext}`. Profile files override base values. Later profiles override earlier ones.
 
 ## 7. Config schema
 
@@ -137,128 +101,46 @@ Defaults: `configFiles=['config.{yaml,yml,json,toml}']`, `env=process.env`, `arg
 declare function createConfigSchema<T>(prefix: string, parser: ConfigParser<T>): Token<T>;
 ```
 
-The returned token's factory: `(registry = inject(ConfigRegistry)) => registry.parse(token)`.
+Precedence: `@Provide > cli > env > config file > @ConfigDefault > parser defaults`.
 
-`registry.parse(token)` reads prefix and parser from `Metadata.of(Configuration, token)`, then extracts and validates the node at `prefix` from the registry's merged config.
-
-Precedence (highest -> lowest):
-1. **@Provide** -- bypasses resolution (testing escape hatch)
-2. **CLI arguments** (`--{argvPrefix}{key}`)
-3. **Environment variables** (`{envPrefix}{KEY}`)
-4. **Config files** (first glob match per element)
-5. **@ConfigDefault** -- code-level defaults
-6. **Parser defaults**
+## 8. @ConfigDefault
 
 ```ts
-const DatabaseConfig = createConfigSchema('database', z.object({
-  driver: z.string(),
-  host: z.string(),
-  port: z.coerce.number().default(5432),
-  username: z.string(),
-  password: z.string(),
-  database: z.string(),
-}));
+declare function ConfigDefault<T>(token: Token<T>, defaults: Partial<T>): ClassDecorator<...>;
 ```
 
-## 8. `@ConfigDefault` -- code-level defaults
-
-`@ConfigDefault` is a class decorator that provides code-level default values for a config or bootstrap token. These defaults have lower priority than config files, env vars, and CLI args.
-
-```ts
-interface ConfigDefaultMetadata<T> {
-  token: Token<T>;
-  defaults: Partial<T>;
-}
-
-declare function ConfigDefault<T>(
-  configToken: Token<T>,
-  defaults: Partial<T>,
-): ClassDecorator<ConfigDefaultMetadata<T>>;
-```
-
-Defaults support variable substitution (`${...}` resolved by Resolvers). Multiple `@ConfigDefault` for the same token are deep-merged in `@Use` order.
-
-```ts
-@Component()
-@ConfigDefault(ConfigOptions, {
-  configFiles: ['config/app.yaml'],
-  envPrefix: 'MYAPP_',
-})
-@ConfigDefault(DatabaseConfig, {
-  port: 5432,
-  host: 'localhost',
-})
-class AppConfigModule {}
-```
+Code-level defaults. Lower priority than files/env/cli. Multiple for the same token: deep-merged in @Use order.
 
 ## 9. Variable substitution
 
-After source merging, before parsing. Applied to string values only.
+After all sources are merged and imports are resolved, string values containing `${...}` are resolved from the **env context**.
+
+The env context is built from:
+1. `ConfigOptions.env` (process.env by default)
+2. Values loaded by import resolvers (merged on top)
 
 | Syntax | Behavior |
 |---|---|
-| `${key}` | Config cross-reference, then env |
-| `${prefix:key}` | Delegate to Resolver with matching prefix |
-| `${key:-default}` | Use default if unresolved |
-| `${prefix:key:-default}` | External with default |
+| `${key}` | Look up in env context |
+| `${key:-default}` | Use default if not in env context |
 
-- Unresolved without default -> `ConfigValidationError`
-- Circular references -> `ConfigValidationError`
-- Use `z.coerce.*()` for non-string target types
+## 10. ConfigRegistry lifecycle
 
-```yaml
-database:
-  host: "${DATABASE_HOST:-localhost}"
-  password: "${aws:prod/db-password}"
-  url: "postgres://${database.host}:${database.port}"
-```
+Internal singleton. `@OnConstruct` (in order):
 
-## 10. ConfigRegistry (internal)
+1. **Read @ConfigDefault** — `Metadata.entries(ConfigDefault)`, lowest priority layer
+2. **Load config files** — extensions from `injectAll(Loader)`, try `{configBase}.{ext}` then `{configBase}-{profile}.{ext}` per profile
+3. **Merge config files** over code defaults
+4. **Merge env vars** — uses `Metadata.entries(Configuration)` for field name mapping
+5. **Merge cli args** — same metadata
+6. **Build env context** — start with `ConfigOptions.env` (process.env)
+7. **Read `kavri.config.import`** from merged config
+8. **Load imports** — for each entry, parse `{protocol}:{resource}`, find Resolver via `injectMap(Resolver)`, call `resolver.load(resource)`, merge results into env context
+9. **Resolve `${...}` variables** in all config values using env context
 
-Internal singleton. Created on first config token inject.
+`registry.parse(token)`: read prefix/parser from `Metadata.of(Configuration, token)`, extract node, validate.
 
-### `@OnConstruct` lifecycle (in order):
-
-1. **Merge @ConfigDefault code defaults** -- collected via `Metadata.entries(ConfigDefault)` (lowest priority layer)
-2. **Load and merge config files** -- using `ConfigOptions.configFiles` + `injectAll(Loader)`
-3. **Resolve `${...}` variables** -- using `injectAll(Resolver)`
-4. **Merge env vars** -- uses all registered config nodes' metadata for field mapping: `Metadata.entries(Configuration)`
-5. **Merge cli args** -- same metadata for arg mapping (highest priority layer)
-
-Store merged result.
-
-### `registry.parse(configToken)`:
-
-Reads prefix and parser from `Metadata.of(Configuration, configToken)`. Extracts the node at prefix from merged config. Validates with parser.
-
-Users don't interact with ConfigRegistry directly.
-
-## 11. `Configuration` decorator (internal metadata)
-
-```ts
-interface ConfigurationMetadata<T> {
-  prefix: string;
-  parser: ConfigParser<T>;
-  bootstrap: boolean;
-}
-
-declare function Configuration<T>(
-  prefix: string,
-  parser: ConfigParser<T>,
-  bootstrap?: boolean,
-): ClassDecorator<ConfigurationMetadata<T>>;
-```
-
-Applied internally by `createConfigSchema` and `createBootstrapOption` to their returned tokens. The ConfigRegistry reads this metadata via `Metadata.of(Configuration, token)` and `Metadata.entries(Configuration)`.
-
-## 12. Validation and failure
-
-- Missing required values -> `ConfigValidationError`
-- Parser/validation errors -> `ConfigValidationError` with prefix and details
-- Unresolved `${...}` -> `ConfigValidationError`
-- Circular variable references -> `ConfigValidationError`
-
-## 13. Full example
+## 11. Full example
 
 ```ts
 import {
@@ -271,31 +153,21 @@ import {
 } from 'kavri/config';
 import { z } from 'zod';
 
-// --- bootstrap options (resolved before config files) ---
+// --- bootstrap ---
 
-const AwsResolverOptions = createBootstrapOption('aws', z.object({
+const AwsOpts = createBootstrapOption('aws', z.object({
   region: z.string().default('us-east-1'),
 }));
 
-// --- custom resolver ---
+// --- import resolver ---
 
-@Component()
-class AwsResolver extends Resolver {
-  private readonly client: any;
-  constructor(opts = inject(AwsResolverOptions)) {
-    super();
-    this.client = {}; // new SecretsManagerClient(opts)
+@Component({ name: 'aws-secretmanager' })
+class AwsSecretManagerResolver extends Resolver {
+  constructor(private readonly opts = inject(AwsOpts)) { super(); }
+  async load(resource: string) {
+    // parse resource, fetch secrets, return { key: value }
+    return { 'database.password': 'secret123' };
   }
-  prefix() { return 'aws'; }
-  async resolve(key: string) { return 'secret-value'; }
-}
-
-// --- custom loader ---
-
-@Component()
-class EnvFileLoader extends Loader {
-  supports() { return ['.env']; }
-  load(content: string) { return {}; }
 }
 
 // --- config schemas ---
@@ -312,7 +184,7 @@ const AppConfig = createConfigSchema('app', z.object({
   env: z.enum(['dev', 'staging', 'prod']).default('dev'),
 }));
 
-// --- driver selection ---
+// --- driver ---
 
 abstract class Driver {
   abstract query(sql: string): Promise<any>;
@@ -329,16 +201,31 @@ const SelectedDriver = token<Driver>(
 
 // --- application ---
 
+// config/config.yaml:
+// ---
+// kavri:
+//   config:
+//     import:
+//       - "aws-secretmanager:prod/db?prefix=database"
+// app:
+//   name: pet-store
+// database:
+//   driver: psql
+//   host: "${DATABASE_HOST:-localhost}"
+//   password: "${database.password}"
+//
+// config/config-prod.yaml:
+// ---
+// app:
+//   env: prod
+
 @Component()
 @Touch(PsqlDriver)
-@Touch(AwsResolver, EnvFileLoader)
+@Touch(AwsSecretManagerResolver)
 @ConfigDefault(ConfigOptions, {
-  configFiles: ['config/app.yaml'],
+  configBase: './config/config',
+  profiles: ['prod'],
   envPrefix: 'MYAPP_',
-})
-@ConfigDefault(DbConfig, {
-  port: 5432,
-  host: 'localhost',
 })
 class Application {
   constructor(
@@ -347,7 +234,7 @@ class Application {
   ) {}
 
   async run() {
-    console.log(`${this.app.name}: ${await this.driver.query('select 1')}`);
+    console.log(`${this.app.name} (${this.app.env}): ${await this.driver.query('select 1')}`);
   }
 }
 

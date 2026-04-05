@@ -260,15 +260,22 @@ declare const z: any;
 
 // --- Parser ---
 
+/** Validation interface. Zod schemas satisfy this naturally. */
 interface ConfigParser<T> {
     parse(raw: unknown): T;
 }
 
 // --- Loader ---
 
+/**
+ * Abstract file loader. Config module touches JsonLoader, YamlLoader, TomlLoader by default.
+ * Third-party loaders added via @Touch.
+ */
 @Component()
 abstract class Loader {
+    /** File extensions (e.g., ['.yaml', '.yml']). */
     abstract supports(): string[];
+    /** Parse file content into a key-value object. */
     abstract load(content: string): Record<string, unknown>;
 }
 
@@ -276,15 +283,25 @@ declare class JsonLoader extends Loader {}
 declare class YamlLoader extends Loader {}
 declare class TomlLoader extends Loader {}
 
-// --- Resolver ---
+// --- Resolver (import resolvers, NOT variable resolvers) ---
 
+/**
+ * Abstract import resolver for kavri.config.import entries.
+ * Each resolver handles a specific protocol (e.g., aws-secretmanager, vault).
+ * Resolvers load external key-value pairs into the env context.
+ *
+ * MUST have @Component({ name }) — name is the protocol selector.
+ * ConfigRegistry uses injectMap(Resolver) to find resolvers by name.
+ */
 @Component()
 abstract class Resolver {
-    abstract prefix(): string;
-    abstract resolve(key: string): Awaitable<string | undefined>;
+    /**
+     * Load external values and return them as key-value pairs.
+     * These are merged into the env context for ${...} substitution.
+     * @param resource — the part after the protocol prefix (e.g., "my-secret?prefix=db")
+     */
+    abstract load(resource: string): Awaitable<Record<string, string>>;
 }
-
-declare class EnvResolver extends Resolver {}
 
 // --- Bootstrap options ---
 
@@ -299,8 +316,25 @@ declare class EnvResolver extends Resolver {}
  */
 declare function createBootstrapOption<T>(prefix: string, parser: ConfigParser<T>): Token<T>;
 
+/**
+ * ConfigOptions — bootstrap option for the config system itself.
+ *
+ * configBase: base path for config files (default: './config/config').
+ *   ConfigRegistry appends extensions from discovered loaders:
+ *   e.g., './config/config.yaml', './config/config.json', first found wins.
+ *
+ * profiles: active profiles (default: []).
+ *   For each profile, loads '{configBase}-{profile}.{ext}' after the base file.
+ *   Profile files override base values. Later profiles override earlier ones.
+ *
+ * env: environment variables source (default: process.env).
+ * argv: CLI arguments source (default: process.argv).
+ * envPrefix: prefix for env var mapping (default: '').
+ * argvPrefix: prefix for CLI arg mapping without '--' (default: '').
+ */
 interface ConfigOptions {
-    configFiles: string[];
+    configBase: string;
+    profiles: string[];
     env: Record<string, string>;
     argv: string[];
     envPrefix: string;
@@ -308,6 +342,8 @@ interface ConfigOptions {
 }
 
 declare const ConfigOptions: Token<ConfigOptions>;
+// defaults: configBase='./config/config', profiles=[], env=process.env,
+// argv=process.argv, envPrefix='', argvPrefix=''
 
 // --- Config schema ---
 
@@ -323,18 +359,14 @@ declare function Configuration<T>(prefix: string, parser: ConfigParser<T>, boots
  * Creates a config token bound to a prefix.
  * Token factory: (registry = inject(ConfigRegistry)) => registry.parse(token)
  *
- * registry.parse(token) reads prefix and parser from
- * Metadata.of(Configuration, token), then extracts and validates
- * the node from the registry's merged config.
- *
  * Precedence: @Provide (escape hatch) > cli > env > config file > @ConfigDefault > parser defaults
  *
- * Variable substitution (string values, after merging, before parse):
- *   ${key}, ${prefix:key}, ${key:-default}, ${prefix:key:-default}
+ * Variable substitution: ${key} resolved from env context (built from
+ * process.env + imported external sources). ${key:-default} for fallback.
  */
 declare function createConfigSchema<T>(prefix: string, parser: ConfigParser<T>): Token<T>;
 
-// --- ConfigDefault (code-level defaults for config tokens) ---
+// --- ConfigDefault ---
 
 interface ConfigDefaultMetadata<T> {
     token: Token<T>;
@@ -342,9 +374,7 @@ interface ConfigDefaultMetadata<T> {
 }
 
 /**
- * Class decorator: provides code-level default values for a config or bootstrap token.
- * Lower priority than config files, env, and cli.
- * Defaults support variable substitution (${...} resolved by Resolvers).
+ * Code-level defaults for a config token. Lower than file/env/cli.
  * Multiple @ConfigDefault for the same token: deep-merged in @Use order.
  */
 declare function ConfigDefault<T>(
@@ -358,17 +388,25 @@ declare function ConfigDefault<T>(
  * Internal singleton. Created on first config token inject.
  *
  * @OnConstruct lifecycle (in order):
- *   1. Merge @ConfigDefault code defaults (Metadata.entries(ConfigDefault)) — lowest priority
- *   2. Load and merge config files (ConfigOptions.configFiles + injectAll(Loader))
- *   3. Resolve ${...} variables (injectAll(Resolver))
- *   4. Merge env vars (Metadata.entries(Configuration) for field mapping)
- *   5. Merge cli args (same metadata) — highest priority
- *   Store merged result.
+ *   1. Read @ConfigDefault code defaults (Metadata.entries(ConfigDefault))
+ *   2. Load config files:
+ *      - Discover extensions from injectAll(Loader) → ['.yaml', '.json', '.toml', ...]
+ *      - Try {configBase}.{ext} for each extension, use first found
+ *      - For each profile: try {configBase}-{profile}.{ext}, merge on top
+ *   3. Merge config files over code defaults
+ *   4. Merge env vars (using Metadata.entries(Configuration) for field mapping)
+ *   5. Merge cli args (same metadata)
+ *   6. Build env context: start with ConfigOptions.env (process.env by default)
+ *   7. Read kavri.config.import from merged config:
+ *      e.g., ["aws-secretmanager:my-secret?prefix=db", "vault:secret/redis"]
+ *      For each entry, parse protocol name, find Resolver via injectMap(Resolver),
+ *      call resolver.load(resource), merge returned key-values into env context
+ *   8. Resolve ${...} variables in all config values using the env context
+ *   Store final merged result.
  *
  * registry.parse(configToken):
  *   Reads prefix and parser from Metadata.of(Configuration, configToken).
- *   Extracts the node at prefix from merged config.
- *   Validates with parser.
+ *   Extracts node at prefix. Validates with parser.
  */
 declare class ConfigRegistry {
     parse<T>(configToken: Token<T>): T;
@@ -775,15 +813,24 @@ class JobRunner {
 // Example 11: Configuration & @ConfigDefault
 // ============================================================
 
-// config/app.yaml:
+// config/config.yaml (base config, loaded automatically):
 // ---
+// kavri:
+//   config:
+//     import:
+//       - "aws-secretmanager:prod/db-secrets?prefix=database"
 // app:
 //   name: pet-store
 //   env: "${APP_ENV:-dev}"
 // database:
 //   host: "${DATABASE_HOST:-localhost}"
-//   password: "${aws:prod/db-password}"
+//   password: "${database.password}"   # injected from AWS via import
 //   url: "postgres://${database.host}:${database.port}"
+//
+// config/config-staging.yaml (profile override):
+// ---
+// app:
+//   env: staging
 
 const AppConfig = createConfigSchema<{
     name: string;
@@ -795,10 +842,11 @@ const AppConfig = createConfigSchema<{
     debug: z.boolean().default(false),
 }));
 
-// @ConfigDefault provides code-level defaults (lower than file/env/cli)
+// @ConfigDefault: code-level defaults (lower than file/env/cli)
 @Component()
 @ConfigDefault(ConfigOptions, {
-    configFiles: ['config/app.yaml'],
+    configBase: './config/config',
+    profiles: ['staging'],
     envPrefix: 'MYAPP_',
 })
 @ConfigDefault(DatabaseConfig, {
@@ -809,14 +857,19 @@ class AppConfigModule {}
 
 
 // ============================================================
-// Example 12: External Resolvers with Bootstrap Options
+// Example 12: Import Resolvers (external secret sources)
 // ============================================================
+
+// Resolvers load external key-value pairs into the env context.
+// Triggered by kavri.config.import entries in config files.
+// Format: "{resolver-name}:{resource}" e.g. "aws-secretmanager:prod/db-secrets?prefix=database"
 
 declare class SecretsManagerClient {
     constructor(options: { region: string });
     getSecretValue(params: { SecretId: string }): Promise<{ SecretString?: string }>;
 }
 
+// AwsSecretManagerResolver options — bootstrap (resolved from env/cli before config)
 const AwsResolverOptions = createBootstrapOption<{
     region: string;
     accessKeyId?: string;
@@ -827,8 +880,9 @@ const AwsResolverOptions = createBootstrapOption<{
     secretAccessKey: z.string().optional(),
 }));
 
-@Component()
-class AwsResolver extends Resolver {
+// Name MUST match the protocol in kavri.config.import
+@Component({name: 'aws-secretmanager'})
+class AwsSecretManagerResolver extends Resolver {
     private readonly client: SecretsManagerClient;
 
     constructor(opts = inject(AwsResolverOptions)) {
@@ -836,11 +890,19 @@ class AwsResolver extends Resolver {
         this.client = new SecretsManagerClient(opts);
     }
 
-    prefix() { return 'aws'; }
-
-    async resolve(key: string) {
-        const result = await this.client.getSecretValue({SecretId: key});
-        return result.SecretString;
+    async load(resource: string) {
+        // resource: "prod/db-secrets?prefix=database"
+        // parse secretId and prefix from resource
+        const [secretId, params] = resource.split('?');
+        const prefix = new URLSearchParams(params).get('prefix') ?? '';
+        const result = await this.client.getSecretValue({SecretId: secretId});
+        const secrets = JSON.parse(result.SecretString ?? '{}');
+        // return as prefixed keys: { "database.password": "xxx", "database.username": "yyy" }
+        const entries: Record<string, string> = {};
+        for (const [k, v] of Object.entries(secrets)) {
+            entries[prefix ? `${prefix}.${k}` : k] = String(v);
+        }
+        return entries;
     }
 }
 
@@ -1010,11 +1072,12 @@ class RedisModule {}
 @Component()
 @Touch(Dog, Cat, Bird)
 @Touch(PsqlDriver)
-@Touch(AwsResolver, EnvFileLoader)
+@Touch(AwsSecretManagerResolver, EnvFileLoader)
 @Use(RedisModule)
 @Use(RedisEventSubscriber, JobMetricsListener)
 @ConfigDefault(ConfigOptions, {
-    configFiles: ['config/app.yaml', 'config/app.local.yaml'],
+    configBase: './config/config',
+    profiles: ['prod'],
     envPrefix: 'PETSTORE_',
 })
 class PetStoreApplication {
