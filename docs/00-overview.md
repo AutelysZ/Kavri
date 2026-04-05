@@ -19,10 +19,10 @@ Kavri is a TypeScript IoC framework focused on explicit dependency wiring with o
 |---|---|
 | [`01-ioc-core-design.md`](./01-ioc-core-design.md) | Components, providers, injection, container, scopes |
 | [`02-modularization-design.md`](./02-modularization-design.md) | @Touch, @Use, @Provide, @ConfigDefault, module composition |
-| [`03-configuration-design.md`](./03-configuration-design.md) | createConfigSchema, ConfigOptions, sources, precedence |
+| [`03-configuration-design.md`](./03-configuration-design.md) | createConfiguration, BootstrapOptions, sources, precedence |
 | [`04-event-design.md`](./04-event-design.md) | @EventType, @OnEvent, defineEvent, EventBus |
 | [`05-metadata-design.md`](./05-metadata-design.md) | Metadata.of, createClassDecorator, createMethodDecorator |
-| [`07-http-layer-design.md`](./07-http-layer-design.md) | Controllers, request scoping, middleware |
+| [`06-http-layer-design.md`](./06-http-layer-design.md) | Controllers, interceptors, service definitions, WebApplication |
 | [`08-eslint-plugin-design.md`](./08-eslint-plugin-design.md) | ESLint rules for inject-point enforcement |
 | [`draft.ts`](./draft.ts) | Complete API declarations with usage examples |
 
