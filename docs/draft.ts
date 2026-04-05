@@ -353,14 +353,36 @@ declare type ZodSchema<T> = unknown;
 declare const z: any;
 
 /**
+ * Variable resolver for ${prefix:key} substitution in config values.
+ * Plain objects — not @Component classes. Provided via ConfigOptions.resolvers.
+ *
+ * @example
+ * const awsResolver: ConfigVariableResolver = {
+ *     prefix: 'aws',
+ *     async resolve(key) {
+ *         const client = new SecretsManagerClient({ region: 'us-east-1' });
+ *         const result = await client.getSecretValue({ SecretId: key });
+ *         return result.SecretString;
+ *     },
+ * };
+ */
+interface ConfigVariableResolver {
+    /** Prefix for ${prefix:key} syntax. */
+    readonly prefix: string;
+    /** Resolve a key to a string value. Return undefined if not found. */
+    resolve(key: string): Awaitable<string | undefined>;
+}
+
+/**
  * Configuration source options.
  *
  * Default factory returns:
  *   configFiles: ['config.{yaml,yml,json,toml}']  (glob, first match wins, no match = skip)
  *   env: process.env
  *   argv: process.argv
- *   envPrefix: ''     (e.g., 'APP_' maps APP_DATABASE_HOST → database.host)
- *   argvPrefix: ''    (e.g., 'app.' maps --app.database.host → database.host)
+ *   envPrefix: ''
+ *   argvPrefix: ''
+ *   resolvers: []
  *
  * configFiles elements support glob patterns. For each element, the first
  * matching file is used. If no file matches, that element is skipped.
@@ -368,6 +390,14 @@ declare const z: any;
  *
  * argvPrefix does not include '--'. The container prepends it automatically.
  * '--app.database.host=x' is matched when argvPrefix is 'app.'.
+ *
+ * Variable substitution (applied to string values after source merging, before zod):
+ *   ${key}               — look up in merged config, then env vars
+ *   ${prefix:key}        — delegate to resolver with matching prefix
+ *   ${key:-default}      — use default if unresolved
+ *   ${prefix:key:-default} — external with default
+ *   Unresolved ${...} without default → ConfigValidationError
+ *   Only applies to string values. Use z.coerce.*() for non-string target types.
  */
 interface ConfigOptions {
     /** Glob patterns. First match per element wins. No match = skip. */
@@ -380,6 +410,8 @@ interface ConfigOptions {
     envPrefix: string;
     /** Prefix for CLI arg mapping (without '--'). 'app.' maps --app.database.host → database.host. */
     argvPrefix: string;
+    /** Variable resolvers for ${prefix:key} substitution. */
+    resolvers: ConfigVariableResolver[];
 }
 
 declare const ConfigOptions: Token<ConfigOptions>;
@@ -397,7 +429,8 @@ declare function Configuration<T>(prefix: string, schema: ZodSchema<T>): ClassDe
  *
  * Internally, the token's factory depends on ConfigRegistry (which uses
  * ConfigOptions to load all config sources as raw key-value pairs).
- * The factory parses the node at `prefix` using the zod schema.
+ * After merging sources, variable substitution resolves ${...} placeholders.
+ * Then the factory parses the node at `prefix` using the zod schema.
  *
  * Source precedence (highest → lowest):
  *   1. @Provide override (replaces the config token entirely)
@@ -405,6 +438,14 @@ declare function Configuration<T>(prefix: string, schema: ZodSchema<T>): ClassDe
  *   3. Environment variables (matched by envPrefix)
  *   4. Config files (first glob match per element)
  *   5. Zod schema defaults
+ *
+ * @example
+ * const DatabaseConfig = createConfigSchema('database', z.object({
+ *     driver: z.string(),
+ *     host: z.string(),
+ *     port: z.coerce.number().default(5432),
+ *     password: z.string(),  // can be "${aws:prod/db-password}" in YAML
+ * }));
  */
 declare function createConfigSchema<T>(prefix: string, schema: ZodSchema<T>): Token<T>;
 
@@ -891,7 +932,72 @@ const DefaultSerializer = token<Serializer>(
 
 
 // ============================================================
-// Example 12: Module System
+// Example 12: Variable Substitution & External Resolvers
+// ============================================================
+
+// config/app.yaml:
+// ---
+// app:
+//   name: pet-store
+//   env: "${APP_ENV:-dev}"                          # env var with default
+// database:
+//   host: "${DATABASE_HOST:-localhost}"              # env var with default
+//   port: "${DATABASE_PORT:-5432}"                   # use z.coerce.number() for this
+//   password: "${aws:prod/db-password}"              # from AWS Secrets Manager
+//   url: "postgres://${database.host}:${database.port}"  # cross-reference other config values
+// redis:
+//   url: "${vault:secret/redis#url}"                 # from HashiCorp Vault
+
+// --- AWS Secrets Manager resolver ---
+
+declare class SecretsManagerClient {
+    constructor(options: { region: string });
+    getSecretValue(params: { SecretId: string }): Promise<{ SecretString?: string }>;
+}
+
+function createAwsResolver(region: string): ConfigVariableResolver {
+    const client = new SecretsManagerClient({region});
+    return {
+        prefix: 'aws',
+        async resolve(key) {
+            const result = await client.getSecretValue({SecretId: key});
+            return result.SecretString;
+        },
+    };
+}
+
+// --- HashiCorp Vault resolver ---
+
+function createVaultResolver(addr: string, token: string): ConfigVariableResolver {
+    return {
+        prefix: 'vault',
+        async resolve(key) {
+            // key format: "path#field" e.g. "secret/redis#url"
+            return 'redis://resolved-from-vault:6379';
+        },
+    };
+}
+
+// --- Wire resolvers via @Decorate(ConfigOptions) ---
+
+@Component()
+@Decorate(ConfigOptions, async (prev) => ({
+    ...prev,
+    configFiles: ['config/app.yaml'],
+    resolvers: [
+        ...prev.resolvers,
+        createAwsResolver(process.env.AWS_REGION ?? 'us-east-1'),
+        createVaultResolver(
+            process.env.VAULT_ADDR ?? 'http://localhost:8200',
+            process.env.VAULT_TOKEN ?? '',
+        ),
+    ],
+}))
+class SecretsModule {}
+
+
+// ============================================================
+// Example 13: Module System
 // ============================================================
 
 @Component()
@@ -955,7 +1061,7 @@ declare var console: { assert(value: boolean): void; }
 
 
 // ============================================================
-// Example 13: Testing
+// Example 14: Testing
 // ============================================================
 
 async function testUserService() {
@@ -1005,7 +1111,7 @@ async function testCustomMetadata() {
 
 
 // ============================================================
-// Example 14: Full Application
+// Example 15: Full Application
 // ============================================================
 
 abstract class Pet {

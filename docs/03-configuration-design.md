@@ -60,12 +60,18 @@ class AppService {
 ## 5. ConfigOptions
 
 ```ts
+interface ConfigVariableResolver {
+  readonly prefix: string;
+  resolve(key: string): Awaitable<string | undefined>;
+}
+
 interface ConfigOptions {
   configFiles: string[];
   env: Record<string, string>;
   argv: string[];
   envPrefix: string;
   argvPrefix: string;
+  resolvers: ConfigVariableResolver[];
 }
 
 declare const ConfigOptions: Token<ConfigOptions>;
@@ -83,25 +89,80 @@ Customize via `@Decorate`:
 class ConfigModule {}
 ```
 
-## 6. ConfigRegistry (internal)
+## 6. Variable substitution
 
-`ConfigRegistry` is an internal class that loads all raw config sources (files, env, argv) into a unified key-value store. Config tokens created by `createConfigSchema()` have their factory depend on `ConfigRegistry`, which in turn depends on `ConfigOptions` to determine where to load config from. Users do not interact with `ConfigRegistry` directly — it is resolved automatically when any config token is injected.
+After all config sources are merged, string values containing `${...}` are resolved before zod validation.
 
-## 7. Validation & failure
+| Syntax | Behavior |
+|---|---|
+| `${key}` | Look up in merged config, then env vars |
+| `${prefix:key}` | Delegate to resolver with matching prefix |
+| `${key:-default}` | Use default if unresolved |
+| `${prefix:key:-default}` | External with default |
 
-- Missing required values → startup fails with key name.
-- Zod validation errors → throws `ConfigValidationError` with the prefix and zod issues.
-- Type coercion from env/CLI strings based on schema.
+- Only applies to string values. Use `z.coerce.*()` for non-string target types.
+- Unresolved `${...}` without a default throws `ConfigValidationError`.
+- Cross-references resolve transitively: `${a}` → `${b}` → `"hello"` resolves to `"hello"`.
+- Circular references throw `ConfigValidationError`.
 
-## 8. Config-driven selection
+```yaml
+database:
+  host: "${DATABASE_HOST:-localhost}"
+  port: "${DATABASE_PORT:-5432}"
+  password: "${aws:prod/db-password}"
+  url: "postgres://${database.host}:${database.port}"
+```
+
+## 7. External variable resolvers
+
+Resolvers are plain objects implementing `ConfigVariableResolver`. They are not `@Component` classes — they're provided via `ConfigOptions.resolvers` and available before any config token resolves.
 
 ```ts
-const SelectedDriver = computed<Driver>(
+function createAwsResolver(region: string): ConfigVariableResolver {
+  const client = new SecretsManagerClient({ region });
+  return {
+    prefix: 'aws',
+    async resolve(key) {
+      const result = await client.getSecretValue({ SecretId: key });
+      return result.SecretString;
+    },
+  };
+}
+
+@Component()
+@Decorate(ConfigOptions, async (prev) => ({
+  ...prev,
+  resolvers: [
+    ...prev.resolvers,
+    createAwsResolver(process.env.AWS_REGION ?? 'us-east-1'),
+  ],
+}))
+class SecretsModule {}
+```
+
+Resolvers are initialized in the `@Decorate` factory, which is async-capable. This allows connecting to secret managers before config loads.
+
+## 8. ConfigRegistry (internal)
+
+`ConfigRegistry` is an internal class that loads all raw config sources (files, env, argv) into a unified key-value store, then resolves variable substitutions using resolvers from `ConfigOptions`. Config tokens created by `createConfigSchema()` depend on `ConfigRegistry`. Users do not interact with it directly.
+
+## 9. Validation & failure
+
+- Missing required values → `ConfigValidationError` with key name.
+- Zod validation errors → `ConfigValidationError` with prefix and zod issues.
+- Unresolved `${...}` without default → `ConfigValidationError`.
+- Circular variable references → `ConfigValidationError`.
+- Type coercion from env/CLI strings based on schema.
+
+## 10. Config-driven selection
+
+```ts
+const SelectedDriver = token<Driver>(
   (cfg = inject(DbConfig), d = inject(Driver, cfg.driver)) => d,
 );
 ```
 
-## 9. Introspection
+## 11. Introspection
 
 Since config schemas carry `@Configuration` metadata, all registered schemas can be discovered:
 
@@ -113,7 +174,7 @@ const allConfigs = Metadata.of(Configuration, token);
 const configs = injectAll(Configuration);
 ```
 
-## 10. Full example
+## 12. Full example
 
 ```ts
 import {
