@@ -6,7 +6,7 @@
 - **Parsed input only.** Handlers receive validated, typed data — not raw streams. Body parsing happens before handlers and interceptors see the request (gRPC-style).
 - **Single interception mechanism.** Interceptors replace middleware, guards, pipes, and filters. One abstraction, one chain.
 - **Controllers are singletons.** Per-request data lives in `RequestContext` (AsyncLocalStorage), not in the controller instance.
-- **Definition/implementation separation.** `createService()` produces a shareable type-safe contract. Backend implements it; frontend consumes it.
+- **Definition/implementation separation.** Service definitions (`@kavri/schema`) are shared contracts. `createController()` and `@ControllerImpl()` wire them. `@kavri/client` produces typed HTTP clients. `injectClient()` enables server-side service-to-service calls.
 
 ## 2. Core HTTP Types
 
@@ -197,24 +197,18 @@ class BasicAuthInterceptor extends Interceptor {
 }
 ```
 
-## 6. Service Definition (shared contract)
+## 6. Service Definition & Clients
 
-### createService — define the contract
+### Service definitions (`@kavri/schema`)
 
-```ts
-const UserServiceDef = createService('/user')
-    .get('getUser', '/:id', GetUserParams, UserResponse)
-    .post('createUser', '/', CreateUserBody, UserResponse)
-    .delete('deleteUser', '/:id', DeleteUserParams);
-```
+Service contracts are defined in `@kavri/schema` using `createService()` — see [09-schema-design.md](./09-schema-design.md#8-service-definitions-protobuf-style). Shared between frontend and backend.
 
-`createService(basePath)` returns a builder. Each method call (`.get()`, `.post()`, etc.) adds an endpoint. The result is a typed service definition object that encodes all method names, request/response types, and routes.
-
-This file can be shared between frontend and backend packages.
-
-### createController — backend implementation
+### createController / @ControllerImpl (`@kavri/web`)
 
 ```ts
+import { createController, ControllerImpl } from '@kavri/web';
+import { UserServiceDef } from './user-service';
+
 @ControllerImpl()
 class UserController extends createController(UserServiceDef) {
     constructor(private readonly repo = inject(UserRepository)) { super(); }
@@ -222,52 +216,41 @@ class UserController extends createController(UserServiceDef) {
     override async getUser(input: GetUserParams): Promise<UserResponse> {
         return this.repo.findById(input.id);
     }
+}
+```
 
-    override async createUser(input: CreateUserBody): Promise<UserResponse> {
-        return this.repo.create(input);
-    }
+`createController(def)` returns an abstract class with abstract methods. `@ControllerImpl()` applies `@Controller` and `@Get`/`@Post`/etc. from the definition.
 
-    override async deleteUser(input: DeleteUserParams): Promise<void> {
-        await this.repo.delete(input.id);
+### createClient (`@kavri/client`)
+
+```ts
+import { createClient } from '@kavri/client';
+const client = createClient(UserServiceDef, { baseUrl: 'https://api.example.com' });
+const user = await client.getUser({ id: 123 });
+```
+
+### injectClient (`@kavri/web`)
+
+Server-side typed client for service-to-service calls:
+
+```ts
+import { injectClient } from '@kavri/web';
+
+@Component()
+class PaymentService {
+    constructor(private readonly orders = injectClient(OrderServiceDef)) {}
+
+    async refund(orderId: number) {
+        const order = await this.orders.getOrder({ id: orderId });
     }
 }
 ```
 
-`createController(def)` returns an abstract class with abstract methods for each endpoint. Types are inferred from the schemas.
-
-`@ControllerImpl()` applies `@Controller(basePath)` and the appropriate `@Get`/`@Post`/etc. decorators to each method, derived from the service definition. No manual decorator duplication.
-
-### createClient — frontend consumption
-
-```ts
-import { createClient } from '@kavri/web/client';
-
-const client = createClient(UserServiceDef, { baseUrl: 'https://api.example.com' });
-
-const user = await client.getUser({ id: '123' });  // typed: UserResponse
-await client.createUser({ name: 'Alice', email: 'alice@example.com' });
-```
-
-`createClient(def, options)` returns a typed client with methods matching the service definition. Each method makes an HTTP request.
+`injectClient()` is an inject point. Base URL from configuration or service discovery.
 
 ## 7. OpenAPI Generation
 
-```ts
-interface OpenAPIOptions {
-    title: string;
-    version: string;
-    description?: string;
-}
-
-declare function generateOpenAPI(
-    entrypoint: AnyConstructor<any>,
-    options: OpenAPIOptions,
-): object;  // OpenAPI 3.x document
-```
-
-Reads `Metadata.entries(Controller)` to find all controllers, then `Metadata.of(Get/Post/etc, controller)` for endpoints. Extracts schemas for request params/body and response body. Zod schemas are converted to JSON Schema via `zod-to-json-schema`.
-
-Static generation — no running container needed. Works from metadata alone.
+See [09-schema-design.md](./09-schema-design.md#openapi-generation). `generateOpenAPI(serviceDef, options)` in `@kavri/schema` generates OpenAPI 3.x from service definitions. Static — no running container needed.
 
 ## 8. Static Assets
 
@@ -453,29 +436,40 @@ await app.start();
 ## 13. Full Example
 
 ```ts
-import { z } from 'zod';
 import {
-    Controller, Get, Post, Delete, ControllerImpl,
-    createService, createController, createClient,
-    Interceptor, RequestContext, HttpException,
-    WebApplication, Transactional, FileResponse, Redirect,
+    Schema, IsString, IsInteger, IsEmail, createService,
+} from '@kavri/schema';
+import {
+    ControllerImpl, createController, injectClient,
+    Interceptor, RequestContext, HttpException, WebApplication,
 } from '@kavri/web';
-import {
-    Component, Touch, Use, Provide,
-    inject, injectAll, token,
-    createConfiguration,
-} from '@kavri/core';
+import { Component, Touch, inject } from '@kavri/core';
 
-// ---- Shared service definition ----
+// ---- Shared service definition (from @kavri/schema) ----
 
-const GetUserParams = z.object({ id: z.string() });
-const CreateUserBody = z.object({ name: z.string(), email: z.string().email() });
-const UserResponse = z.object({ id: z.string(), name: z.string(), email: z.string() });
+@Schema()
+class GetUserParams {
+    @IsInteger({ min: 1 }) id!: number;
+}
+
+@Schema()
+class CreateUserBody {
+    @IsString({ minLength: 1 }) name!: string;
+    @IsEmail() email!: string;
+}
+
+@Schema()
+class UserResponse {
+    @IsInteger() id!: number;
+    @IsString() name!: string;
+    @IsEmail() email!: string;
+}
 
 const UserServiceDef = createService('/user')
     .get('getUser', '/:id', GetUserParams, UserResponse)
     .post('createUser', '/', CreateUserBody, UserResponse)
-    .delete('deleteUser', '/:id', GetUserParams);
+    .delete('deleteUser', '/:id', GetUserParams)
+    .build();
 
 // ---- Controller implementation ----
 
@@ -483,17 +477,17 @@ const UserServiceDef = createService('/user')
 class UserController extends createController(UserServiceDef) {
     constructor(private readonly repo = inject(UserRepository)) { super(); }
 
-    override async getUser(input: z.infer<typeof GetUserParams>) {
+    override async getUser(input: GetUserParams) {
         const user = await this.repo.findById(input.id);
         if (!user) throw new HttpException(404, 'User not found');
         return user;
     }
 
-    override async createUser(input: z.infer<typeof CreateUserBody>) {
+    override async createUser(input: CreateUserBody) {
         return this.repo.create(input);
     }
 
-    override async deleteUser(input: z.infer<typeof GetUserParams>) {
+    override async deleteUser(input: GetUserParams) {
         await this.repo.delete(input.id);
     }
 }

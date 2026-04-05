@@ -12,16 +12,20 @@ Package: `@kavri/schema` — no dependency on `@kavri/core`.
 - **Required by default.** Fields are required unless explicitly `{ optional: true }` or `{ nullable: true }`. Prefer `nullable` over `optional`.
 - **Minimal.** Field-level only. No structural transforms (no `_id` → `id` mapping).
 - **Bidirectional.** Class → JSON Schema. JSON Schema → class schema definition. Parse (deserialize) and validate.
+- **Messages + Services.** Define both data schemas (messages) and service contracts (RPC-style). Like protobuf: messages define structure, services define endpoints.
 
 ## 2. Module Imports
 
 ```
 @kavri/basic   → Metadata, createClassDecorator, createFieldDecorator, etc.
-@kavri/schema  → Schema, field decorators, parse, validate, toJsonSchema, fromJsonSchema
+@kavri/schema  → Schema, field decorators, createService, parse, validate, toJsonSchema
+@kavri/client  → createClient, typed HTTP clients from service definitions
 @kavri/core    → Component, Container, inject, etc. (depends on @kavri/basic)
 @kavri/event   → EventType, EventBus, etc. (depends on @kavri/core)
 @kavri/config  → createConfiguration, Loader, Resolver, etc. (depends on @kavri/core)
-@kavri/web     → Controller, Interceptor, WebApplication, etc. (depends on @kavri/core, @kavri/config)
+@kavri/web     → Controller, Interceptor, WebApplication, injectClient (depends on @kavri/core)
+@kavri/aws-secretmanager-resolver → AWS Secrets Manager Resolver for @kavri/config
+@kavri/drizzle → Drizzle ORM integration, TransactionInterceptor, Repository
 ```
 
 `@kavri/schema` depends only on `@kavri/basic`. It can be used standalone without the IoC container.
@@ -435,7 +439,163 @@ interface ValidationIssue {
 }
 ```
 
-## 8. ConfigParser compatibility
+## 8. Service Definitions (protobuf-style)
+
+Like protobuf: `@Schema` classes are **messages** (data structure), `createService()` defines **services** (endpoints). Both live in `@kavri/schema` and can be shared between frontend and backend.
+
+### createService — define a service contract
+
+```ts
+interface ServiceDefinition {
+    readonly basePath: string;
+    readonly endpoints: readonly EndpointDefinition[];
+}
+
+interface EndpointDefinition {
+    readonly name: string;
+    readonly method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | 'HEAD';
+    readonly path: string;
+    readonly requestSchema?: AnyConstructor<any>;  // @Schema class
+    readonly responseSchema?: AnyConstructor<any>; // @Schema class
+}
+
+declare function createService(basePath: string): ServiceBuilder;
+```
+
+`ServiceBuilder` is a fluent builder that accumulates endpoints. Each method call adds an endpoint with typed request/response schemas:
+
+```ts
+declare class ServiceBuilder {
+    get<TReq, TRes>(
+        name: string,
+        path: string,
+        requestSchema?: AnyConstructor<TReq>,
+        responseSchema?: AnyConstructor<TRes>,
+    ): this;
+
+    post<TReq, TRes>(name: string, path: string, requestSchema?: AnyConstructor<TReq>, responseSchema?: AnyConstructor<TRes>): this;
+    put<TReq, TRes>(name: string, path: string, requestSchema?: AnyConstructor<TReq>, responseSchema?: AnyConstructor<TRes>): this;
+    delete<TReq, TRes>(name: string, path: string, requestSchema?: AnyConstructor<TReq>, responseSchema?: AnyConstructor<TRes>): this;
+    patch<TReq, TRes>(name: string, path: string, requestSchema?: AnyConstructor<TReq>, responseSchema?: AnyConstructor<TRes>): this;
+    head<TReq>(name: string, path: string, requestSchema?: AnyConstructor<TReq>): this;
+
+    build(): ServiceDefinition;
+}
+```
+
+### Example — shared definition file
+
+```ts
+// user-service.ts — shared between frontend and backend
+import { createService, Schema, IsString, IsInteger, IsEmail, IsArray, Ref } from '@kavri/schema';
+
+@Schema()
+class GetUserParams {
+    @IsInteger({ min: 1 })
+    id!: number;
+}
+
+@Schema()
+class CreateUserBody {
+    @IsString({ minLength: 1 })
+    name!: string;
+
+    @IsEmail()
+    email!: string;
+}
+
+@Schema()
+class UserResponse {
+    @IsInteger()
+    id!: number;
+
+    @IsString()
+    name!: string;
+
+    @IsEmail()
+    email!: string;
+}
+
+export const UserServiceDef = createService('/user')
+    .get('getUser', '/:id', GetUserParams, UserResponse)
+    .post('createUser', '/', CreateUserBody, UserResponse)
+    .delete('deleteUser', '/:id', GetUserParams)
+    .build();
+```
+
+### createController — backend implementation (`@kavri/web`)
+
+```ts
+import { createController, ControllerImpl } from '@kavri/web';
+import { UserServiceDef } from './user-service';
+
+@ControllerImpl()
+class UserController extends createController(UserServiceDef) {
+    constructor(private readonly repo = inject(UserRepository)) { super(); }
+
+    override async getUser(input: GetUserParams): Promise<UserResponse> {
+        return this.repo.findById(input.id);
+    }
+
+    override async createUser(input: CreateUserBody): Promise<UserResponse> {
+        return this.repo.create(input);
+    }
+
+    override async deleteUser(input: GetUserParams): Promise<void> {
+        await this.repo.delete(input.id);
+    }
+}
+```
+
+### createClient — frontend consumption (`@kavri/client`)
+
+```ts
+import { createClient } from '@kavri/client';
+import { UserServiceDef } from './user-service';
+
+const client = createClient(UserServiceDef, { baseUrl: 'https://api.example.com' });
+
+const user = await client.getUser({ id: 123 });  // typed: UserResponse
+await client.createUser({ name: 'Alice', email: 'alice@example.com' });
+```
+
+### injectClient — server-side typed client (`@kavri/web`)
+
+In the backend, `injectClient()` creates a typed HTTP client for a service, useful for service-to-service calls:
+
+```ts
+import { injectClient } from '@kavri/web';
+import { OrderServiceDef } from './order-service';
+
+@Component()
+class PaymentService {
+    constructor(
+        private readonly orders = injectClient(OrderServiceDef),
+    ) {}
+
+    async refund(orderId: number) {
+        const order = await this.orders.getOrder({ id: orderId });
+        // ...
+    }
+}
+```
+
+`injectClient()` is an inject point — returns a typed client backed by HTTP calls. The base URL is resolved from configuration or service discovery.
+
+### OpenAPI generation
+
+```ts
+import { generateOpenAPI } from '@kavri/schema';
+
+const spec = generateOpenAPI(UserServiceDef, {
+    title: 'User API',
+    version: '1.0.0',
+});
+```
+
+Generates an OpenAPI 3.x document from a `ServiceDefinition`. Request/response schemas are converted to JSON Schema via `toJsonSchema()`. Static — no running container needed.
+
+## 9. ConfigParser Compatibility
 
 `@Schema` classes satisfy the `ConfigParser<T>` interface used by `@kavri/config`:
 
@@ -451,7 +611,7 @@ Helper:
 declare function schemaParser<T>(clazz: AnyConstructor<T>): ConfigParser<T>;
 ```
 
-## 9. Full Example
+## 10. Full Example
 
 ```ts
 import {
@@ -623,7 +783,7 @@ class AppConfig {
 const AppConfiguration = createConfiguration('app', schemaParser(AppConfig));
 ```
 
-## 10. checkAllFields Behavior
+## 11. checkAllFields Behavior
 
 When `@Schema({ checkAllFields: true })`:
 
@@ -635,7 +795,7 @@ When `checkAllFields: false` (default):
 
 Fields without decorators are silently ignored — they are not parsed, validated, or serialized. Only decorated fields participate in the schema.
 
-## 11. Required vs Optional vs Nullable
+## 12. Required vs Optional vs Nullable
 
 | Declaration | JSON Schema | Parse behavior |
 |---|---|---|
@@ -646,7 +806,7 @@ Fields without decorators are silently ignored — they are not parsed, validate
 
 Prefer `nullable` over `optional` when the field should always be present but may have no value.
 
-## 12. Circular References
+## 13. Circular References
 
 `LazyRef` handles circular dependencies:
 
