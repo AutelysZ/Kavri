@@ -349,56 +349,82 @@ declare class EventBus {
 // Section 11: Configuration
 // ============================================================
 
-declare type ZodSchema<T> = unknown;
 declare const z: any;
 
-/**
- * Variable resolver for ${prefix:key} substitution in config values.
- * Plain objects — not @Component classes. Provided via ConfigOptions.resolvers.
- *
- * @example
- * const awsResolver: ConfigVariableResolver = {
- *     prefix: 'aws',
- *     async resolve(key) {
- *         const client = new SecretsManagerClient({ region: 'us-east-1' });
- *         const result = await client.getSecretValue({ SecretId: key });
- *         return result.SecretString;
- *     },
- * };
- */
-interface ConfigVariableResolver {
-    /** Prefix for ${prefix:key} syntax. */
-    readonly prefix: string;
-    /** Resolve a key to a string value. Return undefined if not found. */
-    resolve(key: string): Awaitable<string | undefined>;
-}
+// --- Parser (pluggable validation) ---
 
 /**
- * Configuration source options.
- *
- * Default factory returns:
- *   configFiles: ['config.{yaml,yml,json,toml}']  (glob, first match wins, no match = skip)
- *   env: process.env
- *   argv: process.argv
- *   envPrefix: ''
- *   argvPrefix: ''
- *   resolvers: []
- *
- * configFiles elements support glob patterns. For each element, the first
- * matching file is used. If no file matches, that element is skipped.
- * If no elements match at all, no config file is loaded.
- *
- * argvPrefix does not include '--'. The container prepends it automatically.
- * '--app.database.host=x' is matched when argvPrefix is 'app.'.
- *
- * Variable substitution (applied to string values after source merging, before zod):
- *   ${key}               — look up in merged config, then env vars
- *   ${prefix:key}        — delegate to resolver with matching prefix
- *   ${key:-default}      — use default if unresolved
- *   ${prefix:key:-default} — external with default
- *   Unresolved ${...} without default → ConfigValidationError
- *   Only applies to string values. Use z.coerce.*() for non-string target types.
+ * Validation/transformation interface for config values.
+ * Zod schemas satisfy this naturally (they have .parse()).
+ * Custom parsers can be created for class-validator, joi, etc.
  */
+interface ConfigParser<T> {
+    parse(raw: unknown): T;
+}
+
+// --- Loader (pluggable file formats) ---
+
+/**
+ * Abstract file loader. Config module touches JsonLoader, YamlLoader, TomlLoader by default.
+ * Third-party loaders are added via @Touch on the application/module class.
+ */
+@Component()
+abstract class Loader {
+    /** File extensions this loader handles (e.g., ['.yaml', '.yml']). */
+    abstract supports(): string[];
+    /** Parse file content into a key-value object. */
+    abstract load(content: string): Record<string, unknown>;
+}
+
+// Built-in (touched by config module internally):
+declare class JsonLoader extends Loader {}
+declare class YamlLoader extends Loader {}
+declare class TomlLoader extends Loader {}
+
+// --- Resolver (pluggable variable resolvers) ---
+
+/**
+ * Abstract variable resolver for ${prefix:key} substitution.
+ * Config module touches EnvResolver by default.
+ * Custom resolvers (AWS, Vault) are added via @Touch.
+ *
+ * Resolvers are @Component classes. Their constructors can inject bootstrap
+ * options (createBootstrapOption) but NOT regular config schemas.
+ */
+@Component()
+abstract class Resolver {
+    /** Prefix for ${prefix:key} syntax. */
+    abstract prefix(): string;
+    /** Resolve a key. Return undefined if not found. */
+    abstract resolve(key: string): Awaitable<string | undefined>;
+}
+
+// Built-in (touched by config module internally):
+declare class EnvResolver extends Resolver {}
+
+// --- Bootstrap options (resolved before config files) ---
+
+/**
+ * Creates a bootstrap option token.
+ * Bootstrap options are resolved BEFORE config files are loaded.
+ * Sources: env/cli only (no config file layer).
+ *
+ * Precedence (highest → lowest):
+ *   1. @Provide (bypasses resolution — testing escape hatch)
+ *   2. CLI arguments (--{prefix}.{key})
+ *   3. Environment variables ({PREFIX}_{KEY})
+ *   4. @Decorate (code-level defaults)
+ *   5. Parser/schema defaults
+ *
+ * Env mapping: prefix uppercased, dots become underscores.
+ *   'aws' → AWS_REGION, AWS_ACCESS_KEY_ID
+ * CLI mapping: prefix as-is with '--' prepended.
+ *   'aws' → --aws.region, --aws.accessKeyId
+ */
+declare function createBootstrapOption<T>(prefix: string, parser: ConfigParser<T>): Token<T>;
+
+// ConfigOptions is a bootstrap option:
+// Internally: createBootstrapOption('config', z.object({ ... }))
 interface ConfigOptions {
     /** Glob patterns. First match per element wins. No match = skip. */
     configFiles: string[];
@@ -408,46 +434,48 @@ interface ConfigOptions {
     argv: string[];
     /** Prefix for env var mapping. 'APP_' maps APP_DATABASE_HOST → database.host. */
     envPrefix: string;
-    /** Prefix for CLI arg mapping (without '--'). 'app.' maps --app.database.host → database.host. */
+    /** Prefix for CLI arg mapping (without '--'). */
     argvPrefix: string;
-    /** Variable resolvers for ${prefix:key} substitution. */
-    resolvers: ConfigVariableResolver[];
 }
 
 declare const ConfigOptions: Token<ConfigOptions>;
+// defaults: configFiles=['config.{yaml,yml,json,toml}'], env=process.env,
+// argv=process.argv, envPrefix='', argvPrefix=''
+
+// --- Config schema (resolved from all sources) ---
 
 interface ConfigurationMetadata<T> {
     prefix: string;
-    schema: ZodSchema<T>;
+    parser: ConfigParser<T>;
+    bootstrap: boolean;
 }
 
-declare function Configuration<T>(prefix: string, schema: ZodSchema<T>): ClassDecorator<ConfigurationMetadata<T>>;
+declare function Configuration<T>(prefix: string, parser: ConfigParser<T>, bootstrap?: boolean): ClassDecorator<ConfigurationMetadata<T>>;
 
 /**
  * Creates a config token bound to a prefix.
- * Returns a Token<T> decorated with @Configuration.
  *
- * Internally, the token's factory depends on ConfigRegistry (which uses
- * ConfigOptions to load all config sources as raw key-value pairs).
- * After merging sources, variable substitution resolves ${...} placeholders.
- * Then the factory parses the node at `prefix` using the zod schema.
+ * Internally: ConfigRegistry uses injectAll(Loader) to parse files,
+ * injectAll(Resolver) for ${...} substitution, and ConfigOptions for source paths.
  *
- * Source precedence (highest → lowest):
- *   1. @Provide override (replaces the config token entirely)
- *   2. CLI arguments (matched by '--' + argvPrefix)
- *   3. Environment variables (matched by envPrefix)
+ * Variable substitution (string values, after source merging, before parse):
+ *   ${key}                 — config cross-reference, then env
+ *   ${prefix:key}          — delegate to Resolver with matching prefix
+ *   ${key:-default}        — use default if unresolved
+ *   ${prefix:key:-default} — external with default
+ *   Unresolved without default → ConfigValidationError
+ *   Circular references → ConfigValidationError
+ *   Only applies to string values. Use z.coerce.*() for non-string types.
+ *
+ * Precedence (highest → lowest):
+ *   1. @Provide (bypasses resolution — testing escape hatch)
+ *   2. CLI arguments (--{argvPrefix}{key})
+ *   3. Environment variables ({envPrefix}{KEY})
  *   4. Config files (first glob match per element)
- *   5. Zod schema defaults
- *
- * @example
- * const DatabaseConfig = createConfigSchema('database', z.object({
- *     driver: z.string(),
- *     host: z.string(),
- *     port: z.coerce.number().default(5432),
- *     password: z.string(),  // can be "${aws:prod/db-password}" in YAML
- * }));
+ *   5. @Decorate (code-level defaults)
+ *   6. Parser/schema defaults
  */
-declare function createConfigSchema<T>(prefix: string, schema: ZodSchema<T>): Token<T>;
+declare function createConfigSchema<T>(prefix: string, parser: ConfigParser<T>): Token<T>;
 
 // ============================================================
 // Section 12: Error Types
@@ -939,61 +967,92 @@ const DefaultSerializer = token<Serializer>(
 // ---
 // app:
 //   name: pet-store
-//   env: "${APP_ENV:-dev}"                          # env var with default
+//   env: "${APP_ENV:-dev}"                                # env var with default
 // database:
-//   host: "${DATABASE_HOST:-localhost}"              # env var with default
-//   port: "${DATABASE_PORT:-5432}"                   # use z.coerce.number() for this
-//   password: "${aws:prod/db-password}"              # from AWS Secrets Manager
-//   url: "postgres://${database.host}:${database.port}"  # cross-reference other config values
+//   host: "${DATABASE_HOST:-localhost}"                    # env var with default
+//   port: "${DATABASE_PORT:-5432}"                         # use z.coerce.number()
+//   password: "${aws:prod/db-password}"                    # from AWS Secrets Manager
+//   url: "postgres://${database.host}:${database.port}"    # cross-reference
 // redis:
-//   url: "${vault:secret/redis#url}"                 # from HashiCorp Vault
+//   url: "${vault:secret/redis#url}"                       # from HashiCorp Vault
 
-// --- AWS Secrets Manager resolver ---
+// --- AWS Secrets Manager resolver (a @Component extending Resolver) ---
 
 declare class SecretsManagerClient {
-    constructor(options: { region: string });
+    constructor(options: { region: string; accessKeyId?: string; secretAccessKey?: string });
     getSecretValue(params: { SecretId: string }): Promise<{ SecretString?: string }>;
 }
 
-function createAwsResolver(region: string): ConfigVariableResolver {
-    const client = new SecretsManagerClient({region});
-    return {
-        prefix: 'aws',
-        async resolve(key) {
-            const result = await client.getSecretValue({SecretId: key});
-            return result.SecretString;
-        },
-    };
+// AwsResolverOptions is a bootstrap option — resolved from env/cli before config loads
+// Env: AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+// CLI: --aws.region, --aws.accessKeyId, --aws.secretAccessKey
+const AwsResolverOptions = createBootstrapOption<{
+    region: string;
+    accessKeyId?: string;
+    secretAccessKey?: string;
+}>('aws', z.object({
+    region: z.string().default('us-east-1'),
+    accessKeyId: z.string().optional(),
+    secretAccessKey: z.string().optional(),
+}));
+
+@Component()
+class AwsResolver extends Resolver {
+    private readonly client: SecretsManagerClient;
+
+    constructor(opts = inject(AwsResolverOptions)) {
+        super();
+        this.client = new SecretsManagerClient(opts);
+    }
+
+    prefix() { return 'aws'; }
+
+    async resolve(key: string) {
+        const result = await this.client.getSecretValue({SecretId: key});
+        return result.SecretString;
+    }
 }
 
 // --- HashiCorp Vault resolver ---
 
-function createVaultResolver(addr: string, token: string): ConfigVariableResolver {
-    return {
-        prefix: 'vault',
-        async resolve(key) {
-            // key format: "path#field" e.g. "secret/redis#url"
-            return 'redis://resolved-from-vault:6379';
-        },
-    };
-}
-
-// --- Wire resolvers via @Decorate(ConfigOptions) ---
+const VaultOptions = createBootstrapOption<{
+    addr: string;
+    token: string;
+}>('vault', z.object({
+    addr: z.string().default('http://localhost:8200'),
+    token: z.string().default(''),
+}));
 
 @Component()
-@Decorate(ConfigOptions, async (prev) => ({
+class VaultResolver extends Resolver {
+    constructor(private readonly opts = inject(VaultOptions)) { super(); }
+
+    prefix() { return 'vault'; }
+
+    async resolve(key: string) {
+        // key format: "path#field" e.g. "secret/redis#url"
+        return 'redis://resolved-from-vault:6379';
+    }
+}
+
+// --- Custom loader (.env files) ---
+
+@Component()
+class EnvFileLoader extends Loader {
+    supports() { return ['.env']; }
+    load(content: string) { return {} as any; /* dotenv.parse(content) */ }
+}
+
+// --- Application wires resolvers and loaders via @Touch ---
+
+@Component()
+@Touch(AwsResolver, VaultResolver)     // register resolvers
+@Touch(EnvFileLoader)                   // register custom loader
+@Decorate(ConfigOptions, (prev) => ({
     ...prev,
-    configFiles: ['config/app.yaml'],
-    resolvers: [
-        ...prev.resolvers,
-        createAwsResolver(process.env.AWS_REGION ?? 'us-east-1'),
-        createVaultResolver(
-            process.env.VAULT_ADDR ?? 'http://localhost:8200',
-            process.env.VAULT_TOKEN ?? '',
-        ),
-    ],
+    configFiles: ['config/app.yaml'],   // code-level default (env/cli can override)
 }))
-class SecretsModule {}
+class AppConfigModule {}
 
 
 // ============================================================
