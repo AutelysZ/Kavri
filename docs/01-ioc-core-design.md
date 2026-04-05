@@ -25,8 +25,7 @@ export type NoArgsMethodKeyof<T> = T extends object
 ```ts
 export type Injectable<T> =
   | AnyConstructor<T>
-  | Token<T>
-  | Computed<T>;
+  | Token<T>;
 ```
 
 ## 3. Component decorator
@@ -54,11 +53,13 @@ declare function OnConstruct(): MethodDecorator<{}>;
 declare function OnDestroy(): MethodDecorator<{}>;
 ```
 
+Both `@OnConstruct` and `@OnDestroy` are **inject points** -- their method parameters can use `inject()` in default values. Return value is ignored. Multiple on one class: called in declaration order, serially.
+
 Lifecycle order:
 
-1. **Construction** — constructor runs, default params call `inject()`.
-2. **`@OnConstruct()`** — async post-construction initializer.
-3. **`@OnDestroy()`** — fires during destroy, in reverse dependency order.
+1. **Construction** -- constructor runs, default params call `inject()`.
+2. **`@OnConstruct()`** -- async post-construction initializer (inject point).
+3. **`@OnDestroy()`** -- fires during destroy, in reverse dependency order (inject point).
 
 ## 5. Providers
 
@@ -75,24 +76,22 @@ declare function token<T>(
 ): Token<T>;
 ```
 
-### 5.2 Computed
+### 5.2 `@Provide` -- class decorator
 
-```ts
-declare class Computed<T> {
-  readonly resolve: () => Awaitable<T>;
-}
+Registers a provider for a class or token. Multiple `@Provide` can be stacked. Providers are registered when `@Use`-d.
 
-declare function computed<T>(resolve: () => Awaitable<T>): Computed<T>;
-```
+Duplicate providers for the same target throw `DuplicateProviderError` (unless exactly one has `{ primary: true }`). `@Component` counts as an implicit provider -- `@Provide` on the same target requires `{ primary: true }`.
 
-### 5.3 `@Provide` — class decorator
-
-Registers a provider for a class or token.
+The factory and `onConstruct`/`onDestroy` callbacks are **inject points** -- their parameters can use `inject()` in default values. Return value of callbacks is ignored.
 
 ```ts
 interface ProvideOptions<T> extends ComponentOptions {
+  /** Inject point. Return value ignored. */
   onConstruct?: NoArgsMethodKeyof<T> | ((instance: T) => Awaitable<void>);
+  /** Inject point. Return value ignored. */
   onDestroy?: NoArgsMethodKeyof<T> | ((instance: T) => Awaitable<void>);
+  /** If true, takes precedence when multiple providers exist for the same target. */
+  primary?: boolean;
 }
 
 interface ProvideMetadata<T> extends ProvideOptions<T> {
@@ -107,22 +106,6 @@ declare function Provide<T>(
 ): ClassDecorator<ProvideMetadata<T>>;
 ```
 
-### 5.4 `@Decorate` — class decorator
-
-Wraps an existing provider. If the target has no provider, the decoration is silently ignored.
-
-```ts
-interface DecorateMetadata<T> {
-  target: Injectable<T>;
-  decorator: (previous: T) => Awaitable<T>;
-}
-
-declare function Decorate<T>(
-  target: Injectable<T>,
-  decorator: (previous: T) => Awaitable<T>,
-): ClassDecorator<DecorateMetadata<T>>;
-```
-
 ## 6. Injection APIs
 
 ### 6.1 `inject()`
@@ -134,13 +117,14 @@ declare function inject<T>(injectable: Injectable<T>, optional: true): T | undef
 declare function inject<T>(injectable: Injectable<T>, name: Qualifier, optional: true): T | undefined;
 ```
 
-**Inject points** — `inject()` may only be called in default parameters at:
+**Inject points** -- `inject()` may only be called in default parameters at:
 
 1. `@Component` class constructors
 2. `token()` factory functions
-3. `computed()` resolve functions
-4. `@Provide` / `@Decorate` factory parameters
-5. `ComponentOptions.condition` functions
+3. `@Provide` factory parameters
+4. `ComponentOptions.condition` functions
+5. `@OnConstruct` / `@OnDestroy` method parameters
+6. `onConstruct` / `onDestroy` callback parameters (`ProvideOptions`)
 
 ### 6.2 `injectRef()` — circular references
 
@@ -163,7 +147,7 @@ declare function injectMap<T>(injectable: Injectable<T> | ClassDecoratorFactory<
 
 ## 7. Container & scope
 
-All configuration is done via decorators (`@Provide`, `@Decorate`, `@Touch`, `@Use`). The container only resolves and destroys.
+All configuration is done via decorators (`@Provide`, `@Touch`, `@Use`). The container only resolves and destroys.
 
 ```ts
 declare class Container {
@@ -188,20 +172,14 @@ declare class Scope {
 
 ### Resolution order
 
-When `container.resolve(target)` is called:
+When `container.resolve(target)` is called, all `@Use` deps and the target itself are treated as entrypoints, instantiated serially. For each target:
 
-1. All `@Use` deps and the target itself are treated as entrypoints.
-2. The container instantiates them **serially** in order: `...deps, target`.
-3. For each target being instantiated:
-   1. Find the last registered provider (factory) for it.
-   2. Call the factory (inject context active for default params).
-   3. Call `onConstruct` / `@OnConstruct()` on the instance.
-   4. Apply all `@Decorate` wrappers in registration order.
-   5. Mark the target as instantiated.
-
-### `@Decorate` on target without provider
-
-If `@Decorate` is applied for a target that has no registered provider, the decoration is **silently ignored**.
+1. **Check condition.** Disabled -> skip.
+2. **Register decorator metadata:** `@Touch`, `@Provide` (pure registration). Duplicate `@Provide` -> `DuplicateProviderError` (unless primary).
+3. **Process `@Use`:** recursively instantiate deps (depth-first).
+4. **Call factory** (inject context active).
+5. **Call `@OnConstruct` methods** (declaration order, serially, inject point).
+6. **Mark instantiated.**
 
 ## 8. Error types
 
@@ -232,6 +210,11 @@ declare class ConfigValidationError extends Error {
   readonly prefix: string;
   readonly issues: unknown;
 }
+
+/** Thrown when multiple providers exist for the same target without a primary. */
+declare class DuplicateProviderError extends Error {
+  readonly injectable: Injectable<any>;
+}
 ```
 
 ## 9. Async resolution — Suspense style
@@ -249,9 +232,9 @@ All `inject()` calls are synchronous. Async providers are handled via throw-and-
 
 ```ts
 import {
-  Container, Component, Provide, Decorate, Touch, Use,
-  OnConstruct, OnDestroy,
-  token, computed, inject, injectAll, injectRef,
+  Container, Component, Provide, Touch, Use,
+  OnConstruct, OnDestroy, ConfigDefault,
+  token, inject, injectAll, injectRef,
   Metadata,
 } from 'kavri';
 import { createConfigSchema, ConfigOptions } from 'kavri/config';
@@ -271,7 +254,7 @@ class PsqlDriver extends Driver {
   async query(sql: string) { return `psql:${sql}`; }
 }
 
-const SelectedDriver = computed<Driver>(
+const SelectedDriver = token<Driver>(
   (cfg = inject(DbConfig), d = inject(Driver, cfg.driver)) => d,
 );
 
@@ -286,7 +269,7 @@ declare class Redis {
   await r.connect('redis://localhost');
   return r;
 }, { onDestroy: 'disconnect' })
-@Decorate(ConfigOptions, (prev) => ({ ...prev, configFiles: ['app.yaml'] }))
+@ConfigDefault(ConfigOptions, { configFiles: ['app.yaml'] })
 class AppModule {}
 
 @Component()
@@ -297,7 +280,7 @@ class UserService {
   ) {}
 
   @OnConstruct()
-  async init() { /* warm cache */ }
+  async init(logger = inject(Logger)) { /* warm cache */ }
 
   async createUser(name: string) {
     await this.driver.query(`insert into users ...`);

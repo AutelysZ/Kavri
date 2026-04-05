@@ -2,7 +2,7 @@
 
 ## 1. Purpose
 
-Modules group cohesive sets of providers and component registrations. A module is a `@Component()` class that uses `@Provide`, `@Decorate`, `@Touch`, and/or `@Use` decorators.
+Modules group cohesive sets of providers and component registrations. A module is a `@Component()` class that uses `@Provide`, `@Touch`, `@Use`, and/or `@ConfigDefault` decorators.
 
 There is no root/local module hierarchy. ESM already handles physical modularization. Kavri modules are purely logical groupings for provider organization.
 
@@ -20,19 +20,19 @@ Use for making implementations available for collection injection (`injectAll`/`
 
 ### `@Use(...injectables)` — instantiate and activate
 
-Ensures the listed injectables are **instantiated** (and their `@Provide`/`@Decorate` decorators processed) before the decorated class is resolved.
+Ensures the listed injectables are **instantiated** (and their `@Provide` decorators processed) before the decorated class is resolved.
 
 ```ts
 declare function Use(...injectables: Injectable<any>[]): ClassDecorator;
 ```
 
 Use for:
-- Components with `@Provide`/`@Decorate` that must be processed
+- Components with `@Provide` that must be processed
 - Side-effect components (event subscribers, background workers)
 
-### `@Provide` and `@Decorate` on modules
+### `@Provide` and `@ConfigDefault` on modules
 
-Modules use `@Provide` and `@Decorate` as class decorators to register and wrap providers:
+Modules use `@Provide` as a class decorator to register providers, and `@ConfigDefault` to supply code-level defaults for config tokens:
 
 ```ts
 @Component()
@@ -41,27 +41,24 @@ Modules use `@Provide` and `@Decorate` as class decorators to register and wrap 
   await r.connect(config.url);
   return r;
 }, { onDestroy: 'disconnect' })
-@Decorate(ConfigOptions, (prev) => ({
-  ...prev,
-  configFiles: ['app.yaml'],
-}))
+@ConfigDefault(ConfigOptions, { configFiles: ['app.yaml'] })
 class AppModule {}
 ```
 
-`@Provide`/`@Decorate` can be used on **any** `@Component()` class, not just dedicated module classes.
+`@Provide`/`@ConfigDefault` can be used on **any** `@Component()` class, not just dedicated module classes.
 
 ## 3. Touch vs Use
 
 | | `@Touch` | `@Use` |
 |---|---|---|
 | **What it does** | Registers injectable (makes it known) | Instantiates injectable (triggers side effects) |
-| **Processes `@Provide`/`@Decorate`?** | No | Yes |
+| **Processes `@Provide`?** | No | Yes |
 | **When to use** | Implementations for collections | Modules, side-effect components |
 | **Ordering guarantee** | No (just registration) | Yes (instantiated before dependant) |
 
 ## 4. Rules
 
-- **Module is optional.** Small applications can put `@Provide`/`@Touch` directly on the entrypoint class.
+- **Module is optional.** Small applications can put `@Provide`/`@ConfigDefault`/`@Touch` directly on the entrypoint class.
 - **Module does not change resolution semantics.** Provider scope, lifecycle, and injection behavior are identical whether registered via a module or directly.
 - **Modules can compose.** A module can `@Use` other modules.
 - **No circular module dependencies.** If module A uses module B and B uses A, startup fails.
@@ -75,7 +72,7 @@ import {
   Container,
   Component,
   Provide,
-  Decorate,
+  ConfigDefault,
   Touch,
   Use,
   OnEvent,
@@ -87,7 +84,6 @@ import {
   injectSet,
   injectMap,
   token,
-  computed,
 } from 'kavri';
 import { createConfigSchema, ConfigOptions } from 'kavri/config';
 import { z } from 'zod';
@@ -113,7 +109,7 @@ class MysqlDriver extends Driver {
   async query(sql: string) { return `mysql:${sql}`; }
 }
 
-const SelectedDriver = computed<Driver>(
+const SelectedDriver = token<Driver>(
   (cfg = inject(DbConfig), d = inject(Driver, cfg.driver)) => d,
 );
 
@@ -143,10 +139,9 @@ class CacheModule {}
 // ---- config module ----
 
 @Component()
-@Decorate(ConfigOptions, (prev) => ({
-  ...prev,
+@ConfigDefault(ConfigOptions, {
   configFiles: ['application.yaml'],
-}))
+})
 class ConfigModule {}
 
 // ---- notification module (side-effect) ----

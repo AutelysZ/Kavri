@@ -31,15 +31,7 @@ An inject call is valid **only** as a **default parameter value** in:
    );
    ```
 
-3. **`computed()` resolver parameters**
-
-   ```ts
-   const Selected = computed<Driver>(
-       (cfg = inject(DbConfig), d = inject(Driver, cfg.driver)) => d // ok
-   );
-   ```
-
-4. **`@Provide` factory parameters**
+3. **`@Provide` factory parameters**
 
    ```ts
    @Provide(Redis, async (config = inject(RedisConfig)) => { // ok
@@ -50,14 +42,14 @@ An inject call is valid **only** as a **default parameter value** in:
    class CacheModule {}
    ```
 
-5. **`@Decorate` decorator parameters**
+5. **`@OnConstruct` / `@OnDestroy` method parameters**
 
    ```ts
-   @Decorate(ConfigOptions, (prev, extra = inject(AppConfig)) => ({ // ok
-       ...prev,
-       configFiles: [extra.configDir + '/app.yaml'],
-   }))
-   class ConfigModule {}
+   @Component()
+   class Pool {
+       @OnConstruct()
+       async init(logger = inject(Logger)) {} // ok
+   }
    ```
 
 6. **`ComponentOptions.condition` parameters**
@@ -115,10 +107,10 @@ The rule walks the AST upward from each inject call and checks:
 2. **What is the enclosing function?**
    - Constructor of a class decorated with `@Component` → valid.
    - Arrow/function passed as argument to `token()` → valid.
-   - Arrow/function passed as argument to `computed()` → valid.
    - Arrow/function passed as 2nd argument of a `@Provide(target, factory)` decorator → valid.
-   - Arrow/function passed as 2nd argument of a `@Decorate(target, decorator)` decorator → valid.
    - Arrow/function assigned to `condition` property in `@Component({ condition: ... })` → valid.
+   - Method decorated with `@OnConstruct()` or `@OnDestroy()` → valid.
+   - Arrow/function in `onConstruct`/`onDestroy` of `ProvideOptions` → valid.
    - Anything else → report.
 
 ### Affected functions
@@ -148,8 +140,8 @@ The rule applies to these function names (configurable):
 
 ```
 `inject()` must be called as a default parameter inside a valid inject point
-(@Component constructor, token() factory, computed() resolver, @Provide factory,
-@Decorate decorator, or condition function).
+(@Component constructor, token() factory, @Provide factory, @OnConstruct/@OnDestroy,
+@OnConstruct/@OnDestroy method, or condition function).
 ```
 
 ## 3. Rule: `kavri/no-inject-after-side-effect`

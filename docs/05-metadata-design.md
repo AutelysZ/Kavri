@@ -26,7 +26,7 @@ type MethodDecoratorFactory<T> = (...args: any[]) => MethodDecorator<T>;
 
 Every decorator is both a decorator and a metadata carrier. The factory function that creates it serves as the metadata key.
 
-## 3. Reading metadata — `Metadata.of()`
+## 3. Reading metadata -- `Metadata.of()` and `Metadata.entries()`
 
 ```ts
 declare const Metadata: {
@@ -34,18 +34,25 @@ declare const Metadata: {
   of<T>(factory: ClassDecoratorFactory<T>, target: Injectable<any>): readonly T[];
   of<T>(factory: ClassDecoratorFactory<T>, instance: object): readonly T[];
 
-  // Method-level: by class + method name, or by method reference
+  // Method-level: by class + method name
   of<T>(factory: MethodDecoratorFactory<T>, target: Injectable<any>, key: Qualifier): readonly T[];
   of<T>(factory: MethodDecoratorFactory<T>, instance: object, key: Qualifier): readonly T[];
-  of<T>(factory: MethodDecoratorFactory<T>, method: Function): readonly T[];
 
   // Programmatic write (push, not replace)
   apply<T>(factory: ClassDecoratorFactory<T>, target: Injectable<any>, metadata: T): void;
   apply<T>(factory: MethodDecoratorFactory<T>, target: Injectable<any>, key: Qualifier, metadata: T): void;
+
+  // Get all registered [injectable, metadata] pairs for a class decorator
+  entries<T>(factory: ClassDecoratorFactory<T>): readonly [Injectable<any>, T][];
+
+  // Get all registered [injectable, key, metadata] triples for a method decorator
+  entries<T>(factory: MethodDecoratorFactory<T>): readonly [Injectable<any>, Qualifier, T][];
 };
 ```
 
-Returns `readonly T[]` because a decorator can be applied multiple times (e.g., multiple `@Provide` on one class).
+`Metadata.of()` returns `readonly T[]` because a decorator can be applied multiple times (e.g., multiple `@Provide` on one class).
+
+`Metadata.entries()` returns all registered pairs/triples for a decorator factory. This is how subsystems discover all classes decorated with a given decorator without a central registry.
 
 ### Examples
 
@@ -62,6 +69,14 @@ Metadata.of(OnEvent, OrderListener, 'onCreated'); // [{ event: OrderCreatedEvent
 
 // Read component name
 Metadata.of(Component, myPet)[0]?.options.name;  // 'dog'
+
+// Discover all controllers (class decorator entries)
+Metadata.entries(Controller);
+// → [[UserController, { path: '/users' }], [AdminController, { path: '/admin' }], ...]
+
+// Discover all rate-limited methods (method decorator entries)
+Metadata.entries(RateLimit);
+// → [[ApiService, 'search', { maxRequests: 100, windowMs: 60000 }], ...]
 ```
 
 ## 4. Creating decorators
@@ -117,7 +132,6 @@ All built-in decorators carry typed metadata and can be read via `Metadata.of()`
 |---|---|---|
 | `Component(opts?)` | `ComponentMetadata` | `Metadata.of(Component, cls)` |
 | `Provide(target, fn, opts?)` | `ProvideMetadata<T>` | `Metadata.of(Provide, cls)` |
-| `Decorate(target, fn)` | `DecorateMetadata<T>` | `Metadata.of(Decorate, cls)` |
 | `Touch(...injectables)` | `readonly Injectable<any>[]` | `Metadata.of(Touch, cls)` |
 | `Use(...injectables)` | `readonly Injectable<any>[]` | `Metadata.of(Use, cls)` |
 | `EventType(name?)` | `{ name: string \| undefined }` | `Metadata.of(EventType, cls)` |
@@ -125,6 +139,7 @@ All built-in decorators carry typed metadata and can be read via `Metadata.of()`
 | `OnConstruct()` | `{}` | `Metadata.of(OnConstruct, cls, 'init')` |
 | `OnDestroy()` | `{}` | `Metadata.of(OnDestroy, cls, 'dispose')` |
 | `Configuration(prefix, schema)` | `ConfigurationMetadata<T>` | `Metadata.of(Configuration, token)` |
+| `ConfigDefault(token, defaults)` | `ConfigDefaultMetadata<T>` | `Metadata.of(ConfigDefault, cls)` |
 
 ## 6. Programmatic metadata — `Metadata.apply()`
 

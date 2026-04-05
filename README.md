@@ -17,7 +17,7 @@ Kavri uses default parameters as the injection mechanism. No reflection, no para
 ## Example
 
 ```ts
-import { Container, Component, Provide, Decorate, Touch, Use, inject, token } from 'kavri';
+import { Container, Component, Provide, ConfigDefault, Touch, Use, inject, token } from 'kavri';
 import { createConfigSchema, ConfigOptions } from 'kavri/config';
 import { z } from 'zod';
 
@@ -46,7 +46,7 @@ declare class Redis { connect(url: string): Promise<void>; disconnect(): Promise
 
 @Component()
 @Provide(Redis, async () => { const r = new Redis(); await r.connect('redis://localhost'); return r; }, { onDestroy: 'disconnect' })
-@Decorate(ConfigOptions, (prev) => ({ ...prev, configFiles: ['app.yaml'] }))
+@ConfigDefault(ConfigOptions, { configFiles: ['app.yaml'] })
 class AppModule {}
 
 // application
@@ -71,7 +71,7 @@ await container.destroy();
 ## Documentation
 
 - [IoC Core](./docs/01-ioc-core-design.md) — components, providers, injection, scopes
-- [Modules](./docs/02-modularization-design.md) — @Touch, @Use, @Provide, @Decorate
+- [Modules](./docs/02-modularization-design.md) — @Touch, @Use, @Provide, @ConfigDefault
 - [Configuration](./docs/03-configuration-design.md) — zod schemas, multi-source config
 - [Events](./docs/04-event-design.md) — @EventType, @OnEvent, EventBus
 - [Metadata](./docs/05-metadata-design.md) — Metadata.of, createClassDecorator

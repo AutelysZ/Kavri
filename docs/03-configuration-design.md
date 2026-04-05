@@ -2,20 +2,20 @@
 
 ## 1. Position
 
-Configuration is a first-class subsystem with pluggable loaders, resolvers, and parsers. Config values are tokens — injected with `inject()` like any other dependency.
+Configuration is a first-class subsystem with pluggable loaders, resolvers, and parsers. Config values are tokens -- injected with `inject()` like any other dependency.
 
 ## 2. Architecture
 
 ```
 Bootstrap phase (env/cli only):
-  createBootstrapOption() → ConfigOptions, AwsResolverOptions, ...
+  createBootstrapOption() -> ConfigOptions, AwsResolverOptions, ...
 
 Load phase:
-  injectAll(Loader)    → parse config files (json, yaml, toml, .env, ...)
-  injectAll(Resolver)  → resolve ${prefix:key} placeholders
+  injectAll(Loader)    -> parse config files (json, yaml, toml, .env, ...)
+  injectAll(Resolver)  -> resolve ${prefix:key} placeholders
 
 Config phase (all sources):
-  createConfigSchema() → DatabaseConfig, AppConfig, ...
+  createConfigSchema() -> DatabaseConfig, AppConfig, ...
 ```
 
 ## 3. Parser (pluggable validation)
@@ -99,15 +99,15 @@ Options needed before config files load (ConfigOptions, AwsResolverOptions). Res
 declare function createBootstrapOption<T>(prefix: string, parser: ConfigParser<T>): Token<T>;
 ```
 
-Env mapping: prefix uppercased, dots become underscores. `'aws'` → `AWS_REGION`.
-CLI mapping: prefix as-is with `--` prepended. `'aws'` → `--aws.region`.
+Env mapping: prefix uppercased, dots become underscores. `'aws'` -> `AWS_REGION`.
+CLI mapping: prefix as-is with `--` prepended. `'aws'` -> `--aws.region`.
 
-Precedence (highest → lowest):
-1. **@Provide** — bypasses resolution (testing escape hatch)
+Precedence (highest -> lowest):
+1. **@Provide** -- bypasses resolution (testing escape hatch)
 2. **CLI arguments**
 3. **Environment variables**
-4. **@Decorate** — code-level defaults
-5. **Schema defaults**
+4. **@ConfigDefault** -- code-level defaults
+5. **Parser defaults**
 
 ```ts
 const AwsResolverOptions = createBootstrapOption('aws', z.object({
@@ -137,24 +137,61 @@ Defaults: `configFiles=['config.{yaml,yml,json,toml}']`, `env=process.env`, `arg
 declare function createConfigSchema<T>(prefix: string, parser: ConfigParser<T>): Token<T>;
 ```
 
-Precedence (highest → lowest):
-1. **@Provide** — bypasses resolution (testing escape hatch)
+The returned token's factory: `(registry = inject(ConfigRegistry)) => registry.parse(token)`.
+
+`registry.parse(token)` reads prefix and parser from `Metadata.of(Configuration, token)`, then extracts and validates the node at `prefix` from the registry's merged config.
+
+Precedence (highest -> lowest):
+1. **@Provide** -- bypasses resolution (testing escape hatch)
 2. **CLI arguments** (`--{argvPrefix}{key}`)
 3. **Environment variables** (`{envPrefix}{KEY}`)
 4. **Config files** (first glob match per element)
-5. **@Decorate** — code-level defaults
-6. **Schema defaults**
+5. **@ConfigDefault** -- code-level defaults
+6. **Parser defaults**
 
 ```ts
 const DatabaseConfig = createConfigSchema('database', z.object({
   driver: z.string(),
   host: z.string(),
   port: z.coerce.number().default(5432),
+  username: z.string(),
   password: z.string(),
+  database: z.string(),
 }));
 ```
 
-## 8. Variable substitution
+## 8. `@ConfigDefault` -- code-level defaults
+
+`@ConfigDefault` is a class decorator that provides code-level default values for a config or bootstrap token. These defaults have lower priority than config files, env vars, and CLI args.
+
+```ts
+interface ConfigDefaultMetadata<T> {
+  token: Token<T>;
+  defaults: Partial<T>;
+}
+
+declare function ConfigDefault<T>(
+  configToken: Token<T>,
+  defaults: Partial<T>,
+): ClassDecorator<ConfigDefaultMetadata<T>>;
+```
+
+Defaults support variable substitution (`${...}` resolved by Resolvers). Multiple `@ConfigDefault` for the same token are deep-merged in `@Use` order.
+
+```ts
+@Component()
+@ConfigDefault(ConfigOptions, {
+  configFiles: ['config/app.yaml'],
+  envPrefix: 'MYAPP_',
+})
+@ConfigDefault(DatabaseConfig, {
+  port: 5432,
+  host: 'localhost',
+})
+class AppConfigModule {}
+```
+
+## 9. Variable substitution
 
 After source merging, before parsing. Applied to string values only.
 
@@ -165,8 +202,8 @@ After source merging, before parsing. Applied to string values only.
 | `${key:-default}` | Use default if unresolved |
 | `${prefix:key:-default}` | External with default |
 
-- Unresolved without default → `ConfigValidationError`
-- Circular references → `ConfigValidationError`
+- Unresolved without default -> `ConfigValidationError`
+- Circular references -> `ConfigValidationError`
 - Use `z.coerce.*()` for non-string target types
 
 ```yaml
@@ -176,22 +213,56 @@ database:
   url: "postgres://${database.host}:${database.port}"
 ```
 
-## 9. ConfigRegistry (internal)
+## 10. ConfigRegistry (internal)
 
-Loads all config sources (files via Loaders, env, argv), resolves `${...}` via Resolvers, stores merged key-value store. Config tokens depend on it. Users don't interact with it directly.
+Internal singleton. Created on first config token inject.
 
-## 10. Validation & failure
+### `@OnConstruct` lifecycle (in order):
 
-- Missing required values → `ConfigValidationError`
-- Parser/validation errors → `ConfigValidationError` with prefix and details
-- Unresolved `${...}` → `ConfigValidationError`
-- Circular variable references → `ConfigValidationError`
+1. **Load config files** -- using `ConfigOptions.configFiles` + `injectAll(Loader)`
+2. **Merge @ConfigDefault code defaults** -- collected via `Metadata.entries(ConfigDefault)`
+3. **Resolve `${...}` variables** -- using `injectAll(Resolver)`
+4. **Merge env vars** -- uses all registered config nodes' metadata to determine field names/types for env mapping: `Metadata.entries(Configuration)`
+5. **Merge cli args** -- same metadata for arg mapping
 
-## 11. Full example
+Store merged result.
+
+### `registry.parse(configToken)`:
+
+Reads prefix and parser from `Metadata.of(Configuration, configToken)`. Extracts the node at prefix from merged config. Validates with parser.
+
+Users don't interact with ConfigRegistry directly.
+
+## 11. `Configuration` decorator (internal metadata)
+
+```ts
+interface ConfigurationMetadata<T> {
+  prefix: string;
+  parser: ConfigParser<T>;
+  bootstrap: boolean;
+}
+
+declare function Configuration<T>(
+  prefix: string,
+  parser: ConfigParser<T>,
+  bootstrap?: boolean,
+): ClassDecorator<ConfigurationMetadata<T>>;
+```
+
+Applied internally by `createConfigSchema` and `createBootstrapOption` to their returned tokens. The ConfigRegistry reads this metadata via `Metadata.of(Configuration, token)` and `Metadata.entries(Configuration)`.
+
+## 12. Validation and failure
+
+- Missing required values -> `ConfigValidationError`
+- Parser/validation errors -> `ConfigValidationError` with prefix and details
+- Unresolved `${...}` -> `ConfigValidationError`
+- Circular variable references -> `ConfigValidationError`
+
+## 13. Full example
 
 ```ts
 import {
-  Container, Component, Touch, Use, Decorate,
+  Container, Component, Touch, Use, ConfigDefault,
   inject, injectAll, token,
 } from 'kavri';
 import {
@@ -261,11 +332,14 @@ const SelectedDriver = token<Driver>(
 @Component()
 @Touch(PsqlDriver)
 @Touch(AwsResolver, EnvFileLoader)
-@Decorate(ConfigOptions, (prev) => ({
-  ...prev,
+@ConfigDefault(ConfigOptions, {
   configFiles: ['config/app.yaml'],
   envPrefix: 'MYAPP_',
-}))
+})
+@ConfigDefault(DbConfig, {
+  port: 5432,
+  host: 'localhost',
+})
 class Application {
   constructor(
     private readonly app = inject(AppConfig),
