@@ -240,14 +240,8 @@ declare function IsArray(
     },
 ): FieldDecorator;
 
-// Nested @Schema class reference
+// Reference to another @Schema class. Always lazy (factory function) to support circular deps.
 declare function Ref(
-    clazz: AnyConstructor<any>,
-    options?: FieldDecoratorOptions,
-): FieldDecorator;
-
-// Lazy reference for circular dependencies
-declare function LazyRef(
     factory: () => AnyConstructor<any>,
     options?: FieldDecoratorOptions,
 ): FieldDecorator;
@@ -357,7 +351,7 @@ Returns the aggregated schema metadata from `@Schema`. Throws if the class is no
 declare function toJsonSchema(clazz: AnyConstructor<any>): object;
 ```
 
-Generates a JSON Schema 2020-12 document from a `@Schema`-decorated class. Handles `Ref`, `LazyRef` as `$ref`. Strips Kavri-specific extensions (`validator`, `parse`, `class`, `lazyClass`).
+Generates a JSON Schema 2020-12 document from a `@Schema`-decorated class. Handles `Ref` as `$ref`. Strips Kavri-specific extensions (`validator`, `parse`, `lazyClass`).
 
 ### fromJsonSchema — JSON Schema to inline schema definition
 
@@ -603,7 +597,7 @@ import {
     IsString, IsInteger, IsNumber, IsBoolean,
     IsEmail, IsDate, IsEnum, IsUUID,
     IsArray, IsObject, IsRecord,
-    Ref, LazyRef, OneOf, IsConst, IsAny,
+    Ref, Ref, OneOf, IsConst, IsAny,
     parse, validate, serialize, toJsonSchema, fromJsonSchema, getSchema, defineSchema,
     createFieldDecorator,
 } from '@kavri/schema';
@@ -641,7 +635,7 @@ class User {
     @IsObject({ id: IsInteger() }, { additionalProperties: true })
     metadata!: { id: number; [key: string]: any };
 
-    @IsArray(Ref(Post), { minItems: 0, optional: true })
+    @IsArray(Ref(() => Post), { minItems: 0, optional: true })
     posts?: Post[];
 
     @IsArray(IsInteger())
@@ -659,7 +653,7 @@ class Post {
     @IsInteger()
     id!: number;
 
-    @LazyRef(() => User, { description: 'Author', optional: true })
+    @Ref(() => User, { description: 'Author', optional: true })
     author?: User;
 
     @IsString()
@@ -792,7 +786,7 @@ Prefer `nullable` over `optional` when the field should always be present but ma
 
 ## 12. Circular References
 
-`LazyRef` handles circular dependencies:
+`Ref` handles circular dependencies:
 
 ```ts
 @Schema()
@@ -800,11 +794,9 @@ class TreeNode {
     @IsString()
     name!: string;
 
-    @IsArray(LazyRef(() => TreeNode), { optional: true })
+    @IsArray(Ref(() => TreeNode), { optional: true })
     children?: TreeNode[];
 }
 ```
 
-`LazyRef(() => TreeNode)` defers class resolution. In JSON Schema output, it produces a `$ref`. In parse, it resolves the class lazily.
-
-`Ref(Post)` is for non-circular references — the class must already be defined.
+`Ref()` always takes a factory function. This defers class resolution, supporting both circular and non-circular references uniformly. In JSON Schema output, it produces a `$ref`. In parse, it resolves the class lazily.
