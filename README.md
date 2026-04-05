@@ -83,7 +83,7 @@ await container.destroy();
 - [IoC Core](./docs/01-ioc-core-design.md) — components, providers, injection, scopes
 - [Modules](./docs/02-modularization-design.md) — @Touch, @Use, @Provide, @Decorate
 - [Configuration](./docs/03-configuration-design.md) — zod schemas, multi-source config
-- [Events](./docs/04-event-design.md) — @Event, @OnEvent, EventBus
+- [Events](./docs/04-event-design.md) — @EventType, @OnEvent, EventBus
 - [Metadata](./docs/05-metadata-design.md) — Metadata.of, createClassDecorator
 - [API Reference](./docs/draft.ts) — complete type declarations with examples
 

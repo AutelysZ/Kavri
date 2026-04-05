@@ -6,18 +6,18 @@ The event system provides decoupled pub/sub communication between components. It
 
 ## 2. Two event styles
 
-### 2.1 Class-based events — `@Event(name?)`
+### 2.1 Class-based events — `@EventType(name?)`
 
-Event classes must be decorated with `@Event()`. Emitting an undecorated class instance is a runtime error — this prevents accidental dispatch of arbitrary objects.
+Event classes must be decorated with `@EventType()`. Emitting an undecorated class instance is a runtime error — this prevents accidental dispatch of arbitrary objects.
 
 ```ts
-declare function Event(name?: string): ClassDecorator;
+declare function EventType(name?: string): ClassDecorator<{ name: string | undefined }>;
 ```
 
 The optional `name` is used for logging, serialization, and debugging.
 
 ```ts
-@Event('order.created')
+@EventType('order.created')
 class OrderCreatedEvent {
   constructor(
     public readonly orderId: string,
@@ -33,6 +33,7 @@ Lightweight typed events without defining a class. Use when the event payload is
 ```ts
 declare class EventKey<T> {
   readonly name?: string;
+  private readonly __brand: T;
 }
 
 declare function defineEvent<T>(name?: string): EventKey<T>;
@@ -72,8 +73,8 @@ class OrderNotifier {
 
 ```ts
 declare class EventBus {
-  /** Emit a class-based event. The class must be decorated with @Event(). */
-  emit<T>(event: T): Promise<void>;
+  /** Emit a class-based event. The class must be decorated with @EventType(). */
+  emit<T extends object>(event: T): Promise<void>;
   /** Emit a key-based event with data. */
   emit<T>(key: EventKey<T>, data: T): Promise<void>;
 }
@@ -85,7 +86,7 @@ declare class EventBus {
 
 ## 5. Rules
 
-- **`@Event` is required** for class-based events. Emitting an undecorated class throws at runtime.
+- **`@EventType` is required** for class-based events. Emitting an undecorated class throws at runtime.
 - **Listeners must be in `@Component()` classes.** The component must be imported/used in the container.
 - **Listener invocation order** follows dependency order (components resolved first are called first).
 - **Async listeners** are awaited. If a listener throws, `emit()` rejects.
@@ -98,9 +99,9 @@ declare class EventBus {
 import {
   Container,
   Component,
-  Import,
+  Touch,
   Use,
-  Event,
+  EventType,
   OnEvent,
   EventBus,
   defineEvent,
@@ -110,7 +111,7 @@ import {
 
 // --- class-based events ---
 
-@Event('order.created')
+@EventType('order.created')
 class OrderCreatedEvent {
   constructor(
     public readonly orderId: string,
@@ -118,7 +119,7 @@ class OrderCreatedEvent {
   ) {}
 }
 
-@Event('order.shipped')
+@EventType('order.shipped')
 class OrderShippedEvent {
   constructor(public readonly orderId: string) {}
 }

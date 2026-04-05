@@ -83,13 +83,17 @@ Customize via `container.decorate()` or `@Decorate`:
 class ConfigModule {}
 ```
 
-## 6. Validation & failure
+## 6. ConfigRegistry (internal)
+
+`ConfigRegistry` is an internal class that loads all raw config sources (files, env, argv) into a unified key-value store. Config tokens created by `createConfigSchema()` have their factory depend on `ConfigRegistry`, which in turn depends on `ConfigOptions` to determine where to load config from. Users do not interact with `ConfigRegistry` directly — it is resolved automatically when any config token is injected.
+
+## 7. Validation & failure
 
 - Missing required values → startup fails with key name.
-- Zod validation errors → startup fails with details.
+- Zod validation errors → throws `ConfigValidationError` with the prefix and zod issues.
 - Type coercion from env/CLI strings based on schema.
 
-## 7. Config-driven selection
+## 8. Config-driven selection
 
 ```ts
 const SelectedDriver = computed<Driver>(
@@ -97,7 +101,7 @@ const SelectedDriver = computed<Driver>(
 );
 ```
 
-## 8. Introspection
+## 9. Introspection
 
 Since config schemas carry `@Configuration` metadata, all registered schemas can be discovered:
 
@@ -109,7 +113,7 @@ const allConfigs = Metadata.of(Configuration, token);
 const configs = injectAll(Configuration);
 ```
 
-## 9. Full example
+## 10. Full example
 
 ```ts
 import {

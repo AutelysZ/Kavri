@@ -39,9 +39,9 @@ declare const Metadata: {
   of<T>(factory: MethodDecoratorFactory<T>, instance: object, key: Qualifier): readonly T[];
   of<T>(factory: MethodDecoratorFactory<T>, method: Function): readonly T[];
 
-  // Programmatic write
-  decorate<T>(factory: ClassDecoratorFactory<T>, target: Injectable<any>, metadata: T): void;
-  decorate<T>(factory: MethodDecoratorFactory<T>, target: Injectable<any>, key: Qualifier, metadata: T): void;
+  // Programmatic write (push, not replace)
+  apply<T>(factory: ClassDecoratorFactory<T>, target: Injectable<any>, metadata: T): void;
+  apply<T>(factory: MethodDecoratorFactory<T>, target: Injectable<any>, key: Qualifier, metadata: T): void;
 };
 ```
 
@@ -51,7 +51,7 @@ Returns `readonly T[]` because a decorator can be applied multiple times (e.g., 
 
 ```ts
 // Read @Component metadata
-Metadata.of(Component, UserService);     // [{ name: undefined, scope: 'singleton' }]
+Metadata.of(Component, UserService);     // [{ options: { name: undefined, scope: 'singleton' } }]
 Metadata.of(Component, myInstance);       // same, works on instances
 
 // Read @Provide metadata from a module
@@ -61,7 +61,7 @@ Metadata.of(Provide, InfraModule);       // [{ injectable: Sequelize, ... }, { i
 Metadata.of(OnEvent, OrderListener, 'onCreated'); // [{ event: OrderCreatedEvent }]
 
 // Read component name
-Metadata.of(Component, myPet)[0]?.name;  // 'dog'
+Metadata.of(Component, myPet)[0]?.options.name;  // 'dog'
 ```
 
 ## 4. Creating decorators
@@ -120,22 +120,22 @@ All built-in decorators carry typed metadata and can be read via `Metadata.of()`
 | `Decorate(target, fn)` | `DecorateMetadata<T>` | `Metadata.of(Decorate, cls)` |
 | `Touch(...injectables)` | `readonly Injectable<any>[]` | `Metadata.of(Touch, cls)` |
 | `Use(...injectables)` | `readonly Injectable<any>[]` | `Metadata.of(Use, cls)` |
-| `Event(name?)` | `{ name: string \| undefined }` | `Metadata.of(Event, cls)` |
+| `EventType(name?)` | `{ name: string \| undefined }` | `Metadata.of(EventType, cls)` |
 | `OnEvent(event)` | `{ event: ... }` | `Metadata.of(OnEvent, cls, 'method')` |
 | `OnConstruct()` | `{}` | `Metadata.of(OnConstruct, cls, 'init')` |
 | `OnDestroy()` | `{}` | `Metadata.of(OnDestroy, cls, 'dispose')` |
 | `Configuration(prefix, schema)` | `ConfigurationMetadata<T>` | `Metadata.of(Configuration, token)` |
 
-## 6. Programmatic metadata — `Metadata.decorate()`
+## 6. Programmatic metadata — `Metadata.apply()`
 
-Attach metadata to a class or method without using decorator syntax. Useful for dynamic registration or testing.
+Attach metadata to a class or method without using decorator syntax. `apply()` uses push semantics — it appends to the metadata array rather than replacing it. Useful for dynamic registration or testing.
 
 ```ts
 // Programmatically mark a class as a Component
-Metadata.decorate(Component, MyClass, { name: 'dynamic', scope: 'singleton' });
+Metadata.apply(Component, MyClass, { options: { name: 'dynamic', scope: 'singleton' } });
 
 // Programmatically add an OnEvent handler
-Metadata.decorate(OnEvent, MyClass, 'handleOrder', { event: OrderCreatedEvent });
+Metadata.apply(OnEvent, MyClass, 'handleOrder', { event: OrderCreatedEvent });
 ```
 
 ## 7. Collection injection via decorator

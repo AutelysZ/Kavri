@@ -89,10 +89,12 @@ import {
   Use,
   OnEvent,
   OnDestroy,
-  Event,
+  EventType,
   EventBus,
   inject,
   injectAll,
+  injectSet,
+  injectMap,
   token,
   computed,
 } from 'kavri';
@@ -158,7 +160,7 @@ class ConfigModule {}
 
 // ---- notification module (side-effect) ----
 
-@Event('user.registered')
+@EventType('user.registered')
 class UserRegisteredEvent {
   constructor(public readonly email: string) {}
 }

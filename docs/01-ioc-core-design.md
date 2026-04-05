@@ -15,10 +15,9 @@ export type Awaitable<T> = T | Promise<T>;
 export type CollectionOrder = 'topological' | 'provided' | 'alphabetical';
 
 export type AnyConstructor<T> = abstract new (...args: any[]) => T;
-export type Constructor<T> = abstract new () => T;
-export type NoArgsMethodKeyof<T> = {
-  [P in keyof T]-?: T[P] extends (...args: never[]) => any ? P : never;
-}[keyof T];
+export type NoArgsMethodKeyof<T> = T extends object
+  ? { [P in keyof T]-?: T[P] extends () => any ? P : never; }[keyof T]
+  : never;
 ```
 
 ### Injectable type
@@ -26,7 +25,6 @@ export type NoArgsMethodKeyof<T> = {
 ```ts
 export type Injectable<T> =
   | AnyConstructor<T>
-  | Constructor<T>
   | Token<T>
   | Computed<T>;
 ```
@@ -40,7 +38,9 @@ interface ComponentOptions {
   condition?: () => Awaitable<boolean>;
 }
 
-interface ComponentMetadata extends ComponentOptions {}
+interface ComponentMetadata {
+  options: ComponentOptions;
+}
 
 declare function Component(options?: ComponentOptions): ClassDecorator<ComponentMetadata>;
 ```
@@ -110,6 +110,7 @@ declare function Provide<T>(
 ### 5.4 `@Decorate` — class decorator
 
 Wraps an existing provider. Declarative equivalent of `container.decorate()`.
+If the target has no provider, the decoration is silently ignored.
 
 ```ts
 interface DecorateMetadata<T> {
@@ -155,11 +156,11 @@ declare function injectRef<T>(injectable: Injectable<T>, optional: true): Ref<T>
 
 ```ts
 declare function injectAll<T>(injectable: Injectable<T> | ClassDecoratorFactory<any>, order?: CollectionOrder): readonly T[];
-declare function injectAll<T>(injectable: Injectable<T> | ClassDecoratorFactory<any>, as: 'set'): ReadonlySet<T>;
-declare function injectAll<T>(injectable: Injectable<T> | ClassDecoratorFactory<any>, as: 'map'): ReadonlyMap<Qualifier, T>;
+declare function injectSet<T>(injectable: Injectable<T> | ClassDecoratorFactory<any>): ReadonlySet<T>;
+declare function injectMap<T>(injectable: Injectable<T> | ClassDecoratorFactory<any>): ReadonlyMap<Qualifier, T>;
 ```
 
-`injectAll` accepts either a base class/token or a `ClassDecoratorFactory` to collect all classes decorated with that decorator. The `'set'` and `'map'` overloads replace the previous `injectSet`/`injectMap` functions.
+`injectAll` returns an ordered array. `injectSet` returns a `ReadonlySet`. `injectMap` returns a `ReadonlyMap` keyed by the component's `Qualifier` name. All three accept either a base class/token or a `ClassDecoratorFactory` to collect all classes decorated with that decorator.
 
 ## 7. Container & scope
 
@@ -188,7 +189,55 @@ declare class Scope {
 | `scoped` | Error if resolved from root | Fresh instance per scope |
 | `transient` | New per injection | New per injection |
 
-## 8. Async resolution — Suspense style
+### Resolution order
+
+When `container.resolve(target)` is called:
+
+1. All `container.use()` deps and the target itself are treated as entrypoints.
+2. The container instantiates them **serially** in order: `...deps, target`.
+3. For each target being instantiated:
+   1. Find the last registered provider (factory) for it.
+   2. Call the factory (inject context active for default params).
+   3. Call `onConstruct` / `@OnConstruct()` on the instance.
+   4. Apply all `@Decorate` / `container.decorate()` wrappers in registration order.
+   5. Mark the target as instantiated.
+
+### `container.decorate()` on target without provider
+
+If `container.decorate()` (or `@Decorate`) is called for a target that has no registered provider, the decoration is **silently ignored**. If `provide()` is called after `decorate()`, previously registered decorators are cleared.
+
+## 8. Error types
+
+```ts
+/** Thrown when a circular dependency is detected during resolution. */
+declare class CircularDependencyError extends Error {
+  readonly chain: Injectable<any>[];
+}
+
+/** Thrown when inject() is called for a target with no registered provider (non-optional). */
+declare class MissingProviderError extends Error {
+  readonly injectable: Injectable<any>;
+}
+
+/** Thrown when inject() is called outside a valid inject point. */
+declare class InjectContextError extends Error {}
+
+/** Thrown when a scoped provider is resolved from the root container. */
+declare class ScopeError extends Error {
+  readonly injectable: Injectable<any>;
+}
+
+/** Thrown when the container is used after destroy(). */
+declare class DestroyedContainerError extends Error {}
+
+/** Thrown when a config schema fails zod validation during resolution. */
+declare class ConfigValidationError extends Error {
+  readonly prefix: string;
+  readonly issues: unknown;
+}
+```
+
+## 9. Async resolution — Suspense style
 
 All `inject()` calls are synchronous. Async providers are handled via throw-and-retry:
 
@@ -199,7 +248,7 @@ All `inject()` calls are synchronous. Async providers are handled via throw-and-
 
 **Assumption:** all `inject()` calls happen before any side effects. Default parameters satisfy this naturally.
 
-## 9. Full example
+## 10. Full example
 
 ```ts
 import {
