@@ -219,11 +219,11 @@ Internal singleton. Created on first config token inject.
 
 ### `@OnConstruct` lifecycle (in order):
 
-1. **Load config files** -- using `ConfigOptions.configFiles` + `injectAll(Loader)`
-2. **Merge @ConfigDefault code defaults** -- collected via `Metadata.entries(ConfigDefault)`
+1. **Merge @ConfigDefault code defaults** -- collected via `Metadata.entries(ConfigDefault)` (lowest priority layer)
+2. **Load and merge config files** -- using `ConfigOptions.configFiles` + `injectAll(Loader)`
 3. **Resolve `${...}` variables** -- using `injectAll(Resolver)`
-4. **Merge env vars** -- uses all registered config nodes' metadata to determine field names/types for env mapping: `Metadata.entries(Configuration)`
-5. **Merge cli args** -- same metadata for arg mapping
+4. **Merge env vars** -- uses all registered config nodes' metadata for field mapping: `Metadata.entries(Configuration)`
+5. **Merge cli args** -- same metadata for arg mapping (highest priority layer)
 
 Store merged result.
 
