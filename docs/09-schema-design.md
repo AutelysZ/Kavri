@@ -14,23 +14,7 @@ Package: `@kavri/schema` — no dependency on `@kavri/core`.
 - **Bidirectional.** Class → JSON Schema. JSON Schema → class schema definition. Parse (deserialize) and validate.
 - **Messages + Services.** Define both data schemas (messages) and service contracts (RPC-style). Like protobuf: messages define structure, services define endpoints.
 
-## 2. Module Imports
-
-```
-@kavri/basic   → Metadata, createClassDecorator, createFieldDecorator, etc.
-@kavri/schema  → Schema, field decorators, createService, parse, validate, toJsonSchema
-@kavri/client  → createClient, typed HTTP clients from service definitions
-@kavri/core    → Component, Container, inject, etc. (depends on @kavri/basic)
-@kavri/event   → EventType, EventBus, etc. (depends on @kavri/core)
-@kavri/config  → createConfiguration, Loader, Resolver, etc. (depends on @kavri/core)
-@kavri/web     → Controller, Interceptor, WebApplication, injectClient (depends on @kavri/core)
-@kavri/aws-secretmanager-resolver → AWS Secrets Manager Resolver for @kavri/config
-@kavri/drizzle → Drizzle ORM integration, TransactionInterceptor, Repository
-```
-
-`@kavri/schema` depends only on `@kavri/basic`. It can be used standalone without the IoC container.
-
-## 3. Field Decorator System
+## 2. Field Decorator System
 
 ### FieldDecorator type
 
@@ -116,7 +100,7 @@ function IsEmail(options?: { nullable?: boolean; optional?: boolean; description
 
 All built-in decorators follow this pattern. Users can create custom ones the same way.
 
-## 4. Built-in Field Decorators
+## 3. Built-in Field Decorators
 
 ### Primitive types
 
@@ -318,7 +302,7 @@ declare function IsTuple(
 ): FieldDecorator;
 ```
 
-## 5. @Schema Decorator
+## 4. @Schema Decorator
 
 ```ts
 interface SchemaOptions {
@@ -357,7 +341,7 @@ declare function Ignore(): FieldDecorator;
 
 Marks a field as ignored. The field is excluded from parse, validate, and serialize. At runtime, the property is made non-enumerable on parsed instances.
 
-## 6. Utilities
+## 5. Utilities
 
 ### getSchema — read schema from class
 
@@ -422,7 +406,7 @@ declare function serialize<T>(instance: T): object;
 
 Converts a class instance to a plain object. Applies serializers (e.g., `Date` → ISO string). Excludes `@Ignore`-d fields (non-enumerable).
 
-## 7. Error Types
+## 6. Error Types
 
 ```ts
 declare class SchemaValidationError extends Error {
@@ -439,7 +423,7 @@ interface ValidationIssue {
 }
 ```
 
-## 8. Service Definitions (protobuf-style)
+## 7. Service Definitions (protobuf-style)
 
 Like protobuf: `@Schema` classes are **messages** (data structure), `createService()` defines **services** (endpoints). Both live in `@kavri/schema` and can be shared between frontend and backend.
 
@@ -595,7 +579,7 @@ const spec = generateOpenAPI(UserServiceDef, {
 
 Generates an OpenAPI 3.x document from a `ServiceDefinition`. Request/response schemas are converted to JSON Schema via `toJsonSchema()`. Static — no running container needed.
 
-## 9. ConfigParser Compatibility
+## 8. ConfigParser Compatibility
 
 `@Schema` classes satisfy the `ConfigParser<T>` interface used by `@kavri/config`:
 
@@ -611,7 +595,7 @@ Helper:
 declare function schemaParser<T>(clazz: AnyConstructor<T>): ConfigParser<T>;
 ```
 
-## 10. Full Example
+## 9. Full Example
 
 ```ts
 import {
@@ -783,7 +767,7 @@ class AppConfig {
 const AppConfiguration = createConfiguration('app', schemaParser(AppConfig));
 ```
 
-## 11. checkAllFields Behavior
+## 10. checkAllFields Behavior
 
 When `@Schema({ checkAllFields: true })`:
 
@@ -795,7 +779,7 @@ When `checkAllFields: false` (default):
 
 Fields without decorators are silently ignored — they are not parsed, validated, or serialized. Only decorated fields participate in the schema.
 
-## 12. Required vs Optional vs Nullable
+## 11. Required vs Optional vs Nullable
 
 | Declaration | JSON Schema | Parse behavior |
 |---|---|---|
@@ -806,7 +790,7 @@ Fields without decorators are silently ignored — they are not parsed, validate
 
 Prefer `nullable` over `optional` when the field should always be present but may have no value.
 
-## 13. Circular References
+## 12. Circular References
 
 `LazyRef` handles circular dependencies:
 

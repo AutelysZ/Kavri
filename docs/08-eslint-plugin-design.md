@@ -4,9 +4,9 @@
 
 Kavri's `inject()`, `injectAll()`, and `injectRef()` must only be called inside designated inject points. Calling them elsewhere is a runtime error. This ESLint plugin catches violations at lint time.
 
-Package name: `eslint-plugin-kavri`
+Package name: `@kavri/eslint-plugin`
 
-## 2. Rule: `kavri/inject-context`
+## 2. Rule: `@kavri/inject-context`
 
 Enforces that all inject functions are only called inside valid inject points.
 
@@ -126,9 +126,9 @@ The rule applies to these function names (configurable):
 ```jsonc
 // .eslintrc
 {
-  "plugins": ["kavri"],
+  "plugins": ["@kavri"],
   "rules": {
-    "kavri/inject-context": ["error", {
+    "@kavri/inject-context": ["error", {
       // additional function names to restrict (if user creates custom inject helpers)
       "additionalFunctions": []
     }]
@@ -144,7 +144,7 @@ The rule applies to these function names (configurable):
 @OnConstruct/@OnDestroy method, or condition function).
 ```
 
-## 3. Rule: `kavri/no-inject-after-side-effect`
+## 3. Rule: `@kavri/no-inject-after-side-effect`
 
 Warns when inject calls appear in default parameters **after** parameters that could have side effects. This catches subtle bugs with the Suspense-style retry mechanism — if a factory has side effects before an inject call, those side effects will re-execute on retry.
 
@@ -168,7 +168,7 @@ In a factory function's parameter list, if a default parameter calls an inject f
 ```jsonc
 {
   "rules": {
-    "kavri/no-inject-after-side-effect": "warn"
+    "@kavri/no-inject-after-side-effect": "warn"
   }
 }
 ```
@@ -185,14 +185,14 @@ will re-execute. Move inject() calls before side-effecting defaults.
 
 ```jsonc
 // eslint.config.js (flat config)
-import kavri from 'eslint-plugin-kavri';
+import kavri from '@kavri/eslint-plugin';
 
 export default [
   {
-    plugins: { kavri },
+    plugins: { '@kavri': kavri },
     rules: {
-      'kavri/inject-context': 'error',
-      'kavri/no-inject-after-side-effect': 'warn',
+      '@kavri/inject-context': 'error',
+      '@kavri/no-inject-after-side-effect': 'warn',
     },
   },
 ];
