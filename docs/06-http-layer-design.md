@@ -40,7 +40,6 @@ Normal handler return → JSON serialized with 200. Return `Redirect`, `FileResp
 ## 3. RequestContext
 
 ```ts
-@Component({ scope: 'scoped' })
 class RequestContext {
     readonly method: string;
     readonly url: string;
@@ -49,13 +48,18 @@ class RequestContext {
     readonly query: Readonly<Record<string, string>>;     // query string
     readonly body: unknown;                                // parsed body
 
-    // Scoped key-value store (for interceptors to pass data to handlers)
+    // Key-value store (for interceptors to pass data to handlers)
     get<T>(key: string): T | undefined;
     set<T>(key: string, value: T): void;
 }
+
+/** Token that reads from AsyncLocalStorage. Usable in any singleton. */
+declare const RequestContext: Token<RequestContext>;
 ```
 
-`RequestContext` is scoped — fresh instance per request. Injected in controller constructors via `inject(RequestContext)`.
+`RequestContext` is NOT a `@Component`. The framework creates it per-request and stores it in `AsyncLocalStorage`. The `RequestContext` token's factory reads from the storage — any singleton (controllers, services, interceptors) can `inject(RequestContext)` to access the current request.
+
+No scoped scope needed. All components remain singletons.
 
 ## 4. Controller & Method Decorators
 
@@ -106,7 +110,7 @@ class UserController {
     ) {}
 
     // Handler receives: (parsedInput, requestContext)
-    // requestContext is injected by the framework per-request.
+    // Or inject RequestContext anywhere — it reads from AsyncLocalStorage.
     @Get('/:id', GetUserParams, UserResponse)
     async getUser(input: GetUserParams, ctx: RequestContext): Promise<User> {
         return this.userRepo.findById(input.id);
@@ -117,6 +121,10 @@ class UserController {
         const userId = ctx.get<string>('userId'); // set by AuthInterceptor
         return this.userRepo.create({ ...input, createdBy: userId });
     }
+
+    // Alternative: inject RequestContext via inject() in any singleton
+    // private readonly ctx = inject(RequestContext);
+    // Works because the token reads from AsyncLocalStorage.
 
     @Get('/old/:id', RedirectParams)
     async redirectOld(input: RedirectParams): Promise<Redirect> {
@@ -416,13 +424,11 @@ declare class WebApplication {
 1. Receive HTTP request
 2. Route matching → find controller instance (singleton) + method + endpoint metadata
 3. Parse request: extract params, query, body. Validate with `requestSchema`.
-4. Create child scope
-5. Create `RequestContext` in scope (scoped, fresh per request)
-6. Run interceptor chain → call handler with `(parsedInput, requestContext)`
-7. Handler returns typed value or special response
-8. If `responseSchema`, validate response. Serialize as JSON with 200.
-9. If special response (`Redirect`, `FileResponse`, etc.), handle accordingly.
-10. Destroy scope
+4. Create `RequestContext`, store in `AsyncLocalStorage`
+5. Run interceptor chain → call handler with `(parsedInput, requestContext)`
+6. Handler returns typed value or special response
+7. If `responseSchema`, validate response. Serialize as JSON with 200.
+8. If special response (`Redirect`, `FileResponse`, etc.), handle accordingly.
 
 ### Bootstrap example
 
