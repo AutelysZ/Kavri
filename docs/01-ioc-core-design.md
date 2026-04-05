@@ -2,7 +2,7 @@
 
 ## 1. Scope
 
-This document defines the implementation-ready IoC core API: explicit provider registration, injection via constructor default parameters, lifecycle hooks, scoped containers, and deterministic async resolution.
+This document defines the implementation-ready IoC core API: explicit provider registration, injection via constructor default parameters, lifecycle hooks, and deterministic async resolution. All components are singletons.
 
 For the metadata system that underpins all decorators, see [05-metadata-design.md](./05-metadata-design.md).
 
@@ -10,7 +10,6 @@ For the metadata system that underpins all decorators, see [05-metadata-design.m
 
 ```ts
 export type Qualifier = string | symbol;
-export type ProviderScope = 'singleton' | 'scoped' | 'transient';
 export type Awaitable<T> = T | Promise<T>;
 export type CollectionOrder = 'topological' | 'provided' | 'alphabetical';
 
@@ -33,7 +32,6 @@ export type Injectable<T> =
 ```ts
 interface ComponentOptions {
   name?: Qualifier;
-  scope?: ProviderScope;
   condition?: () => Awaitable<boolean>;
 }
 
@@ -145,30 +143,16 @@ declare function injectMap<T>(injectable: Injectable<T> | ClassDecoratorFactory<
 
 `injectAll` returns an ordered array. `injectSet` returns a `ReadonlySet`. `injectMap` returns a `ReadonlyMap` keyed by the component's `Qualifier` name. All three accept either a base class/token or a `ClassDecoratorFactory` to collect all classes decorated with that decorator.
 
-## 7. Container & scope
+## 7. Container
 
-All configuration is done via decorators (`@Provide`, `@Touch`, `@Use`). The container only resolves and destroys.
+All configuration is done via decorators (`@Provide`, `@Touch`, `@Use`). The container only resolves and destroys. All components are singletons.
 
 ```ts
 declare class Container {
   resolve<T>(injectable: Injectable<T>): Promise<T>;
-  createScope(name?: string): Scope;
-  destroy(): Promise<void>;
-}
-
-declare class Scope {
-  resolve<T>(injectable: Injectable<T>): Promise<T>;
   destroy(): Promise<void>;
 }
 ```
-
-### Scope semantics
-
-| Scope | Container | Child Scope |
-|---|---|---|
-| `singleton` | Shared instance | Same instance as parent |
-| `scoped` | Error if resolved from root | Fresh instance per scope |
-| `transient` | New per injection | New per injection |
 
 ### Resolution order
 
@@ -196,11 +180,6 @@ declare class MissingProviderError extends Error {
 
 /** Thrown when inject() is called outside a valid inject point. */
 declare class InjectContextError extends Error {}
-
-/** Thrown when a scoped provider is resolved from the root container. */
-declare class ScopeError extends Error {
-  readonly injectable: Injectable<any>;
-}
 
 /** Thrown when the container is used after destroy(). */
 declare class DestroyedContainerError extends Error {}

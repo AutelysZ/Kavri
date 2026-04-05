@@ -58,7 +58,7 @@ declare const Metadata: {
 
 ```ts
 // Read @Component metadata
-Metadata.of(Component, UserService);     // [{ options: { name: undefined, scope: 'singleton' } }]
+Metadata.of(Component, UserService);     // [{ options: { name: undefined } }]
 Metadata.of(Component, myInstance);       // same, works on instances
 
 // Read @Provide metadata from a module
@@ -147,7 +147,7 @@ Attach metadata to a class or method without using decorator syntax. `apply()` u
 
 ```ts
 // Programmatically mark a class as a Component
-Metadata.apply(Component, MyClass, { options: { name: 'dynamic', scope: 'singleton' } });
+Metadata.apply(Component, MyClass, { options: { name: 'dynamic' } });
 
 // Programmatically add an OnEvent handler
 Metadata.apply(OnEvent, MyClass, 'handleOrder', { event: OrderCreatedEvent });

@@ -59,7 +59,7 @@ class AppModule {}
 ## 4. Rules
 
 - **Module is optional.** Small applications can put `@Provide`/`@ConfigDefault`/`@Touch` directly on the entrypoint class.
-- **Module does not change resolution semantics.** Provider scope, lifecycle, and injection behavior are identical whether registered via a module or directly.
+- **Module does not change resolution semantics.** Lifecycle and injection behavior are identical whether registered via a module or directly.
 - **Modules can compose.** A module can `@Use` other modules.
 - **No circular module dependencies.** If module A uses module B and B uses A, startup fails.
 - **`@Touch` is additive.** Touching the same injectable multiple times is idempotent.

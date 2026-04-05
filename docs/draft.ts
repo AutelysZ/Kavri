@@ -5,7 +5,6 @@ export {}
 // ============================================================
 
 type Qualifier = string | symbol;
-type ProviderScope = 'singleton' | 'scoped' | 'transient';
 type Awaitable<T> = T | Promise<T>;
 export type CollectionOrder = 'topological' | 'provided' | 'alphabetical';
 
@@ -41,7 +40,6 @@ declare function createMethodDecorator<T>(factory: MethodDecoratorFactory<T>, me
 
 interface ComponentOptions {
     name?: Qualifier;
-    scope?: ProviderScope;
     /**
      * Async condition evaluated lazily on first inject(). Result is cached.
      * Runs in an inject context.
@@ -67,7 +65,7 @@ declare function Component(options?: ComponentOptions): ClassDecorator<Component
 declare function OnConstruct(): MethodDecorator<{}>;
 
 /**
- * Called during container/scope destroy, in reverse dependency order.
+ * Called during container destroy, in reverse dependency order.
  * Inject point — default params can use inject().
  * Multiple @OnDestroy on one class: called in declaration order, serially.
  * Return value is ignored.
@@ -201,11 +199,11 @@ declare function Touch(...classes: AnyConstructor<any>[]): ClassDecorator<readon
 declare function Use(...injectables: Injectable<any>[]): ClassDecorator<readonly Injectable<any>[]>;
 
 // ============================================================
-// Section 9: Container & Scope
+// Section 9: Container
 // ============================================================
 
 /**
- * The root IoC container.
+ * The root IoC container. All components are singletons.
  *
  * Resolution order for container.resolve(target):
  *   All @Use deps and target are entrypoints, instantiated serially.
@@ -219,12 +217,6 @@ declare function Use(...injectables: Injectable<any>[]): ClassDecorator<readonly
  *     6. Mark instantiated.
  */
 declare class Container {
-    resolve<T>(injectable: Injectable<T>): Promise<T>;
-    createScope(name?: string): Scope;
-    destroy(): Promise<void>;
-}
-
-declare class Scope {
     resolve<T>(injectable: Injectable<T>): Promise<T>;
     destroy(): Promise<void>;
 }
@@ -443,10 +435,6 @@ declare class MissingProviderError extends Error {
 }
 
 declare class InjectContextError extends Error {}
-
-declare class ScopeError extends Error {
-    readonly injectable: Injectable<any>;
-}
 
 declare class DestroyedContainerError extends Error {}
 
@@ -696,21 +684,6 @@ class OrderService {
 class InventoryService {
     constructor(private readonly orderRef: Ref<OrderService> = injectRef(OrderService)) {}
     async checkStock(productId: string, qty: number): Promise<boolean> { return true; }
-}
-
-
-// ============================================================
-// Example 7: Scoped Providers
-// ============================================================
-
-@Component({scope: 'scoped'})
-class RequestContext {
-    readonly requestId = Math.random().toString(36).slice(2);
-}
-
-@Component({scope: 'transient'})
-class TraceSpan {
-    readonly spanId = Math.random().toString(36).slice(2);
 }
 
 

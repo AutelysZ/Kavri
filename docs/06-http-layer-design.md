@@ -5,7 +5,7 @@
 - **Framework-independent.** Core design has no dependency on Express, Fastify, etc. The HTTP layer produces a standard `(req, res) => void` handler usable with `node:http`, Bun, Deno, or any adapter.
 - **Parsed input only.** Handlers receive validated, typed data — not raw streams. Body parsing happens before handlers and interceptors see the request (gRPC-style).
 - **Single interception mechanism.** Interceptors replace middleware, guards, pipes, and filters. One abstraction, one chain.
-- **Controllers are singletons.** Per-request data lives in scoped `RequestContext`, not in the controller instance.
+- **Controllers are singletons.** Per-request data lives in `RequestContext` (AsyncLocalStorage), not in the controller instance.
 - **Definition/implementation separation.** `createService()` produces a shareable type-safe contract. Backend implements it; frontend consumes it.
 
 ## 2. Core HTTP Types
@@ -59,7 +59,7 @@ declare class RequestContext {
 
 `RequestContext` is a static API backed by `AsyncLocalStorage`. Not injectable, not a component. The framework creates it per-request and stores it in `AsyncLocalStorage`. Access it anywhere via `RequestContext.get()`.
 
-No scoped scope needed. All components remain singletons.
+All components are singletons. No scope mechanism needed.
 
 ## 4. Controller & Method Decorators
 
@@ -71,7 +71,7 @@ interface ControllerMetadata {
 }
 
 // Composes @Component() — controllers are singletons.
-// Per-request data is in scoped RequestContext, not the controller.
+// Per-request data is in RequestContext (AsyncLocalStorage), not the controller.
 declare function Controller(path: string): ClassDecorator<ControllerMetadata>;
 ```
 
