@@ -2,7 +2,7 @@
 
 ## 1. Position
 
-Configuration is a first-class subsystem. Config schemas are tokens — `createConfigSchema()` returns a `Token<T>` decorated with `@Configuration`. This means config values are injected with `inject()`, not a separate `injectConfig()`.
+Configuration is a first-class subsystem. `createConfigSchema()` returns a `Token<T>` decorated with `@Configuration`. Config values are injected with `inject()` like any other dependency.
 
 ## 2. Schema definition
 
@@ -17,7 +17,7 @@ declare function Configuration<T>(prefix: string, schema: ZodSchema<T>): ClassDe
 declare function createConfigSchema<T>(prefix: string, schema: ZodSchema<T>): Token<T>;
 ```
 
-`createConfigSchema()` returns a `Token<T>` that carries `@Configuration` metadata. The token's factory resolves from config sources using the zod schema for parsing and validation.
+The returned `Token<T>` carries `@Configuration` metadata. Its factory resolves from config sources using the zod schema for parsing and validation.
 
 ```ts
 const DatabaseConfig = createConfigSchema('database', z.object({
@@ -36,7 +36,7 @@ const AppConfig = createConfigSchema('app', z.object({
 
 ## 3. Config injection
 
-Config tokens are injected with `inject()` — the same as any other injectable:
+Config tokens are injected with `inject()`:
 
 ```ts
 @Component()
@@ -48,8 +48,6 @@ class AppService {
   ) {}
 }
 ```
-
-No separate `injectConfig()` function. Config tokens are regular tokens.
 
 ## 4. Config sources & precedence
 

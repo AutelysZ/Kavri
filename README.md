@@ -35,7 +35,7 @@ class UserService {}
 Metadata.of(Cacheable, UserService); // [{ ttl: 3600 }]
 ```
 
-**Config schemas are tokens.** `createConfigSchema()` returns a `Token<T>` — injected with `inject()` like everything else. No separate `injectConfig()`, no special config layer.
+**Config is just injection.** Configuration schemas produce tokens — injected with the same `inject()` as any other dependency. No special config API.
 
 ```ts
 const DbConfig = createConfigSchema('database', z.object({

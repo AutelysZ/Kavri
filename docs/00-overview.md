@@ -8,7 +8,7 @@ Kavri is a TypeScript IoC framework focused on explicit dependency wiring with o
 2. **Strict inject points** — `inject()` only works in well-defined contexts. No ambient service locator.
 3. **Suspense-style async** — async providers handled transparently via throw-and-retry. `inject()` stays synchronous.
 4. **Unified metadata** — all decorators carry typed metadata via `createClassDecorator`/`createMethodDecorator`. `Metadata.of()` reads any decorator's data.
-5. **Config as tokens** — `createConfigSchema()` returns a `Token<T>`, injected with `inject()` like anything else.
+5. **Config is injection** — configuration schemas produce tokens, injected with `inject()` like any other dependency.
 6. **Simple modules** — `@Component()` classes with `@Provide`/`@Decorate`/`@Touch`/`@Use` decorators. No module hierarchy.
 7. **Event pub/sub** — `@Event`/`@OnEvent`/`defineEvent` for decoupled communication.
 8. **Optional HTTP upper layer** — built on IoC core but not required.

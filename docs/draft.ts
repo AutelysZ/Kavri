@@ -102,7 +102,7 @@ interface ComponentOptions {
     /**
      * Async condition evaluated during container initialization.
      * If it returns false, the component is excluded.
-     * Runs in an inject context — can use inject()/injectConfig() in default params.
+     * Runs in an inject context — can use inject() in default params.
      */
     condition?: () => Awaitable<boolean>;
 }
@@ -155,12 +155,12 @@ declare class Token<T> {
 
 /**
  * Creates a typed token with a factory default.
- * The factory runs in an inject context — use inject()/injectConfig() in default params.
+ * The factory runs in an inject context — use inject() in default params.
  *
  * @example
  * const AppName = token<string>(() => 'my-app');
  *
- * const DbUrl = token<string>((config = injectConfig(DatabaseConfig)) => config.url);
+ * const DbUrl = token<string>((config = inject(DatabaseConfig)) => config.url);
  *
  * const Redis = token<RedisClient>(
  *     (url = inject(RedisUrl)) => new RedisClient(url),
@@ -186,7 +186,7 @@ declare class Computed<T> {
  *
  * @example
  * const SelectedDriver = computed<Driver>(
- *     (config = injectConfig(DbConfig), driver = inject(Driver, config.driver)) => driver
+ *     (config = inject(DbConfig), driver = inject(Driver, config.driver)) => driver
  * );
  */
 declare function computed<T>(resolve: () => Awaitable<T>): Computed<T>;
@@ -211,14 +211,14 @@ interface ProvideOptions<T> extends ComponentOptions {
  * Class decorator: registers a provider for a class or token.
  * Declarative equivalent of container.provide().
  *
- * The factory runs in an inject context — use inject()/injectConfig() in default params.
+ * The factory runs in an inject context — use inject() in default params.
  * Multiple @Provide decorators can be stacked on a single class.
  * The providers are registered when the class is used (via @Use or container.use()).
  *
  * @example
  * @Component()
  * @Provide(Sequelize, (url = inject(DbUrl)) => new Sequelize(url), { onDestroy: 'close' })
- * @Provide(Redis, async (config = injectConfig(RedisConfig)) => {
+ * @Provide(Redis, async (config = inject(RedisConfig)) => {
  *     const redis = new Redis();
  *     await redis.connect(config.url);
  *     return redis;
