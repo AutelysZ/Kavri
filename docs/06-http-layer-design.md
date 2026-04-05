@@ -5,6 +5,7 @@
 - **Framework-independent.** Core design has no dependency on Express, Fastify, etc. The HTTP layer produces a standard `(req, res) => void` handler usable with `node:http`, Bun, Deno, or any adapter.
 - **Parsed input only.** Handlers receive validated, typed data — not raw streams. Body parsing happens before handlers and interceptors see the request (gRPC-style).
 - **Single interception mechanism.** Interceptors replace middleware, guards, pipes, and filters. One abstraction, one chain.
+- **Controllers are singletons.** Per-request data lives in scoped `RequestContext`, not in the controller instance.
 - **Definition/implementation separation.** `createService()` produces a shareable type-safe contract. Backend implements it; frontend consumes it.
 
 ## 2. Core HTTP Types
@@ -65,7 +66,8 @@ interface ControllerMetadata {
     path: string;
 }
 
-// Composes @Component({ scope: 'scoped' })
+// Composes @Component() — controllers are singletons.
+// Per-request data is in scoped RequestContext, not the controller.
 declare function Controller(path: string): ClassDecorator<ControllerMetadata>;
 ```
 
@@ -100,18 +102,20 @@ declare function Get<TReq, TRes>(
 @Controller('/user')
 class UserController {
     constructor(
-        private readonly ctx = inject(RequestContext),
         private readonly userRepo = inject(UserRepository),
     ) {}
 
+    // Handler receives: (parsedInput, requestContext)
+    // requestContext is injected by the framework per-request.
     @Get('/:id', GetUserParams, UserResponse)
-    async getUser(input: GetUserParams): Promise<User> {
+    async getUser(input: GetUserParams, ctx: RequestContext): Promise<User> {
         return this.userRepo.findById(input.id);
     }
 
     @Post('/', CreateUserBody, UserResponse)
-    async createUser(input: CreateUserBody): Promise<User> {
-        return this.userRepo.create(input);
+    async createUser(input: CreateUserBody, ctx: RequestContext): Promise<User> {
+        const userId = ctx.get<string>('userId'); // set by AuthInterceptor
+        return this.userRepo.create({ ...input, createdBy: userId });
     }
 
     @Get('/old/:id', RedirectParams)
@@ -410,11 +414,11 @@ declare class WebApplication {
 ### Per-request lifecycle
 
 1. Receive HTTP request
-2. Route matching → find controller class + method + endpoint metadata
+2. Route matching → find controller instance (singleton) + method + endpoint metadata
 3. Parse request: extract params, query, body. Validate with `requestSchema`.
 4. Create child scope
-5. Bind `RequestContext` in scope
-6. Run interceptor chain → call handler
+5. Create `RequestContext` in scope (scoped, fresh per request)
+6. Run interceptor chain → call handler with `(parsedInput, requestContext)`
 7. Handler returns typed value or special response
 8. If `responseSchema`, validate response. Serialize as JSON with 200.
 9. If special response (`Redirect`, `FileResponse`, etc.), handle accordingly.
@@ -476,22 +480,19 @@ const UserServiceDef = createService('/user')
 
 @ControllerImpl()
 class UserController extends createController(UserServiceDef) {
-    constructor(
-        private readonly ctx = inject(RequestContext),
-        private readonly repo = inject(UserRepository),
-    ) { super(); }
+    constructor(private readonly repo = inject(UserRepository)) { super(); }
 
-    override async getUser(input: z.infer<typeof GetUserParams>) {
+    override async getUser(input: z.infer<typeof GetUserParams>, ctx: RequestContext) {
         const user = await this.repo.findById(input.id);
         if (!user) throw new HttpException(404, 'User not found');
         return user;
     }
 
-    override async createUser(input: z.infer<typeof CreateUserBody>) {
+    override async createUser(input: z.infer<typeof CreateUserBody>, ctx: RequestContext) {
         return this.repo.create(input);
     }
 
-    override async deleteUser(input: z.infer<typeof GetUserParams>) {
+    override async deleteUser(input: z.infer<typeof GetUserParams>, ctx: RequestContext) {
         await this.repo.delete(input.id);
     }
 }
