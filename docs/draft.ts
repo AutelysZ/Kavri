@@ -151,9 +151,8 @@ interface DecorateMetadata<T> {
  * If the target has no provider, the decoration is silently ignored.
  * Applied after the provider's @OnConstruct, in registration order.
  *
- * If the decorator returns a new instance, the container uses the decorated
- * value for @OnDestroy. To specify destroy behavior for the decorated value,
- * use the options parameter.
+ * If the decorator returns a new instance, the DecorateOptions.onDestroy
+ * is used instead of the original provider's onDestroy (override, not both).
  *
  * @example
  * @Component()
@@ -292,9 +291,12 @@ declare function Use(...injectables: Injectable<any>[]): ClassDecorator<readonly
  *        @Decorate on a target without a provider is silently ignored.
  *     8. Mark the target as instantiated.
  *
- *   @OnDestroy: called on the final decorated value. If @Decorate returns a new
- *   instance, the DecorateOptions.onDestroy is used for the decorated value.
- *   The original provider's onDestroy is still called on the original instance.
+ *   @OnDestroy: if @Decorate provides DecorateOptions.onDestroy, it overrides
+ *   (not supplements) the original provider's onDestroy for that target.
+ *
+ *   Duplicate providers: @Component counts as an implicit provider. If both
+ *   @Component and @Provide register the same target, DuplicateProviderError
+ *   is thrown (use { primary: true } on @Provide to override).
  */
 declare class Container {
     /** Resolve an injectable. Triggers the full instantiation chain. */
@@ -318,8 +320,17 @@ declare class Scope {
 
 declare function EventType(name?: string): ClassDecorator<{ name: string | undefined }>;
 
-declare function OnEvent<T>(event: AnyConstructor<T> | EventKey<T>): MethodDecorator<{
-    event: AnyConstructor<T> | EventKey<T>
+/**
+ * Marks a method as a listener.
+ * Listeners are called in dependency order, serially (fail-fast: if one throws, emit() rejects,
+ * remaining listeners do not run).
+ *
+ * With { async: true }, the listener runs in parallel with other async listeners.
+ * Errors in async listeners are ignored (fire-and-forget).
+ */
+declare function OnEvent<T>(event: AnyConstructor<T> | EventKey<T>, options?: { async?: boolean }): MethodDecorator<{
+    event: AnyConstructor<T> | EventKey<T>;
+    async: boolean;
 }>;
 
 declare class EventKey<T> {
@@ -341,11 +352,33 @@ declare class EventBus {
 declare type ZodSchema<T> = unknown;
 declare const z: any;
 
+/**
+ * Configuration source options.
+ *
+ * Default factory returns:
+ *   configFiles: ['config.{yaml,yml,json,toml}']  (glob, first match wins, no match = skip)
+ *   env: process.env
+ *   argv: process.argv
+ *   envPrefix: ''     (e.g., 'APP_' maps APP_DATABASE_HOST → database.host)
+ *   argvPrefix: ''    (e.g., 'app.' maps --app.database.host → database.host)
+ *
+ * configFiles elements support glob patterns. For each element, the first
+ * matching file is used. If no file matches, that element is skipped.
+ * If no elements match at all, no config file is loaded.
+ *
+ * argvPrefix does not include '--'. The container prepends it automatically.
+ * '--app.database.host=x' is matched when argvPrefix is 'app.'.
+ */
 interface ConfigOptions {
+    /** Glob patterns. First match per element wins. No match = skip. */
     configFiles: string[];
+    /** Environment variables. Typically process.env. */
     env: Record<string, string>;
+    /** CLI arguments. Typically process.argv. */
     argv: string[];
+    /** Prefix for env var mapping. 'APP_' maps APP_DATABASE_HOST → database.host. */
     envPrefix: string;
+    /** Prefix for CLI arg mapping (without '--'). 'app.' maps --app.database.host → database.host. */
     argvPrefix: string;
 }
 
@@ -358,6 +391,21 @@ interface ConfigurationMetadata<T> {
 
 declare function Configuration<T>(prefix: string, schema: ZodSchema<T>): ClassDecorator<ConfigurationMetadata<T>>;
 
+/**
+ * Creates a config token bound to a prefix.
+ * Returns a Token<T> decorated with @Configuration.
+ *
+ * Internally, the token's factory depends on ConfigRegistry (which uses
+ * ConfigOptions to load all config sources as raw key-value pairs).
+ * The factory parses the node at `prefix` using the zod schema.
+ *
+ * Source precedence (highest → lowest):
+ *   1. @Provide override (replaces the config token entirely)
+ *   2. CLI arguments (matched by '--' + argvPrefix)
+ *   3. Environment variables (matched by envPrefix)
+ *   4. Config files (first glob match per element)
+ *   5. Zod schema defaults
+ */
 declare function createConfigSchema<T>(prefix: string, schema: ZodSchema<T>): Token<T>;
 
 // ============================================================
