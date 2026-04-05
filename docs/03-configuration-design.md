@@ -2,29 +2,237 @@
 
 ## 1. Position
 
-Configuration is a first-class subsystem. `createConfigSchema()` returns a `Token<T>` decorated with `@Configuration`. Config values are injected with `inject()` like any other dependency.
+Configuration is a first-class subsystem with pluggable loaders, resolvers, and parsers. Config values are tokens — injected with `inject()` like any other dependency.
 
-## 2. Schema definition
+## 2. Architecture
 
-```ts
-interface ConfigurationMetadata<T> {
-  prefix: string;
-  schema: ZodSchema<T>;
-}
+```
+Bootstrap phase (env/cli only):
+  createBootstrapOption() → ConfigOptions, AwsResolverOptions, ...
 
-declare function Configuration<T>(prefix: string, schema: ZodSchema<T>): ClassDecorator<ConfigurationMetadata<T>>;
+Load phase:
+  injectAll(Loader)    → parse config files (json, yaml, toml, .env, ...)
+  injectAll(Resolver)  → resolve ${prefix:key} placeholders
 
-declare function createConfigSchema<T>(prefix: string, schema: ZodSchema<T>): Token<T>;
+Config phase (all sources):
+  createConfigSchema() → DatabaseConfig, AppConfig, ...
 ```
 
-The returned `Token<T>` carries `@Configuration` metadata. Its factory resolves from config sources using the zod schema for parsing and validation.
+## 3. Parser (pluggable validation)
+
+```ts
+interface ConfigParser<T> {
+  parse(raw: unknown): T;
+}
+```
+
+Zod schemas satisfy this naturally (they have `.parse()`). Custom parsers can be created for class-validator, joi, etc. Both `createConfigSchema` and `createBootstrapOption` accept `ConfigParser<T>`.
+
+## 4. Loader (pluggable file formats)
+
+```ts
+@Component()
+abstract class Loader {
+  abstract supports(): string[];  // file extensions, e.g. ['.yaml', '.yml']
+  abstract load(content: string): Record<string, unknown>;
+}
+```
+
+Built-in (touched by config module internally): `JsonLoader`, `YamlLoader`, `TomlLoader`.
+
+Third-party loaders are added via `@Touch`:
+
+```ts
+@Component()
+class EnvFileLoader extends Loader {
+  supports() { return ['.env']; }
+  load(content: string) { return dotenv.parse(content); }
+}
+
+@Component()
+@Touch(EnvFileLoader)
+class AppModule {}
+```
+
+Config module uses `injectAll(Loader)` to discover all loaders at resolution time.
+
+## 5. Resolver (pluggable variable resolvers)
+
+```ts
+@Component()
+abstract class Resolver {
+  abstract prefix(): string;    // for ${prefix:key} syntax
+  abstract resolve(key: string): Awaitable<string | undefined>;
+}
+```
+
+Built-in (touched by config module internally): `EnvResolver` (resolves `${env:KEY}`).
+
+Custom resolvers are `@Component` classes added via `@Touch`. They can inject bootstrap options but NOT regular config schemas (which haven't loaded yet).
+
+```ts
+@Component()
+class AwsResolver extends Resolver {
+  private readonly client: SecretsManagerClient;
+
+  constructor(opts = inject(AwsResolverOptions)) {
+    super();
+    this.client = new SecretsManagerClient(opts);
+  }
+
+  prefix() { return 'aws'; }
+
+  async resolve(key: string) {
+    const result = await this.client.getSecretValue({ SecretId: key });
+    return result.SecretString;
+  }
+}
+```
+
+Config module uses `injectAll(Resolver)` to discover all resolvers at resolution time.
+
+## 6. Bootstrap options
+
+Options needed before config files load (ConfigOptions, AwsResolverOptions). Resolved from env/cli only.
+
+```ts
+declare function createBootstrapOption<T>(prefix: string, parser: ConfigParser<T>): Token<T>;
+```
+
+Env mapping: prefix uppercased, dots become underscores. `'aws'` → `AWS_REGION`.
+CLI mapping: prefix as-is with `--` prepended. `'aws'` → `--aws.region`.
+
+Precedence (highest → lowest):
+1. **@Provide** — bypasses resolution (testing escape hatch)
+2. **CLI arguments**
+3. **Environment variables**
+4. **@Decorate** — code-level defaults
+5. **Schema defaults**
+
+```ts
+const AwsResolverOptions = createBootstrapOption('aws', z.object({
+  region: z.string().default('us-east-1'),
+  accessKeyId: z.string().optional(),
+  secretAccessKey: z.string().optional(),
+}));
+```
+
+`ConfigOptions` is a built-in bootstrap option (`createBootstrapOption('config', ...)`):
+
+```ts
+interface ConfigOptions {
+  configFiles: string[];  // glob patterns, first match per element
+  env: Record<string, string>;
+  argv: string[];
+  envPrefix: string;
+  argvPrefix: string;     // without '--'
+}
+```
+
+Defaults: `configFiles=['config.{yaml,yml,json,toml}']`, `env=process.env`, `argv=process.argv`, empty prefixes.
+
+## 7. Config schema
+
+```ts
+declare function createConfigSchema<T>(prefix: string, parser: ConfigParser<T>): Token<T>;
+```
+
+Precedence (highest → lowest):
+1. **@Provide** — bypasses resolution (testing escape hatch)
+2. **CLI arguments** (`--{argvPrefix}{key}`)
+3. **Environment variables** (`{envPrefix}{KEY}`)
+4. **Config files** (first glob match per element)
+5. **@Decorate** — code-level defaults
+6. **Schema defaults**
 
 ```ts
 const DatabaseConfig = createConfigSchema('database', z.object({
   driver: z.string(),
   host: z.string(),
-  port: z.number().default(5432),
-  username: z.string(),
+  port: z.coerce.number().default(5432),
+  password: z.string(),
+}));
+```
+
+## 8. Variable substitution
+
+After source merging, before parsing. Applied to string values only.
+
+| Syntax | Behavior |
+|---|---|
+| `${key}` | Config cross-reference, then env |
+| `${prefix:key}` | Delegate to Resolver with matching prefix |
+| `${key:-default}` | Use default if unresolved |
+| `${prefix:key:-default}` | External with default |
+
+- Unresolved without default → `ConfigValidationError`
+- Circular references → `ConfigValidationError`
+- Use `z.coerce.*()` for non-string target types
+
+```yaml
+database:
+  host: "${DATABASE_HOST:-localhost}"
+  password: "${aws:prod/db-password}"
+  url: "postgres://${database.host}:${database.port}"
+```
+
+## 9. ConfigRegistry (internal)
+
+Loads all config sources (files via Loaders, env, argv), resolves `${...}` via Resolvers, stores merged key-value store. Config tokens depend on it. Users don't interact with it directly.
+
+## 10. Validation & failure
+
+- Missing required values → `ConfigValidationError`
+- Parser/validation errors → `ConfigValidationError` with prefix and details
+- Unresolved `${...}` → `ConfigValidationError`
+- Circular variable references → `ConfigValidationError`
+
+## 11. Full example
+
+```ts
+import {
+  Container, Component, Touch, Use, Decorate,
+  inject, injectAll, token,
+} from 'kavri';
+import {
+  createConfigSchema, createBootstrapOption, ConfigOptions,
+  Resolver, Loader,
+} from 'kavri/config';
+import { z } from 'zod';
+
+// --- bootstrap options (resolved before config files) ---
+
+const AwsResolverOptions = createBootstrapOption('aws', z.object({
+  region: z.string().default('us-east-1'),
+}));
+
+// --- custom resolver ---
+
+@Component()
+class AwsResolver extends Resolver {
+  private readonly client: any;
+  constructor(opts = inject(AwsResolverOptions)) {
+    super();
+    this.client = {}; // new SecretsManagerClient(opts)
+  }
+  prefix() { return 'aws'; }
+  async resolve(key: string) { return 'secret-value'; }
+}
+
+// --- custom loader ---
+
+@Component()
+class EnvFileLoader extends Loader {
+  supports() { return ['.env']; }
+  load(content: string) { return {}; }
+}
+
+// --- config schemas ---
+
+const DbConfig = createConfigSchema('database', z.object({
+  driver: z.string(),
+  host: z.string(),
+  port: z.coerce.number().default(5432),
   password: z.string(),
 }));
 
@@ -32,171 +240,8 @@ const AppConfig = createConfigSchema('app', z.object({
   name: z.string().default('my-app'),
   env: z.enum(['dev', 'staging', 'prod']).default('dev'),
 }));
-```
 
-## 3. Config injection
-
-Config tokens are injected with `inject()`:
-
-```ts
-@Component()
-class AppService {
-  constructor(
-    private readonly db = inject(DatabaseConfig),        // required
-    private readonly app = inject(AppConfig),            // required
-    private readonly tel = inject(TelemetryConfig, true), // optional
-  ) {}
-}
-```
-
-## 4. Config sources & precedence
-
-1. **`@Provide`** — runtime override
-2. **CLI arguments** — matched by `argvPrefix`
-3. **Environment variables** — matched by `envPrefix`
-4. **Config files** — YAML, JSON, TOML (loaded in order, later overrides)
-5. **Zod defaults** — `.default()` values
-
-## 5. ConfigOptions
-
-```ts
-interface ConfigVariableResolver {
-  readonly prefix: string;
-  resolve(key: string): Awaitable<string | undefined>;
-}
-
-interface ConfigOptions {
-  configFiles: string[];
-  env: Record<string, string>;
-  argv: string[];
-  envPrefix: string;
-  argvPrefix: string;
-  resolvers: ConfigVariableResolver[];
-}
-
-declare const ConfigOptions: Token<ConfigOptions>;
-```
-
-Customize via `@Decorate`:
-
-```ts
-@Component()
-@Decorate(ConfigOptions, (prev) => ({
-  ...prev,
-  configFiles: ['config/app.yaml'],
-  envPrefix: 'MYAPP_',
-}))
-class ConfigModule {}
-```
-
-## 6. Variable substitution
-
-After all config sources are merged, string values containing `${...}` are resolved before zod validation.
-
-| Syntax | Behavior |
-|---|---|
-| `${key}` | Look up in merged config, then env vars |
-| `${prefix:key}` | Delegate to resolver with matching prefix |
-| `${key:-default}` | Use default if unresolved |
-| `${prefix:key:-default}` | External with default |
-
-- Only applies to string values. Use `z.coerce.*()` for non-string target types.
-- Unresolved `${...}` without a default throws `ConfigValidationError`.
-- Cross-references resolve transitively: `${a}` → `${b}` → `"hello"` resolves to `"hello"`.
-- Circular references throw `ConfigValidationError`.
-
-```yaml
-database:
-  host: "${DATABASE_HOST:-localhost}"
-  port: "${DATABASE_PORT:-5432}"
-  password: "${aws:prod/db-password}"
-  url: "postgres://${database.host}:${database.port}"
-```
-
-## 7. External variable resolvers
-
-Resolvers are plain objects implementing `ConfigVariableResolver`. They are not `@Component` classes — they're provided via `ConfigOptions.resolvers` and available before any config token resolves.
-
-```ts
-function createAwsResolver(region: string): ConfigVariableResolver {
-  const client = new SecretsManagerClient({ region });
-  return {
-    prefix: 'aws',
-    async resolve(key) {
-      const result = await client.getSecretValue({ SecretId: key });
-      return result.SecretString;
-    },
-  };
-}
-
-@Component()
-@Decorate(ConfigOptions, async (prev) => ({
-  ...prev,
-  resolvers: [
-    ...prev.resolvers,
-    createAwsResolver(process.env.AWS_REGION ?? 'us-east-1'),
-  ],
-}))
-class SecretsModule {}
-```
-
-Resolvers are initialized in the `@Decorate` factory, which is async-capable. This allows connecting to secret managers before config loads.
-
-## 8. ConfigRegistry (internal)
-
-`ConfigRegistry` is an internal class that loads all raw config sources (files, env, argv) into a unified key-value store, then resolves variable substitutions using resolvers from `ConfigOptions`. Config tokens created by `createConfigSchema()` depend on `ConfigRegistry`. Users do not interact with it directly.
-
-## 9. Validation & failure
-
-- Missing required values → `ConfigValidationError` with key name.
-- Zod validation errors → `ConfigValidationError` with prefix and zod issues.
-- Unresolved `${...}` without default → `ConfigValidationError`.
-- Circular variable references → `ConfigValidationError`.
-- Type coercion from env/CLI strings based on schema.
-
-## 10. Config-driven selection
-
-```ts
-const SelectedDriver = token<Driver>(
-  (cfg = inject(DbConfig), d = inject(Driver, cfg.driver)) => d,
-);
-```
-
-## 11. Introspection
-
-Since config schemas carry `@Configuration` metadata, all registered schemas can be discovered:
-
-```ts
-// Via the metadata system
-const allConfigs = Metadata.of(Configuration, token);
-
-// Or via injectAll with the Configuration decorator factory
-const configs = injectAll(Configuration);
-```
-
-## 12. Full example
-
-```ts
-import {
-  Container, Component, Provide, Decorate, Touch, Use,
-  inject, injectAll, computed, token, Metadata,
-} from 'kavri';
-import { createConfigSchema, Configuration, ConfigOptions } from 'kavri/config';
-import { z } from 'zod';
-
-const AppConfig = createConfigSchema('app', z.object({
-  name: z.string().default('demo'),
-  env: z.enum(['dev', 'staging', 'prod']).default('dev'),
-}));
-
-const DbConfig = createConfigSchema('database', z.object({
-  driver: z.string(),
-  url: z.string(),
-}));
-
-const TelemetryConfig = createConfigSchema('telemetry', z.object({
-  enabled: z.boolean().default(false),
-}));
+// --- driver selection ---
 
 abstract class Driver {
   abstract query(sql: string): Promise<any>;
@@ -207,38 +252,28 @@ class PsqlDriver extends Driver {
   async query(sql: string) { return `psql:${sql}`; }
 }
 
-const SelectedDriver = computed<Driver>(
+const SelectedDriver = token<Driver>(
   (cfg = inject(DbConfig), d = inject(Driver, cfg.driver)) => d,
 );
 
-@Component({
-  condition: (cfg = inject(TelemetryConfig, true)) => cfg?.enabled ?? false,
-})
-class TelemetryService {
-  constructor(private readonly config = inject(TelemetryConfig)) {}
-  send(metric: string, value: number) {}
-}
+// --- application ---
 
 @Component()
+@Touch(PsqlDriver)
+@Touch(AwsResolver, EnvFileLoader)
 @Decorate(ConfigOptions, (prev) => ({
   ...prev,
   configFiles: ['config/app.yaml'],
   envPrefix: 'MYAPP_',
 }))
-class ConfigModule {}
-
-@Touch(PsqlDriver)
-@Use(ConfigModule)
 class Application {
   constructor(
     private readonly app = inject(AppConfig),
     private readonly driver = inject(SelectedDriver),
-    private readonly telemetry = inject(TelemetryService, true),
   ) {}
 
   async run() {
-    const result = await this.driver.query('select 1');
-    console.log(`${this.app.name} (${this.app.env}): ${result}`);
+    console.log(`${this.app.name}: ${await this.driver.query('select 1')}`);
   }
 }
 
