@@ -387,17 +387,19 @@ declare function createConfiguration<T>(prefix: string, parser: ConfigParser<T>)
 
 interface OverrideConfigurationMetadata<T> {
     token: Token<T>;
-    defaults: Partial<T>;
+    override: (prev: Partial<T> | undefined) => Partial<T> | undefined;
 }
 
 /**
  * Code-level defaults for any config token (bootstrap or regular).
  * Lower priority than env/cli (and config files for regular configs).
- * Multiple @OverrideConfiguration for the same token: deep-merged in @Use order.
+ * The callback receives the previous override value (or undefined if first)
+ * and returns the merged partial. Multiple @OverrideConfiguration for the
+ * same token: chained in @Use order.
  */
 declare function OverrideConfiguration<T>(
     configToken: Token<T>,
-    defaults: Partial<T>,
+    override: (prev: Partial<T> | undefined) => Partial<T> | undefined,
 ): ClassDecorator<OverrideConfigurationMetadata<T>>;
 
 // --- ConfigurationRegistry (internal) ---
@@ -860,15 +862,15 @@ const AppConfig = createConfiguration<{
 
 // @OverrideConfiguration: code-level defaults (lower than file/env/cli)
 @Component()
-@OverrideConfiguration(BootstrapOptions, {
+@OverrideConfiguration(BootstrapOptions, () => ({
     configBase: './config/config',
     profiles: ['staging'],
     envPrefix: 'MYAPP_',
-})
-@OverrideConfiguration(DatabaseConfig, {
+}))
+@OverrideConfiguration(DatabaseConfig, () => ({
     port: 5432,
     host: 'localhost',
-})
+}))
 class AppConfigModule {}
 
 
@@ -1091,11 +1093,11 @@ class RedisModule {}
 @Touch(AwsSecretManagerResolver, EnvFileLoader)
 @Use(RedisModule)
 @Use(RedisEventSubscriber, JobMetricsListener)
-@OverrideConfiguration(BootstrapOptions, {
+@OverrideConfiguration(BootstrapOptions, () => ({
     configBase: './config/config',
     profiles: ['prod'],
     envPrefix: 'PETSTORE_',
-})
+}))
 class PetStoreApplication {
     constructor(
         private readonly config = inject(PetStoreConfig),

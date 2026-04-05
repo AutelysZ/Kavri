@@ -152,16 +152,16 @@ Precedence: `@Provide > cli > env > config file > @OverrideConfiguration > parse
 ```ts
 interface OverrideConfigurationMetadata<T> {
   token: Token<T>;
-  defaults: Partial<T>;
+  override: (prev: Partial<T> | undefined) => Partial<T> | undefined;
 }
 
 declare function OverrideConfiguration<T>(
   configToken: Token<T>,
-  defaults: Partial<T>,
+  override: (prev: Partial<T> | undefined) => Partial<T> | undefined,
 ): ClassDecorator<OverrideConfigurationMetadata<T>>;
 ```
 
-Code-level defaults for any config token (bootstrap or regular). Lower priority than env/cli (and config files for regular). Multiple for the same token: deep-merged in `@Use` order.
+Code-level defaults for any config token (bootstrap or regular). Lower priority than env/cli (and config files for regular). The callback receives the previous override value (or `undefined` if first) and returns the merged partial. Multiple for the same token: chained in `@Use` order.
 
 ## 9. Variable substitution
 
@@ -276,11 +276,11 @@ const SelectedDriver = token<Driver>(
 @Component()
 @Touch(PsqlDriver)
 @Touch(AwsSecretManagerResolver)
-@OverrideConfiguration(BootstrapOptions, {
+@OverrideConfiguration(BootstrapOptions, () => ({
   configBase: './config/config',
   profiles: ['prod'],
   envPrefix: 'MYAPP_',
-})
+}))
 class Application {
   constructor(
     private readonly app = inject(AppConfig),
