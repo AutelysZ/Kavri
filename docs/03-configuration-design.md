@@ -7,8 +7,9 @@ Configuration is a first-class subsystem with pluggable loaders, import resolver
 ## 2. Architecture
 
 ```
-Bootstrap phase (env/cli only):
-  createBootstrapOption() → ConfigOptions, AwsResolverOptions, ...
+Bootstrap phase (BootstrapConfigRegistry):
+  createBootstrapConfig() → ConfigOptions, AwsResolverOptions, ...
+  Sources: @ConfigDefault < env < cli (no files, no variable substitution)
 
 Load phase (ConfigRegistry @OnConstruct):
   1. @ConfigDefault code defaults
@@ -72,13 +73,19 @@ For `aws-secretmanager:prod/db-secrets?prefix=database`:
 
 `injectMap(Resolver)` requires all Resolver subclasses to have `@Component({ name })`. If any doesn't, it throws.
 
-## 6. Bootstrap options
+## 6. Bootstrap configuration
 
 ```ts
-declare function createBootstrapOption<T>(prefix: string, parser: ConfigParser<T>): Token<T>;
+declare function BootstrapConfiguration<T>(prefix: string, parser: ConfigParser<T>): ClassDecorator<BootstrapConfigurationMetadata<T>>;
+declare function createBootstrapConfig<T>(prefix: string, parser: ConfigParser<T>): Token<T>;
 ```
 
-Resolved before config files. Precedence: `@Provide > cli > env > @ConfigDefault > parser defaults`.
+Bootstrap configs are resolved before config files by `BootstrapConfigRegistry`. No config files, no variable substitution. Precedence: `@Provide > cli > env > @ConfigDefault > parser defaults`.
+
+`BootstrapConfigRegistry` `@OnConstruct`:
+1. Read `@ConfigDefault` for bootstrap tokens (`Metadata.entries(ConfigDefault)`)
+2. Merge env vars (`Metadata.entries(BootstrapConfiguration)` for field mapping)
+3. Merge cli args
 
 ### ConfigOptions
 
@@ -148,14 +155,14 @@ import {
   inject, injectAll, token,
 } from 'kavri';
 import {
-  createConfigSchema, createBootstrapOption, ConfigOptions,
+  createConfigSchema, createBootstrapConfig, ConfigOptions,
   Resolver, Loader,
 } from 'kavri/config';
 import { z } from 'zod';
 
 // --- bootstrap ---
 
-const AwsOpts = createBootstrapOption('aws', z.object({
+const AwsOpts = createBootstrapConfig('aws', z.object({
   region: z.string().default('us-east-1'),
 }));
 

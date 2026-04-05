@@ -303,66 +303,88 @@ abstract class Resolver {
     abstract load(resource: string): Awaitable<Record<string, string>>;
 }
 
-// --- Bootstrap options ---
+// --- Bootstrap configuration ---
+
+interface BootstrapConfigurationMetadata<T> {
+    prefix: string;
+    parser: ConfigParser<T>;
+}
+
+/** Marks a token as a bootstrap config (resolved before config files, no variable substitution). */
+declare function BootstrapConfiguration<T>(prefix: string, parser: ConfigParser<T>): ClassDecorator<BootstrapConfigurationMetadata<T>>;
 
 /**
- * Creates a bootstrap option token (resolved before config files).
- * Sources: env/cli only, no config file layer.
+ * Creates a bootstrap config token. Resolved before config files load.
+ * Token is decorated with @BootstrapConfiguration.
+ * Factory: (registry = inject(BootstrapConfigRegistry)) => registry.parse(token)
  *
+ * Sources: env/cli only, no config files, no variable substitution.
  * Precedence: @Provide (escape hatch) > cli > env > @ConfigDefault > parser defaults
  *
  * Env mapping: prefix uppercased. 'aws' → AWS_REGION
  * CLI mapping: '--' + prefix. 'aws' → --aws.region
  */
-declare function createBootstrapOption<T>(prefix: string, parser: ConfigParser<T>): Token<T>;
+declare function createBootstrapConfig<T>(prefix: string, parser: ConfigParser<T>): Token<T>;
 
 /**
- * ConfigOptions — bootstrap option for the config system itself.
- *
- * configBase: base path for config files (default: './config/config').
- *   ConfigRegistry appends extensions from discovered loaders:
- *   e.g., './config/config.yaml', './config/config.json', first found wins.
- *
- * profiles: active profiles (default: []).
- *   For each profile, loads '{configBase}-{profile}.{ext}' after the base file.
- *   Profile files override base values. Later profiles override earlier ones.
- *
- * env: environment variables source (default: process.env).
- * argv: CLI arguments source (default: process.argv).
- * envPrefix: prefix for env var mapping (default: '').
- * argvPrefix: prefix for CLI arg mapping without '--' (default: '').
+ * ConfigOptions — bootstrap config for the config system itself.
+ * Internally: createBootstrapConfig('config', z.object({ ... }))
  */
 interface ConfigOptions {
+    /** Base path for config files. Default: './config/config'. */
     configBase: string;
+    /** Active profiles. Default: []. Loads {configBase}-{profile}.{ext}. */
     profiles: string[];
+    /** Environment variables source. Default: process.env. */
     env: Record<string, string>;
+    /** CLI arguments source. Default: process.argv. */
     argv: string[];
+    /** Prefix for env var mapping. Default: ''. */
     envPrefix: string;
+    /** Prefix for CLI arg mapping (without '--'). Default: ''. */
     argvPrefix: string;
 }
 
 declare const ConfigOptions: Token<ConfigOptions>;
-// defaults: configBase='./config/config', profiles=[], env=process.env,
-// argv=process.argv, envPrefix='', argvPrefix=''
 
-// --- Config schema ---
+// --- BootstrapConfigRegistry (internal) ---
+
+/**
+ * Internal singleton for bootstrap configs.
+ *
+ * @OnConstruct lifecycle:
+ *   1. Read @ConfigDefault for bootstrap tokens (Metadata.entries(ConfigDefault))
+ *   2. Merge env vars (using Metadata.entries(BootstrapConfiguration) for field mapping)
+ *   3. Merge cli args
+ *   No config files. No variable substitution.
+ *
+ * registry.parse(token):
+ *   Reads prefix/parser from Metadata.of(BootstrapConfiguration, token).
+ *   Validates with parser.
+ */
+declare class BootstrapConfigRegistry {
+    parse<T>(token: Token<T>): T;
+}
+
+// --- Regular configuration ---
 
 interface ConfigurationMetadata<T> {
     prefix: string;
     parser: ConfigParser<T>;
-    bootstrap: boolean;
 }
 
-declare function Configuration<T>(prefix: string, parser: ConfigParser<T>, bootstrap?: boolean): ClassDecorator<ConfigurationMetadata<T>>;
+/** Marks a token as a regular config schema (resolved from all sources). */
+declare function Configuration<T>(prefix: string, parser: ConfigParser<T>): ClassDecorator<ConfigurationMetadata<T>>;
 
 /**
  * Creates a config token bound to a prefix.
- * Token factory: (registry = inject(ConfigRegistry)) => registry.parse(token)
+ * Token is decorated with @Configuration.
+ * Factory: (registry = inject(ConfigRegistry)) => registry.parse(token)
  *
  * Precedence: @Provide (escape hatch) > cli > env > config file > @ConfigDefault > parser defaults
  *
- * Variable substitution: ${key} resolved from env context (built from
- * process.env + imported external sources). ${key:-default} for fallback.
+ * Variable substitution: ${key} resolved from env context
+ * (process.env + imported external sources). ${key:-default} for fallback.
  */
 declare function createConfigSchema<T>(prefix: string, parser: ConfigParser<T>): Token<T>;
 
@@ -374,7 +396,8 @@ interface ConfigDefaultMetadata<T> {
 }
 
 /**
- * Code-level defaults for a config token. Lower than file/env/cli.
+ * Code-level defaults for any config token (bootstrap or regular).
+ * Lower priority than env/cli (and config files for regular configs).
  * Multiple @ConfigDefault for the same token: deep-merged in @Use order.
  */
 declare function ConfigDefault<T>(
@@ -385,27 +408,25 @@ declare function ConfigDefault<T>(
 // --- ConfigRegistry (internal) ---
 
 /**
- * Internal singleton. Created on first config token inject.
+ * Internal singleton for regular configs. Depends on BootstrapConfigRegistry
+ * (for ConfigOptions) and Loaders/Resolvers.
  *
  * @OnConstruct lifecycle (in order):
  *   1. Read @ConfigDefault code defaults (Metadata.entries(ConfigDefault))
  *   2. Load config files:
- *      - Discover extensions from injectAll(Loader) → ['.yaml', '.json', '.toml', ...]
- *      - Try {configBase}.{ext} for each extension, use first found
- *      - For each profile: try {configBase}-{profile}.{ext}, merge on top
+ *      - Extensions from injectAll(Loader)
+ *      - Try {configBase}.{ext}, first found wins
+ *      - Per profile: {configBase}-{profile}.{ext}, merge on top
  *   3. Merge config files over code defaults
- *   4. Merge env vars (using Metadata.entries(Configuration) for field mapping)
- *   5. Merge cli args (same metadata)
- *   6. Build env context: start with ConfigOptions.env (process.env by default)
- *   7. Read kavri.config.import from merged config:
- *      e.g., ["aws-secretmanager:my-secret?prefix=db", "vault:secret/redis"]
- *      For each entry, parse protocol name, find Resolver via injectMap(Resolver),
- *      call resolver.load(resource), merge returned key-values into env context
- *   8. Resolve ${...} variables in all config values using the env context
- *   Store final merged result.
+ *   4. Merge env vars (Metadata.entries(Configuration) for field mapping)
+ *   5. Merge cli args
+ *   6. Build env context: start with ConfigOptions.env (process.env)
+ *   7. Read kavri.config.import from merged config
+ *   8. Load imports via injectMap(Resolver), merge into env context
+ *   9. Resolve ${...} variables using env context
  *
- * registry.parse(configToken):
- *   Reads prefix and parser from Metadata.of(Configuration, configToken).
+ * registry.parse(token):
+ *   Reads prefix/parser from Metadata.of(Configuration, token).
  *   Extracts node at prefix. Validates with parser.
  */
 declare class ConfigRegistry {
@@ -870,7 +891,7 @@ declare class SecretsManagerClient {
 }
 
 // AwsSecretManagerResolver options — bootstrap (resolved from env/cli before config)
-const AwsResolverOptions = createBootstrapOption<{
+const AwsResolverOptions = createBootstrapConfig<{
     region: string;
     accessKeyId?: string;
     secretAccessKey?: string;
