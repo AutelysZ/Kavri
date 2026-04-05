@@ -240,7 +240,7 @@ class UserController extends createController(UserServiceDef) {
 ### createClient — frontend consumption
 
 ```ts
-import { createClient } from 'kavri/http-client';
+import { createClient } from '@kavri/web/client';
 
 const client = createClient(UserServiceDef, { baseUrl: 'https://api.example.com' });
 
@@ -459,12 +459,12 @@ import {
     createService, createController, createClient,
     Interceptor, RequestContext, HttpException,
     WebApplication, Transactional, FileResponse, Redirect,
-} from 'kavri/http';
+} from '@kavri/web';
 import {
     Component, Touch, Use, Provide,
     inject, injectAll, token,
     createConfiguration,
-} from 'kavri';
+} from '@kavri/core';
 
 // ---- Shared service definition ----
 

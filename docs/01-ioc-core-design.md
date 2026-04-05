@@ -212,14 +212,14 @@ All `inject()` calls are synchronous. Async providers are handled via throw-and-
 ```ts
 import {
   Container, Component, Provide, Touch, Use,
-  OnConstruct, OnDestroy, ConfigDefault,
+  OnConstruct, OnDestroy, OverrideConfiguration,
   token, inject, injectAll, injectRef,
   Metadata,
-} from 'kavri';
-import { createConfigSchema, ConfigOptions } from 'kavri/config';
+} from '@kavri/core';
+import { createConfiguration, BootstrapOptions } from '@kavri/config';
 import { z } from 'zod';
 
-const DbConfig = createConfigSchema('database', z.object({
+const DbConfig = createConfiguration('database', z.object({
   driver: z.string(),
   url: z.string(),
 }));
@@ -248,7 +248,7 @@ declare class Redis {
   await r.connect('redis://localhost');
   return r;
 }, { onDestroy: 'disconnect' })
-@ConfigDefault(ConfigOptions, { configFiles: ['app.yaml'] })
+@OverrideConfiguration(BootstrapOptions, () => ({ configBase: './config/app' }))
 class AppModule {}
 
 @Component()

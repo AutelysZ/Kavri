@@ -201,11 +201,11 @@ Internal singleton for regular configs. Depends on `BootstrapConfigurationRegist
 import {
   Container, Component, Touch, Use, OverrideConfiguration,
   inject, injectAll, token,
-} from 'kavri';
+} from '@kavri/core';
 import {
   createConfiguration, createBootstrapConfiguration, BootstrapOptions,
   Resolver, Loader, Configuration,
-} from 'kavri/config';
+} from '@kavri/config';
 import { z } from 'zod';
 
 // --- bootstrap ---

@@ -139,7 +139,7 @@ All built-in decorators carry typed metadata and can be read via `Metadata.of()`
 | `OnConstruct()` | `{}` | `Metadata.of(OnConstruct, cls, 'init')` |
 | `OnDestroy()` | `{}` | `Metadata.of(OnDestroy, cls, 'dispose')` |
 | `Configuration(prefix, schema)` | `ConfigurationMetadata<T>` | `Metadata.of(Configuration, token)` |
-| `ConfigDefault(token, defaults)` | `ConfigDefaultMetadata<T>` | `Metadata.of(ConfigDefault, cls)` |
+| `OverrideConfiguration(token, fn)` | `OverrideConfigurationMetadata<T>` | `Metadata.of(OverrideConfiguration, cls)` |
 
 ## 6. Programmatic metadata — `Metadata.apply()`
 
@@ -177,7 +177,7 @@ import {
   createMethodDecorator,
   inject,
   injectAll,
-} from 'kavri';
+} from '@kavri/core';
 
 // ---- Custom class decorator ----
 

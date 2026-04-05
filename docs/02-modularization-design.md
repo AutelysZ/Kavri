@@ -2,7 +2,7 @@
 
 ## 1. Purpose
 
-Modules group cohesive sets of providers and component registrations. A module is a `@Component()` class that uses `@Provide`, `@Touch`, `@Use`, and/or `@ConfigDefault` decorators.
+Modules group cohesive sets of providers and component registrations. A module is a `@Component()` class that uses `@Provide`, `@Touch`, `@Use`, and/or `@OverrideConfiguration` decorators.
 
 There is no root/local module hierarchy. ESM already handles physical modularization. Kavri modules are purely logical groupings for provider organization.
 
@@ -30,9 +30,9 @@ Use for:
 - Components with `@Provide` that must be processed
 - Side-effect components (event subscribers, background workers)
 
-### `@Provide` and `@ConfigDefault` on modules
+### `@Provide` and `@OverrideConfiguration` on modules
 
-Modules use `@Provide` as a class decorator to register providers, and `@ConfigDefault` to supply code-level defaults for config tokens:
+Modules use `@Provide` as a class decorator to register providers, and `@OverrideConfiguration` to supply code-level defaults for config tokens:
 
 ```ts
 @Component()
@@ -41,11 +41,11 @@ Modules use `@Provide` as a class decorator to register providers, and `@ConfigD
   await r.connect(config.url);
   return r;
 }, { onDestroy: 'disconnect' })
-@ConfigDefault(ConfigOptions, { configFiles: ['app.yaml'] })
+@OverrideConfiguration(BootstrapOptions, () => ({ configBase: './config/app' }))
 class AppModule {}
 ```
 
-`@Provide`/`@ConfigDefault` can be used on **any** `@Component()` class, not just dedicated module classes.
+`@Provide`/`@OverrideConfiguration` can be used on **any** `@Component()` class, not just dedicated module classes.
 
 ## 3. Touch vs Use
 
@@ -58,7 +58,7 @@ class AppModule {}
 
 ## 4. Rules
 
-- **Module is optional.** Small applications can put `@Provide`/`@ConfigDefault`/`@Touch` directly on the entrypoint class.
+- **Module is optional.** Small applications can put `@Provide`/`@OverrideConfiguration`/`@Touch` directly on the entrypoint class.
 - **Module does not change resolution semantics.** Lifecycle and injection behavior are identical whether registered via a module or directly.
 - **Modules can compose.** A module can `@Use` other modules.
 - **No circular module dependencies.** If module A uses module B and B uses A, startup fails.
@@ -72,7 +72,7 @@ import {
   Container,
   Component,
   Provide,
-  ConfigDefault,
+  OverrideConfiguration,
   Touch,
   Use,
   OnEvent,
@@ -84,13 +84,13 @@ import {
   injectSet,
   injectMap,
   token,
-} from 'kavri';
-import { createConfigSchema, ConfigOptions } from 'kavri/config';
+} from '@kavri/core';
+import { createConfiguration, BootstrapOptions } from '@kavri/config';
 import { z } from 'zod';
 
 // ---- driver module ----
 
-const DbConfig = createConfigSchema('database', z.object({
+const DbConfig = createConfiguration('database', z.object({
   driver: z.string(),
   url: z.string(),
 }));
@@ -139,9 +139,9 @@ class CacheModule {}
 // ---- config module ----
 
 @Component()
-@ConfigDefault(ConfigOptions, {
-  configFiles: ['application.yaml'],
-})
+@OverrideConfiguration(BootstrapOptions, () => ({
+  configBase: './config/app',
+}))
 class ConfigModule {}
 
 // ---- notification module (side-effect) ----

@@ -107,7 +107,7 @@ import {
   defineEvent,
   inject,
   token,
-} from 'kavri';
+} from '@kavri/core';
 
 // --- class-based events ---
 
