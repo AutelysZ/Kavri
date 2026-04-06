@@ -437,7 +437,7 @@ await app.start();
 
 ```ts
 import {
-    Schema, IsString, IsInteger, IsEmail, createService,
+    Schema, IsString, IsInteger, IsEmail, createService, get, post, del,
 } from '@kavri/schema';
 import {
     ControllerImpl, createController,
@@ -465,10 +465,11 @@ class UserResponse {
     @IsEmail() email!: string;
 }
 
-const UserService = createService('/user')
-    .get('getUser', '/:id', GetUserParams, UserResponse)
-    .post('createUser', '/', CreateUserBody, UserResponse)
-    .delete('deleteUser', '/:id', GetUserParams);
+const UserService = createService('/user', {
+    getUser: get('/:id', GetUserParams, UserResponse),
+    createUser: post('/', CreateUserBody, UserResponse),
+    deleteUser: del('/:id', GetUserParams),
+});
 
 // ---- Controller implementation ----
 
