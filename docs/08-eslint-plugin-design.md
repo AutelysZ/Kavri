@@ -2,7 +2,7 @@
 
 ## 1. Purpose
 
-Kavri's `inject()`, `injectAll()`, and `injectRef()` must only be called inside designated inject points. Calling them elsewhere is a runtime error. This ESLint plugin catches violations at lint time.
+Kavri's `inject()`, `injectAll()`, `injectRef()`, and `injectConfig()` must only be called inside designated inject points. Calling them elsewhere is a runtime error. This ESLint plugin catches violations at lint time.
 
 Package name: `@kavri/eslint-plugin`
 
@@ -27,14 +27,14 @@ An inject call is valid **only** as a **default parameter value** in:
 
    ```ts
    const DbUrl = token<string>(
-       (config = inject(DbConfig)) => config.url // ok
+       (config = injectConfig(DbConfig)) => config.url // ok
    );
    ```
 
 3. **`@Provide` factory parameters**
 
    ```ts
-   @Provide(Redis, async (config = inject(RedisConfig)) => { // ok
+   @Provide(Redis, async (config = injectConfig(RedisConfig)) => { // ok
        const r = new Redis();
        await r.connect(config.url);
        return r;
@@ -120,6 +120,7 @@ The rule applies to these function names (configurable):
 - `inject`
 - `injectRef`
 - `injectAll`
+- `injectConfig`
 
 ### Configuration
 

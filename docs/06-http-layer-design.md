@@ -133,17 +133,18 @@ class LoggingInterceptor extends Interceptor {
 ### Built-in: BasicAuthInterceptor
 
 ```ts
-const BasicAuthConfig = createConfiguration('auth.basic', z.object({
-    username: z.string(),
-    password: z.string(),
-    realm: z.string().default('Restricted'),
-}));
+@Configuration('auth.basic')
+class BasicAuthConfig {
+    @IsString() username!: string;
+    @IsString() password!: string;
+    @IsString({ default: 'Restricted' }) realm!: string;
+}
 
 @Component({
-    condition: (config = inject(BasicAuthConfig, true)) => config !== undefined,
+    condition: (config = injectConfig(BasicAuthConfig, true)) => config !== undefined,
 })
 class BasicAuthInterceptor extends Interceptor {
-    constructor(private readonly config = inject(BasicAuthConfig)) { super(); }
+    constructor(private readonly config = injectConfig(BasicAuthConfig)) { super(); }
 
     async intercept(ctx: InterceptorContext, next: () => Promise<unknown>) {
         const auth = RequestContext.get().headers.get('authorization');
@@ -193,16 +194,17 @@ See [09-schema-design.md](./09-schema-design.md#openapi-generation). `generateOp
 ## 8. Static Assets
 
 ```ts
-const StaticConfig = createConfiguration('static', z.object({
-    root: z.string().default('./public'),
-    prefix: z.string().default('/static'),
-}));
+@Configuration('static')
+class StaticConfig {
+    @IsString({ default: './public' }) root!: string;
+    @IsString({ default: '/static' }) prefix!: string;
+}
 
 @Component({
-    condition: (config = inject(StaticConfig, true)) => config !== undefined,
+    condition: (config = injectConfig(StaticConfig, true)) => config !== undefined,
 })
 class StaticFileInterceptor extends Interceptor {
-    constructor(private readonly config = inject(StaticConfig)) { super(); }
+    constructor(private readonly config = injectConfig(StaticConfig)) { super(); }
 
     async intercept(ctx: InterceptorContext, next: () => Promise<unknown>) {
         if (RequestContext.get().url.startsWith(this.config.prefix)) {
@@ -265,18 +267,18 @@ class OrderController extends createController(OrderRoute) {
 ## 10. Configuration
 
 ```ts
-const HttpConfig = createConfiguration('http', z.object({
-    host: z.string().default('0.0.0.0'),
-    port: z.coerce.number().default(3000),
-}));
+@Configuration('http')
+class HttpConfig {
+    @IsString({ default: '0.0.0.0' }) host!: string;
+    @IsInteger({ default: 3000 }) port!: number;
+}
 
-const DatabaseConfig = createConfiguration('database', z.object({
-    url: z.string(),
-    pool: z.object({
-        min: z.number().default(2),
-        max: z.number().default(10),
-    }).default({}),
-}));
+@Configuration('database')
+class DatabaseConfig {
+    @IsString() url!: string;
+    @IsInteger({ default: 2 }) poolMin!: number;
+    @IsInteger({ default: 10 }) poolMax!: number;
+}
 ```
 
 ## 11. Error Handling

@@ -115,7 +115,7 @@ declare function inject<T>(injectable: Injectable<T>, optional: true): T | undef
 declare function inject<T>(injectable: Injectable<T>, name: Qualifier, optional: true): T | undefined;
 ```
 
-**Inject points** -- `inject()` may only be called in default parameters at:
+**Inject points** -- `inject()` / `injectConfig()` may only be called in default parameters at:
 
 1. `@Component` class constructors
 2. `token()` factory functions
@@ -123,6 +123,7 @@ declare function inject<T>(injectable: Injectable<T>, name: Qualifier, optional:
 4. `ComponentOptions.condition` functions
 5. `@OnConstruct` / `@OnDestroy` method parameters
 6. `onConstruct` / `onDestroy` callback parameters (`ProvideOptions`)
+7. `injectConfig()` -- injects a validated `@Configuration` class instance
 
 ### 6.2 `injectRef()` — circular references
 
@@ -184,7 +185,7 @@ declare class InjectContextError extends Error {}
 /** Thrown when the container is used after destroy(). */
 declare class DestroyedContainerError extends Error {}
 
-/** Thrown when a config schema fails zod validation during resolution. */
+/** Thrown when a config schema fails validation during resolution. */
 declare class ConfigValidationError extends Error {
   readonly prefix: string;
   readonly issues: unknown;
@@ -216,13 +217,14 @@ import {
   token, inject, injectAll, injectRef,
   Metadata,
 } from '@kavri/core';
-import { createConfiguration, BootstrapOptions } from '@kavri/config';
-import { z } from 'zod';
+import { Configuration, injectConfig, BootstrapOptions } from '@kavri/config';
+import { IsString } from '@kavri/schema';
 
-const DbConfig = createConfiguration('database', z.object({
-  driver: z.string(),
-  url: z.string(),
-}));
+@Configuration('database')
+class DatabaseConfig {
+  @IsString() driver!: string;
+  @IsString() url!: string;
+}
 
 abstract class Driver {
   abstract query(sql: string): Promise<any>;
@@ -234,7 +236,7 @@ class PsqlDriver extends Driver {
 }
 
 const SelectedDriver = token<Driver>(
-  (cfg = inject(DbConfig), d = inject(Driver, cfg.driver)) => d,
+  (cfg = injectConfig(DatabaseConfig), d = inject(Driver, cfg.driver)) => d,
 );
 
 declare class Redis {

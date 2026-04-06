@@ -248,15 +248,6 @@ declare class EventBus {
 // Section 11: Configuration
 // ============================================================
 
-declare const z: any;
-
-// --- Parser ---
-
-/** Validation interface. Zod schemas satisfy this naturally. */
-interface ConfigParser<T> {
-    parse(raw: unknown): T;
-}
-
 // --- Loader ---
 
 /**
@@ -264,9 +255,7 @@ interface ConfigParser<T> {
  * Subclasses must be @Component(). Third-party loaders added via @Touch.
  */
 abstract class Loader {
-    /** File extensions (e.g., ['.yaml', '.yml']). */
     abstract supports(): string[];
-    /** Parse file content into config object. */
     abstract load(content: string): Awaitable<object>;
 }
 
@@ -274,7 +263,7 @@ declare class JsonLoader extends Loader {}
 declare class YamlLoader extends Loader {}
 declare class TomlLoader extends Loader {}
 
-// --- Resolver (import resolvers, NOT variable resolvers) ---
+// --- Resolver (import resolvers) ---
 
 /**
  * Abstract import resolver for kavri.config.import entries.
@@ -282,144 +271,111 @@ declare class TomlLoader extends Loader {}
  * ConfigurationRegistry uses injectMap(Resolver) to find resolvers by name.
  */
 abstract class Resolver {
-    /**
-     * Load external values and return them as key-value pairs.
-     * These are merged into the env context for ${...} substitution.
-     * @param resource — the part after the protocol prefix (e.g., "my-secret?prefix=db")
-     */
     abstract load(resource: string): Awaitable<Record<string, string>>;
 }
 
-// --- Bootstrap configuration ---
+// --- @Configuration ---
 
-interface BootstrapConfigurationMetadata<T> {
+interface ConfigurationMetadata {
     prefix: string;
-    parser: ConfigParser<T>;
+    bootstrap: boolean;
 }
 
-/** Marks a token as a bootstrap config (resolved before config files, no variable substitution). */
-declare function BootstrapConfiguration<T>(prefix: string, parser: ConfigParser<T>): ClassDecorator<BootstrapConfigurationMetadata<T>>;
-
 /**
- * Creates a bootstrap config token. Resolved before config files load.
- * Token is decorated with @BootstrapConfiguration.
- * Factory: (registry = inject(BootstrapConfigurationRegistry)) => registry.parse(token)
+ * Marks a class as a configuration schema.
+ * Composes @Schema() — all fields must have field decorators from @kavri/schema.
  *
- * Sources: env/cli only, no config files, no variable substitution.
- * Precedence: @Provide (escape hatch) > cli > env > @OverrideConfiguration > parser defaults
+ * Regular configuration (default): resolved from all sources.
+ * Bootstrap configuration ({ bootstrap: true }): resolved from env/cli only,
+ * before config files load.
  *
- * Env mapping: prefix uppercased. 'aws' → AWS_REGION
- * CLI mapping: '--' + prefix. 'aws' → --aws.region
+ * @example
+ * @Configuration('app')
+ * class AppConfig {
+ *     @IsString({ default: 'my-app' })
+ *     name!: string;
+ *
+ *     @IsInteger({ default: 3000 })
+ *     port!: number;
+ * }
+ *
+ * @Configuration('config', { bootstrap: true })
+ * class BootstrapOptions {
+ *     @IsString({ default: './config/config' })
+ *     configBase!: string;
+ *
+ *     @IsArray(IsString(), { default: [] })
+ *     profiles!: string[];
+ * }
  */
-declare function createBootstrapConfiguration<T>(prefix: string, parser: ConfigParser<T>): Token<T>;
+declare function Configuration(prefix: string, options?: { bootstrap?: boolean }): ClassDecorator<ConfigurationMetadata>;
 
-/**
- * BootstrapOptions — bootstrap config for the config system itself.
- * Internally: createBootstrapConfiguration('config', z.object({ ... }))
- */
-interface BootstrapOptions {
-    /** Base path for config files. Default: './config/config'. */
-    configBase: string;
-    /** Active profiles. Default: []. Loads {configBase}-{profile}.{ext}. */
-    profiles: string[];
-    /** Environment variables source. Default: process.env. */
-    env: Record<string, string>;
-    /** CLI arguments source. Default: process.argv. */
-    argv: string[];
-    /** Prefix for env var mapping. Default: ''. */
-    envPrefix: string;
-    /** Prefix for CLI arg mapping (without '--'). Default: ''. */
-    argvPrefix: string;
+// --- BootstrapOptions (built-in bootstrap config) ---
+
+@Configuration('config', {bootstrap: true})
+declare class BootstrapOptions {
+    configBase: string;    // default: './config/config'
+    profiles: string[];    // default: []
+    env: Record<string, string>; // default: process.env
+    argv: string[];        // default: process.argv
+    envPrefix: string;     // default: ''
+    argvPrefix: string;    // default: ''
 }
 
-declare const BootstrapOptions: Token<BootstrapOptions>;
-
-// --- BootstrapConfigurationRegistry (internal) ---
+// --- injectConfig ---
 
 /**
- * Internal singleton for bootstrap configs.
+ * Injects a validated configuration instance.
+ * The class must be decorated with @Configuration(prefix).
+ * This is an inject point — usable in constructors, factories, conditions, etc.
  *
- * @OnConstruct lifecycle:
- *   1. Read @OverrideConfiguration for bootstrap tokens (Metadata.entries(OverrideConfiguration))
- *   2. Merge env vars (using Metadata.entries(BootstrapConfiguration) for field mapping)
- *   3. Merge cli args
- *   No config files. No variable substitution.
- *
- * registry.parse(token):
- *   Reads prefix/parser from Metadata.of(BootstrapConfiguration, token).
- *   Validates with parser.
+ * Regular configs: @Provide > cli > env > config file > @OverrideConfiguration > schema defaults
+ * Bootstrap configs: @Provide > cli > env > @OverrideConfiguration > schema defaults
  */
-declare class BootstrapConfigurationRegistry {
-    parse<T>(token: Token<T>): T;
-}
-
-// --- Regular configuration ---
-
-interface ConfigurationMetadata<T> {
-    prefix: string;
-    parser: ConfigParser<T>;
-}
-
-/** Marks a token as a regular config schema (resolved from all sources). */
-declare function Configuration<T>(prefix: string, parser: ConfigParser<T>): ClassDecorator<ConfigurationMetadata<T>>;
-
-/**
- * Creates a config token bound to a prefix.
- * Token is decorated with @Configuration.
- * Factory: (registry = inject(ConfigurationRegistry)) => registry.parse(token)
- *
- * Precedence: @Provide (escape hatch) > cli > env > config file > @OverrideConfiguration > parser defaults
- *
- * Variable substitution: ${key} resolved from env context
- * (process.env + imported external sources). ${key:-default} for fallback.
- */
-declare function createConfiguration<T>(prefix: string, parser: ConfigParser<T>): Token<T>;
+declare function injectConfig<T>(clazz: AnyConstructor<T>): T;
+declare function injectConfig<T>(clazz: AnyConstructor<T>, optional: true): T | undefined;
 
 // --- OverrideConfiguration ---
 
 interface OverrideConfigurationMetadata<T> {
-    token: Token<T>;
+    clazz: AnyConstructor<T>;
     override: (prev: Partial<T> | undefined) => Partial<T> | undefined;
 }
 
 /**
- * Code-level defaults for any config token (bootstrap or regular).
+ * Code-level defaults for a @Configuration class.
  * Lower priority than env/cli (and config files for regular configs).
- * The callback receives the previous override value (or undefined if first)
- * and returns the merged partial. Multiple @OverrideConfiguration for the
- * same token: chained in @Use order.
  */
 declare function OverrideConfiguration<T>(
-    configToken: Token<T>,
+    clazz: AnyConstructor<T>,
     override: (prev: Partial<T> | undefined) => Partial<T> | undefined,
 ): ClassDecorator<OverrideConfigurationMetadata<T>>;
+
+// --- BootstrapConfigurationRegistry (internal) ---
+
+/**
+ * @OnConstruct: @OverrideConfiguration defaults → merge env → merge cli.
+ * No config files. No variable substitution.
+ */
+declare class BootstrapConfigurationRegistry {
+    resolve<T>(clazz: AnyConstructor<T>): T;
+}
 
 // --- ConfigurationRegistry (internal) ---
 
 /**
- * Internal singleton for regular configs. Depends on BootstrapConfigurationRegistry
- * (for BootstrapOptions) and Loaders/Resolvers.
- *
- * @OnConstruct lifecycle (in order):
- *   1. Read @OverrideConfiguration code defaults (Metadata.entries(OverrideConfiguration))
- *   2. Load config files:
- *      - Extensions from injectAll(Loader)
- *      - Try {configBase}.{ext}, first found wins
- *      - Per profile: {configBase}-{profile}.{ext}, merge on top
+ * @OnConstruct (in order):
+ *   1. @OverrideConfiguration code defaults
+ *   2. Load config files ({configBase}.{ext}, {configBase}-{profile}.{ext})
  *   3. Merge config files over code defaults
- *   4. Merge env vars (Metadata.entries(Configuration) for field mapping)
+ *   4. Merge env vars
  *   5. Merge cli args
- *   6. Build env context: start with BootstrapOptions.env (process.env)
- *   7. Read kavri.config.import from merged config
- *   8. Load imports via injectMap(Resolver), merge into env context
- *   9. Resolve ${...} variables using env context
- *
- * registry.parse(token):
- *   Reads prefix/parser from Metadata.of(Configuration, token).
- *   Extracts node at prefix. Validates with parser.
+ *   6. Build env context (process.env + imports)
+ *   7. Read kavri.config.import → load via injectMap(Resolver)
+ *   8. Resolve ${...} variables
  */
 declare class ConfigurationRegistry {
-    parse<T>(configToken: Token<T>): T;
+    resolve<T>(clazz: AnyConstructor<T>): T;
 }
 
 // ============================================================
@@ -566,24 +522,18 @@ class DataExporter {
 
 const AppName = token<string>(() => 'kavri-app');
 
-const DatabaseConfig = createConfiguration<{
-    driver: string;
-    host: string;
-    port: number;
-    username: string;
-    password: string;
-    database: string;
-}>('database', z.object({
-    driver: z.string(),
-    host: z.string(),
-    port: z.coerce.number().default(5432),
-    username: z.string(),
-    password: z.string(),
-    database: z.string(),
-}));
+@Configuration('database')
+class DatabaseConfig {
+    @IsString() driver!: string;
+    @IsString() host!: string;
+    @IsInteger({default: 5432}) port!: number;
+    @IsString() username!: string;
+    @IsString() password!: string;
+    @IsString() database!: string;
+}
 
 const DatabaseUrl = token<string>(
-    (config = inject(DatabaseConfig)) => `${config.driver}://${config.username}:${config.password}@${config.host}:${config.port}/${config.database}`
+    (config = injectConfig(DatabaseConfig)) => `${config.driver}://${config.username}:${config.password}@${config.host}:${config.port}/${config.database}`
 );
 
 declare class ExternalHttpClient {
@@ -627,7 +577,7 @@ class PsqlDriver extends Driver<unknown> {
 }
 
 const SelectedDriver = token<Driver<any>>(
-    (config = inject(DatabaseConfig), driver = inject(Driver, config.driver)) => driver
+    (config = injectConfig(DatabaseConfig), driver = inject(Driver, config.driver)) => driver
 );
 
 const Connection = token<any>(
@@ -653,9 +603,10 @@ declare class Redis {
     set(key: string, value: string, ttl?: number): Promise<void>;
 }
 
-const RedisConfig = createConfiguration<{ url: string }>('redis', z.object({
-    url: z.string(),
-}));
+@Configuration('redis')
+class RedisConfig {
+    @IsString() url!: string;
+}
 
 @Component()
 @Provide(Sequelize, async (url = inject(DatabaseUrl)) => {
@@ -663,7 +614,7 @@ const RedisConfig = createConfiguration<{ url: string }>('redis', z.object({
     await seq.authenticate();
     return seq;
 }, {onDestroy: 'close'})
-@Provide(Redis, async (config = inject(RedisConfig)) => {
+@Provide(Redis, async (config = injectConfig(RedisConfig)) => {
     const redis = new Redis();
     await redis.connect(config.url);
     return redis;
@@ -713,19 +664,17 @@ class ConnectionPool {
 // Example 9: Conditional Components
 // ============================================================
 
-const TelemetryConfig = createConfiguration<{
-    enabled: boolean;
-    endpoint: string;
-}>('telemetry', z.object({
-    enabled: z.boolean().default(false),
-    endpoint: z.string().optional(),
-}));
+@Configuration('telemetry')
+class TelemetryConfig {
+    @IsBoolean({default: false}) enabled!: boolean;
+    @IsString({optional: true}) endpoint?: string;
+}
 
 @Component({
-    condition: (config = inject(TelemetryConfig, true)) => config?.enabled ?? false,
+    condition: (config = injectConfig(TelemetryConfig, true)) => config?.enabled ?? false,
 })
 class TelemetryService {
-    constructor(private readonly config = inject(TelemetryConfig)) {}
+    constructor(private readonly config = injectConfig(TelemetryConfig)) {}
     send(metric: string, value: number): void {}
 }
 
@@ -823,15 +772,12 @@ class JobRunner {
 // app:
 //   env: staging
 
-const AppConfig = createConfiguration<{
-    name: string;
-    env: string;
-    debug: boolean;
-}>('app', z.object({
-    name: z.string().default('kavri-app'),
-    env: z.enum(['dev', 'staging', 'prod']).default('dev'),
-    debug: z.boolean().default(false),
-}));
+@Configuration('app')
+class AppConfig {
+    @IsString({default: 'kavri-app'}) name!: string;
+    @IsString({in: ['dev', 'staging', 'prod'], default: 'dev'}) env!: string;
+    @IsBoolean({default: false}) debug!: boolean;
+}
 
 // @OverrideConfiguration: code-level defaults (lower than file/env/cli)
 @Component()
@@ -861,22 +807,19 @@ declare class SecretsManagerClient {
 }
 
 // AwsSecretManagerResolver options — bootstrap (resolved from env/cli before config)
-const AwsResolverOptions = createBootstrapConfiguration<{
-    region: string;
-    accessKeyId?: string;
-    secretAccessKey?: string;
-}>('aws', z.object({
-    region: z.string().default('us-east-1'),
-    accessKeyId: z.string().optional(),
-    secretAccessKey: z.string().optional(),
-}));
+@Configuration('aws', {bootstrap: true})
+class AwsResolverOptions {
+    @IsString({default: 'us-east-1'}) region!: string;
+    @IsString({optional: true}) accessKeyId?: string;
+    @IsString({optional: true}) secretAccessKey?: string;
+}
 
 // Name MUST match the protocol in kavri.config.import
 @Component({name: 'aws-secretmanager'})
 class AwsSecretManagerResolver extends Resolver {
     private readonly client: SecretsManagerClient;
 
-    constructor(opts = inject(AwsResolverOptions)) {
+    constructor(opts = injectConfig(AwsResolverOptions)) {
         super();
         this.client = new SecretsManagerClient(opts);
     }
@@ -909,7 +852,7 @@ class EnvFileLoader extends Loader {
 // ============================================================
 
 @Component()
-@Provide(Redis, async (config = inject(RedisConfig)) => {
+@Provide(Redis, async (config = injectConfig(RedisConfig)) => {
     const redis = new Redis();
     await redis.connect(config.url);
     return redis;
@@ -946,7 +889,7 @@ class RedisEventSubscriber {
 @Use(RedisEventSubscriber, JobMetricsListener)
 class Application {
     constructor(
-        private readonly appConfig = inject(AppConfig),
+        private readonly appConfig = injectConfig(AppConfig),
         private readonly serializers = injectAll(Serializer, 'alphabetical'),
         private readonly jobs = inject(JobRunner),
         private readonly events = inject(EventBus),
@@ -1037,20 +980,18 @@ class PetRepository extends Repository<PetRecord> {
     tableName() { return 'pets'; }
 }
 
-const RedisUrl = token<string>((config = inject(RedisConfig)) => config.url);
+const RedisUrl = token<string>((config = injectConfig(RedisConfig)) => config.url);
 
 @EventType('pet.adopted')
 class PetAdoptedEvent {
     constructor(public readonly petId: string, public readonly species: string) {}
 }
 
-const PetStoreConfig = createConfiguration<{
-    defaultPet: string;
-    maxPetsPerUser: number;
-}>('petstore', z.object({
-    defaultPet: z.string().default('dog'),
-    maxPetsPerUser: z.number().default(5),
-}));
+@Configuration('petstore')
+class PetStoreConfig {
+    @IsString({default: 'dog'}) defaultPet!: string;
+    @IsInteger({default: 5}) maxPetsPerUser!: number;
+}
 
 @Component()
 @Provide(Redis, async (url = inject(RedisUrl)) => {
@@ -1073,8 +1014,8 @@ class RedisModule {}
 }))
 class PetStoreApplication {
     constructor(
-        private readonly config = inject(PetStoreConfig),
-        private readonly appConfig = inject(AppConfig),
+        private readonly config = injectConfig(PetStoreConfig),
+        private readonly appConfig = injectConfig(AppConfig),
         private readonly petRepo = inject(PetRepository),
         private readonly allPets = injectAll(Pet, 'alphabetical'),
         private readonly defaultPet = inject(Pet, config.defaultPet),

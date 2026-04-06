@@ -36,7 +36,7 @@ Modules use `@Provide` as a class decorator to register providers, and `@Overrid
 
 ```ts
 @Component()
-@Provide(Redis, async (config = inject(RedisConfig)) => {
+@Provide(Redis, async (config = injectConfig(RedisConfig)) => {
   const r = new Redis();
   await r.connect(config.url);
   return r;
@@ -85,15 +85,16 @@ import {
   injectMap,
   token,
 } from '@kavri/core';
-import { createConfiguration, BootstrapOptions } from '@kavri/config';
-import { z } from 'zod';
+import { Configuration, injectConfig, BootstrapOptions } from '@kavri/config';
+import { IsString } from '@kavri/schema';
 
 // ---- driver module ----
 
-const DbConfig = createConfiguration('database', z.object({
-  driver: z.string(),
-  url: z.string(),
-}));
+@Configuration('database')
+class DatabaseConfig {
+  @IsString() driver!: string;
+  @IsString() url!: string;
+}
 
 abstract class Driver {
   abstract query(sql: string): Promise<any>;
@@ -110,7 +111,7 @@ class MysqlDriver extends Driver {
 }
 
 const SelectedDriver = token<Driver>(
-  (cfg = inject(DbConfig), d = inject(Driver, cfg.driver)) => d,
+  (cfg = injectConfig(DatabaseConfig), d = inject(Driver, cfg.driver)) => d,
 );
 
 @Component()

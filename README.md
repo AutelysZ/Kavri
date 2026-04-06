@@ -12,20 +12,21 @@ Kavri uses default parameters as the injection mechanism. No reflection, no para
 
 **All decorators are metadata.** Every decorator — built-in or custom — carries typed metadata readable via `Metadata.of()`. No reflect-metadata, no `Map<string, any>` side channels.
 
-**Config is just injection.** Configuration schemas produce tokens — injected with the same `inject()` as any other dependency. No special config API.
+**Config is just injection.** `@Configuration` class decorator composes `@Schema` — fields use schema decorators. Inject with `injectConfig()`. No separate parser or token creation step.
 
 ## Example
 
 ```ts
 import { Container, Component, Provide, OverrideConfiguration, Touch, Use, inject, token } from '@kavri/core';
-import { createConfiguration, BootstrapOptions } from '@kavri/config';
-import { z } from 'zod';
+import { Configuration, injectConfig, BootstrapOptions } from '@kavri/config';
+import { IsString } from '@kavri/schema';
 
 // config
-const DbConfig = createConfiguration('database', z.object({
-    driver: z.enum(['psql', 'mysql']),
-    url: z.string(),
-}));
+@Configuration('database')
+class DatabaseConfig {
+    @IsString({ in: ['psql', 'mysql'] }) driver!: string;
+    @IsString() url!: string;
+}
 
 // components
 abstract class Driver {
@@ -38,7 +39,7 @@ class PsqlDriver extends Driver {
 }
 
 const SelectedDriver = token<Driver>(
-    (cfg = inject(DbConfig), d = inject(Driver, cfg.driver)) => d
+    (cfg = injectConfig(DatabaseConfig), d = inject(Driver, cfg.driver)) => d
 );
 
 // external class via @Provide
@@ -46,7 +47,7 @@ declare class Redis { connect(url: string): Promise<void>; disconnect(): Promise
 
 @Component()
 @Provide(Redis, async () => { const r = new Redis(); await r.connect('redis://localhost'); return r; }, { onDestroy: 'disconnect' })
-@OverrideConfiguration(BootstrapOptions, () => ({ configFiles: ['app.yaml'] }))
+@OverrideConfiguration(BootstrapOptions, () => ({ configBase: './config/app' }))
 class AppModule {}
 
 // application
@@ -72,7 +73,7 @@ await container.destroy();
 
 - [IoC Core](./docs/01-ioc-core-design.md) — components, providers, injection, scopes
 - [Modules](./docs/02-modularization-design.md) — @Touch, @Use, @Provide, @OverrideConfiguration
-- [Configuration](./docs/03-configuration-design.md) — zod schemas, multi-source config
+- [Configuration](./docs/03-configuration-design.md) — @Configuration classes, multi-source config
 - [Events](./docs/04-event-design.md) — @EventType, @OnEvent, EventBus
 - [Metadata](./docs/05-metadata-design.md) — Metadata.of, createClassDecorator
 - [API Reference](./docs/draft.ts) — complete type declarations with examples

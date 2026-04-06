@@ -604,23 +604,7 @@ const spec = generateOpenAPI(UserRoute, {
 
 Generates an OpenAPI 3.x document from a `Serviceinition`. Request/response schemas are converted to JSON Schema via `toJsonSchema()`. Static — no running container needed.
 
-## 8. ConfigParser Compatibility
-
-`@Schema` classes satisfy the `ConfigParser<T>` interface used by `@kavri/config`:
-
-```ts
-// ConfigParser<T> = { parse(raw: unknown): T }
-// A @Schema class can be used as:
-const UserConfig = createConfiguration('user', schemaParser(UserConfigClass));
-```
-
-Helper:
-
-```ts
-declare function schemaParser<T>(clazz: AnyConstructor<T>): ConfigParser<T>;
-```
-
-## 9. Full Example
+## 8. Full Example
 
 ```ts
 import {
@@ -774,10 +758,10 @@ function IsSlackChannel(options?: FieldDecoratorOptions): FieldDecorator {
     });
 }
 
-// Use with @kavri/config
-import { createConfiguration, schemaParser } from '@kavri/config';
+// Use with @kavri/config — @Configuration composes @Schema
+import { Configuration, injectConfig } from '@kavri/config';
 
-@Schema()
+@Configuration('app')
 class AppConfig {
     @IsString({ default: 'my-app' })
     name!: string;
@@ -789,10 +773,11 @@ class AppConfig {
     debug!: boolean;
 }
 
-const AppConfiguration = createConfiguration('app', schemaParser(AppConfig));
+// Inject in any inject point:
+// constructor(private readonly config = injectConfig(AppConfig)) {}
 ```
 
-## 10. checkAllFields Behavior
+## 9. checkAllFields Behavior
 
 When `@Schema({ checkAllFields: true })`:
 
@@ -804,7 +789,7 @@ When `checkAllFields: false` (default):
 
 Fields without decorators are silently ignored — they are not parsed, validated, or serialized. Only decorated fields participate in the schema.
 
-## 11. Required vs Optional vs Nullable
+## 10. Required vs Optional vs Nullable
 
 | Declaration | JSON Schema | Parse behavior |
 |---|---|---|
@@ -815,7 +800,7 @@ Fields without decorators are silently ignored — they are not parsed, validate
 
 Prefer `nullable` over `optional` when the field should always be present but may have no value.
 
-## 12. Circular References
+## 11. Circular References
 
 `Ref` handles circular dependencies:
 
