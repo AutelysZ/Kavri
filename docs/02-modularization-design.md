@@ -72,7 +72,6 @@ import {
   Container,
   Component,
   Provide,
-  OverrideConfiguration,
   Touch,
   Use,
   OnEvent,
@@ -85,7 +84,7 @@ import {
   injectMap,
   token,
 } from '@kavri/core';
-import { Configuration, injectConfig, ConfigFileOptions, VariantOptions } from '@kavri/config';
+import { Configuration, injectConfig, OverrideConfiguration, ConfigFileOptions, VariantOptions } from '@kavri/config';
 import { IsString } from '@kavri/schema';
 
 // ---- driver module ----

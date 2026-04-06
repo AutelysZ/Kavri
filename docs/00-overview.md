@@ -21,7 +21,7 @@ Kavri is a TypeScript IoC framework focused on explicit dependency wiring with o
 @kavri/schema  → Schema, field decorators, parse, validate, toJsonSchema (no @kavri/core dependency)
 @kavri/core    → Component, Container, inject, Token, etc.
 @kavri/event   → EventType, EventBus, OnEvent, defineEvent
-@kavri/config  → @Configuration, injectConfig, Loader, Resolver, EnvOptions, ConfigFileOptions, ProfileOptions, VariantOptions
+@kavri/config  → @Configuration, injectConfig, OverrideConfiguration, Loader, Resolver, ConfigFileOptions, ProfileOptions, VariantOptions
 @kavri/web     → ControllerImpl, createController, Interceptor, WebApplication, RequestContext
 @kavri/client  → createClient, injectClient, typed HTTP clients from service definitions
 @kavri/eslint-plugin → ESLint rules for inject-point enforcement

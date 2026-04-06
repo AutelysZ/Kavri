@@ -281,11 +281,11 @@ Internal singleton. Manages layered config data.
 
 ```ts
 import {
-  Container, Component, Conditional, Touch, Use, OverrideConfiguration,
+  Container, Component, Conditional, Touch, Use,
   inject, injectAll, token,
 } from '@kavri/core';
 import {
-  Configuration, injectConfig,
+  Configuration, injectConfig, OverrideConfiguration,
   ConfigFileOptions, ProfileOptions, VariantOptions,
   Resolver, Loader,
 } from '@kavri/config';

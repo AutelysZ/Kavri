@@ -233,11 +233,11 @@ All `inject()` calls are synchronous. Async providers are handled via throw-and-
 ```ts
 import {
   Container, Component, Conditional, Provide, Touch, Use,
-  OnConstruct, OnDestroy, OverrideConfiguration,
+  OnConstruct, OnDestroy,
   token, inject, injectAll, injectRef,
   Metadata,
 } from '@kavri/core';
-import { Configuration, injectConfig, ConfigFileOptions } from '@kavri/config';
+import { Configuration, injectConfig, OverrideConfiguration, ConfigFileOptions } from '@kavri/config';
 import { IsString, IsBoolean } from '@kavri/schema';
 
 @Configuration('database')
