@@ -433,11 +433,6 @@ interface EndpointDef<TReq = any, TRes = any> {
     response?: AnyConstructor<TRes>;
 }
 
-interface RequestOptions {
-    headers?: Record<string, string>;
-    signal?: AbortSignal;
-}
-
 declare function defineRoute<T extends Record<string, EndpointDef>>(
     name: string,
     basePath: string,
@@ -445,17 +440,17 @@ declare function defineRoute<T extends Record<string, EndpointDef>>(
 ): RouteDefinition<{
     [K in keyof T]: T[K] extends EndpointDef<infer TReq, infer TRes>
         ? T[K]['response'] extends AnyConstructor<any>
-            ? (input: TReq, options?: RequestOptions) => Promise<TRes>
-            : (input: TReq, options?: RequestOptions) => Promise<void>
+            ? (input: TReq) => Promise<TRes>
+            : (input: TReq) => Promise<void>
         : never;
 }>;
 
-/** Opaque service definition. Carries typed client methods + endpoint metadata. */
+/** Route definition. Spec only — no runtime behavior. */
 interface RouteDefinition<TMethods> {
     readonly name: string;
     readonly basePath: string;
     readonly endpoints: Record<string, EndpointDef>;
-    /** Phantom type for client inference. */
+    /** Phantom type for method inference. */
     readonly __methods: TMethods;
 }
 ```
@@ -485,10 +480,10 @@ const UserRoute = defineRoute('UserRoute', '/user', {
     deleteUser: del('/:id', GetUserParams),
 });
 
-// typeof UserService infers RouteDefinition<{
-//     getUser(input: GetUserParams, options?: RequestOptions): Promise<UserResponse>;
-//     createUser(input: CreateUserBody, options?: RequestOptions): Promise<UserResponse>;
-//     deleteUser(input: GetUserParams, options?: RequestOptions): Promise<void>;
+// typeof UserRoute infers RouteDefinition<{
+//     getUser(input: GetUserParams): Promise<UserResponse>;
+//     createUser(input: CreateUserBody): Promise<UserResponse>;
+//     deleteUser(input: GetUserParams): Promise<void>;
 // }>
 
 // Clients are fully typed:
