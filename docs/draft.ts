@@ -461,10 +461,10 @@ declare class DuplicateProviderError extends Error {
 // Example: Custom Decorator Creation
 // ============================================================
 
-interface ControllerMetadata { path: string; }
+interface ScheduledMetadata { cron: string; }
 
-function Controller(path: string, options?: ComponentOptions): ClassDecorator<ControllerMetadata> {
-    return createClassDecorator<ControllerMetadata>(Controller, {path}, [Component(options)])
+function Scheduled(cron: string): ClassDecorator<ScheduledMetadata> {
+    return createClassDecorator<ScheduledMetadata>(Scheduled, {cron}, [Component()])
 }
 
 interface RateLimitMetadata { maxRequests: number; windowMs: number; }
@@ -473,7 +473,7 @@ function RateLimit(opts: RateLimitMetadata): MethodDecorator<RateLimitMetadata> 
     return createMethodDecorator<RateLimitMetadata>(RateLimit, opts);
 }
 
-// Metadata.entries(Controller) → [[UserController, { path: '/users' }], ...]
+// Metadata.entries(Scheduled) → [[HourlyCleanup, { cron: '0 * * * *' }], ...]
 // Metadata.entries(RateLimit)  → [[ApiService, 'search', { maxRequests: 100, ... }], ...]
 
 

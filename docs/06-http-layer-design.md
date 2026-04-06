@@ -6,7 +6,7 @@
 - **Parsed input only.** Handlers receive validated, typed data — not raw streams. Body parsing happens before handlers and interceptors see the request (gRPC-style).
 - **Single interception mechanism.** Interceptors replace middleware, guards, pipes, and filters. One abstraction, one chain.
 - **Controllers are singletons.** Per-request data lives in `RequestContext` (AsyncLocalStorage), not in the controller instance.
-- **Definition/implementation separation.** Service definitions (`@kavri/schema`) are shared contracts. `createController()` and `@ControllerImpl()` wire them. `@kavri/client` produces typed HTTP clients and `injectClient()` for server-side service-to-service calls.
+- **Route-first.** All endpoints are defined via `defineRoute()` in `@kavri/schema`. Controllers are implementations of routes — no ad-hoc `@Controller(path)` or `@Get()` decorators.
 
 ## 2. Core HTTP Types
 
@@ -44,96 +44,52 @@ declare class RequestContext {
     readonly method: string;
     readonly url: string;
     readonly headers: ReadonlyMap<string, string>;
-    readonly params: Readonly<Record<string, string>>;   // route params
-    readonly query: Readonly<Record<string, string>>;     // query string
-    readonly body: unknown;                                // parsed body
+    readonly params: Readonly<Record<string, string>>;
+    readonly query: Readonly<Record<string, string>>;
+    readonly body: unknown;
 
-    // Key-value store (for interceptors to pass data to handlers)
     get<T>(key: string): T | undefined;
     set<T>(key: string, value: T): void;
 
-    /** Get the current request context. Reads from AsyncLocalStorage. */
     static get(): RequestContext;
 }
 ```
 
-`RequestContext` is a static API backed by `AsyncLocalStorage`. Not injectable, not a component. The framework creates it per-request and stores it in `AsyncLocalStorage`. Access it anywhere via `RequestContext.get()`.
+Static API backed by `AsyncLocalStorage`. Access anywhere via `RequestContext.get()`.
 
-All components are singletons. No scope mechanism needed.
+## 4. Controllers
 
-## 4. Controller & Method Decorators
+Controllers are the sole mechanism for implementing HTTP endpoints. Every controller implements a route definition from `@kavri/schema`.
 
-### @Controller(path)
-
-```ts
-interface ControllerMetadata {
-    path: string;
-}
-
-// Composes @Component() — controllers are singletons.
-// Per-request data is in RequestContext (AsyncLocalStorage), not the controller.
-declare function Controller(path: string): ClassDecorator<ControllerMetadata>;
-```
-
-`path` must start with `/` and must not end with `/`.
-
-### @Get, @Post, @Put, @Delete, @Patch, @Head
+### createController + @ControllerImpl
 
 ```ts
-interface EndpointMetadata<TReq = any, TRes = any> {
-    method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | 'HEAD';
-    path: string;
-    requestSchema?: ConfigParser<TReq>;
-    responseSchema?: ConfigParser<TRes>;
-}
+import { createController, ControllerImpl } from '@kavri/web';
+import { UserRoute } from './user-route';
 
-declare function Get<TReq, TRes>(
-    path?: string,
-    requestSchema?: ConfigParser<TReq>,
-    responseSchema?: ConfigParser<TRes>,
-): MethodDecorator<EndpointMetadata<TReq, TRes>>;
+@ControllerImpl()
+class UserController extends createController(UserRoute) {
+    constructor(private readonly repo = inject(UserRepository)) { super(); }
 
-// Same for Post, Put, Delete, Patch, Head
-```
-
-`path` is optional (defaults to `''`). If present, must start with `/` and not end with `/`. May contain route params (`:id`).
-
-`requestSchema` validates the merged input (params + query for GET/DELETE/HEAD; params + query + body for POST/PUT/PATCH). `responseSchema` validates the return value (optional — omit for special responses).
-
-### Handler method signature
-
-```ts
-@Controller('/user')
-class UserController {
-    constructor(
-        private readonly userRepo = inject(UserRepository),
-    ) {}
-
-    // Handler receives parsed input. Access request via RequestContext.get().
-    @Get('/:id', GetUserParams, UserResponse)
-    async getUser(input: GetUserParams): Promise<User> {
-        return this.userRepo.findById(input.id);
+    override async getUser(input: GetUserParams): Promise<UserResponse> {
+        return this.repo.findById(input.id);
     }
 
-    @Post('/', CreateUserBody, UserResponse)
-    async createUser(input: CreateUserBody): Promise<User> {
-        const userId = RequestContext.get().get<string>('userId'); // set by AuthInterceptor
-        return this.userRepo.create({ ...input, createdBy: userId });
+    override async createUser(input: CreateUserBody): Promise<UserResponse> {
+        const userId = RequestContext.get().get<string>('userId');
+        return this.repo.create({ ...input, createdBy: userId });
     }
 
-    @Get('/old/:id', RedirectParams)
-    async redirectOld(input: RedirectParams): Promise<Redirect> {
-        return new Redirect(`/user/${input.id}`);
-    }
-
-    @Get('/avatar/:id', AvatarParams)
-    async avatar(input: AvatarParams): Promise<FileResponse> {
-        return new FileResponse(`./avatars/${input.id}.png`, 'image/png');
+    override async deleteUser(input: GetUserParams): Promise<void> {
+        await this.repo.delete(input.id);
     }
 }
 ```
 
-Handler receives parsed `input` as first param. Returns typed response or a special response object.
+- `createController(route)` returns an abstract class with abstract methods matching the route definition. Types are inferred from the route's request/response schemas.
+- `@ControllerImpl()` composes `@Component()` and registers all routing metadata from the route definition. No manual `@Controller(path)` or `@Get()/@Post()` needed.
+- Handlers receive parsed input. Return typed response or a special response object (`Redirect`, `FileResponse`, etc.).
+- Access per-request data via `RequestContext.get()`.
 
 ## 5. Interceptors
 
@@ -141,8 +97,8 @@ Handler receives parsed `input` as first param. Returns typed response or a spec
 interface InterceptorContext {
     readonly controller: AnyConstructor<any>;
     readonly method: string | symbol;
-    readonly endpoint: EndpointMetadata;
-    // Access request via RequestContext.get()
+    readonly route: RouteDefinition<any>;
+    readonly endpointName: string;
 }
 
 abstract class Interceptor {
@@ -157,7 +113,7 @@ Interceptors are `@Component()` classes extending `Interceptor`. Discovered via 
 
 Interceptors can:
 - Short-circuit: `throw new HttpException(401)` or return without calling `next()`
-- Modify context: `context.request.set('user', authUser)`
+- Modify request state: `RequestContext.get().set('user', authUser)`
 - Transform response: `const res = await next(); return transform(res);`
 
 ```ts
@@ -168,7 +124,7 @@ class LoggingInterceptor extends Interceptor {
         try {
             return await next();
         } finally {
-            console.log(`${ctx.endpoint.method} ${RequestContext.get().url} ${Date.now() - start}ms`);
+            console.log(`${ctx.endpointName} ${RequestContext.get().url} ${Date.now() - start}ms`);
         }
     }
 }
@@ -197,29 +153,11 @@ class BasicAuthInterceptor extends Interceptor {
 }
 ```
 
-## 6. Service Definition & Clients
+## 6. Clients
 
-### Service definitions (`@kavri/schema`)
+### Route definitions (`@kavri/schema`)
 
-Service contracts are defined in `@kavri/schema` using `defineRoute()` — see [09-schema-design.md](./09-schema-design.md#8-service-definitions-protobuf-style). Shared between frontend and backend.
-
-### createController / @ControllerImpl (`@kavri/web`)
-
-```ts
-import { createController, ControllerImpl } from '@kavri/web';
-import { UserRoute } from './user-route';
-
-@ControllerImpl()
-class UserController extends createController(UserRoute) {
-    constructor(private readonly repo = inject(UserRepository)) { super(); }
-
-    override async getUser(input: GetUserParams): Promise<UserResponse> {
-        return this.repo.findById(input.id);
-    }
-}
-```
-
-`createController(def)` returns an abstract class with abstract methods. `@ControllerImpl()` applies `@Controller` and `@Get`/`@Post`/etc. from the definition.
+Route contracts are defined in `@kavri/schema` using `defineRoute()` — see [09-schema-design.md](./09-schema-design.md#7-service-definitions-protobuf-style). Shared between frontend and backend.
 
 ### createClient (`@kavri/client`)
 
@@ -250,7 +188,7 @@ class PaymentService {
 
 ## 7. OpenAPI Generation
 
-See [09-schema-design.md](./09-schema-design.md#openapi-generation). `generateOpenAPI(serviceDef, options)` in `@kavri/schema` generates OpenAPI 3.x from service definitions. Static — no running container needed.
+See [09-schema-design.md](./09-schema-design.md#openapi-generation). `generateOpenAPI(route, options)` in `@kavri/schema` generates OpenAPI 3.x from route definitions. Static — no running container needed.
 
 ## 8. Static Assets
 
@@ -276,8 +214,6 @@ class StaticFileInterceptor extends Interceptor {
 }
 ```
 
-Static file serving is an interceptor. Enabled when `static` config is present.
-
 ## 9. Database Transactions (Drizzle + AsyncLocalStorage)
 
 ```ts
@@ -302,7 +238,6 @@ class TransactionInterceptor extends Interceptor {
     }
 }
 
-// Repository base — uses current transaction if available
 @Component()
 abstract class Repository<T> {
     constructor(private readonly db = inject(DrizzleDatabase)) {}
@@ -313,17 +248,15 @@ abstract class Repository<T> {
 }
 ```
 
-Usage:
+Usage — `@Transactional()` on a controller method:
 
 ```ts
-@Controller('/order')
-class OrderController {
-    constructor(private readonly orderRepo = inject(OrderRepository)) {}
+@ControllerImpl()
+class OrderController extends createController(OrderRoute) {
+    constructor(private readonly orderRepo = inject(OrderRepository)) { super(); }
 
-    @Post('/', CreateOrderBody, OrderResponse)
     @Transactional()
-    async createOrder(input: CreateOrderBody): Promise<OrderResponse> {
-        // All repo calls within this handler use the same transaction
+    override async createOrder(input: CreateOrderBody): Promise<OrderResponse> {
         return this.orderRepo.create(input);
     }
 }
@@ -386,13 +319,8 @@ class ErrorInterceptor extends Interceptor {
 declare class WebApplication {
     constructor(entrypoint: AnyConstructor<any>);
 
-    /** Start HTTP server using HttpConfig. */
     start(): Promise<void>;
-
-    /** Return raw Node.js HTTP handler for http.createServer(). */
     toHandler(): (req: IncomingMessage, res: ServerResponse) => void;
-
-    /** Graceful shutdown. Destroys the internal container. */
     stop(): Promise<void>;
 }
 ```
@@ -400,24 +328,17 @@ declare class WebApplication {
 ### Per-request lifecycle
 
 1. Receive HTTP request
-2. Route matching → find controller instance (singleton) + method + endpoint metadata
-3. Parse request: extract params, query, body. Validate with `requestSchema`.
+2. Route matching → find controller instance (singleton) + method from route metadata
+3. Parse request: extract params, query, body. Validate with request schema.
 4. Create `RequestContext`, store in `AsyncLocalStorage`
 5. Run interceptor chain → call handler with `(parsedInput)`
 6. Handler returns typed value or special response
-7. If `responseSchema`, validate response. Serialize as JSON with 200.
+7. If response schema exists, validate response. Serialize as JSON with 200.
 8. If special response (`Redirect`, `FileResponse`, etc.), handle accordingly.
 
 ### Bootstrap example
 
 ```ts
-// config/config.yaml:
-// ---
-// http:
-//   port: 3000
-// database:
-//   url: postgres://localhost/myapp
-
 @Component()
 @Touch(UserController, OrderController)
 @Touch(LoggingInterceptor, TransactionInterceptor, BasicAuthInterceptor)
@@ -426,11 +347,6 @@ class MyApplication {}
 
 const app = new WebApplication(MyApplication);
 await app.start();
-// Server listening on 0.0.0.0:3000
-
-// Or: manual handler
-// const handler = app.toHandler();
-// http.createServer(handler).listen(3000);
 ```
 
 ## 13. Full Example
@@ -445,7 +361,7 @@ import {
 } from '@kavri/web';
 import { Component, Touch, inject } from '@kavri/core';
 
-// ---- Shared service definition (from @kavri/schema) ----
+// ---- Route definition (shared with frontend) ----
 
 @Schema()
 class GetUserParams {
@@ -471,7 +387,7 @@ const UserRoute = defineRoute('UserRoute', '/user', {
     deleteUser: del('/:id', GetUserParams),
 });
 
-// ---- Controller implementation ----
+// ---- Controller ----
 
 @ControllerImpl()
 class UserController extends createController(UserRoute) {
@@ -492,11 +408,11 @@ class UserController extends createController(UserRoute) {
     }
 }
 
-// ---- Interceptors ----
+// ---- Interceptor ----
 
 @Component()
 class AuthInterceptor extends Interceptor {
-    async intercept(ctx, next) {
+    async intercept(ctx: InterceptorContext, next: () => Promise<unknown>) {
         const token = RequestContext.get().headers.get('authorization');
         if (!token) throw new HttpException(401);
         RequestContext.get().set('userId', verifyToken(token));

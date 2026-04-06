@@ -91,25 +91,25 @@ declare function createClassDecorator<T>(
 ): ClassDecorator<T>;
 ```
 
-The `extra` parameter composes additional decorators. This is how composite decorators work — e.g., a `@Controller` that also applies `@Component`.
+The `extra` parameter composes additional decorators. This is how composite decorators work — e.g., a `@Scheduled` that also applies `@Component`.
 
 ```ts
-// Example: @Controller is a @Component that also stores a path
-interface ControllerMetadata {
-  path: string;
+// Example: @Scheduled is a @Component that also stores a cron expression
+interface ScheduledMetadata {
+  cron: string;
 }
 
-function Controller(path: string, options?: ComponentOptions): ClassDecorator<ControllerMetadata> {
-  return createClassDecorator(Controller, { path }, [Component(options)]);
+function Scheduled(cron: string): ClassDecorator<ScheduledMetadata> {
+  return createClassDecorator(Scheduled, { cron }, [Component()]);
 }
 
 // Usage
-@Controller('/users')
-class UserController { ... }
+@Scheduled('0 * * * *')
+class HourlyCleanup { ... }
 
 // Read
-Metadata.of(Controller, UserController);  // [{ path: '/users' }]
-Metadata.of(Component, UserController);   // [{ ... }]  ← also a Component
+Metadata.of(Scheduled, HourlyCleanup);  // [{ cron: '0 * * * *' }]
+Metadata.of(Component, HourlyCleanup);  // [{ ... }]  ← also a Component
 ```
 
 ### Method decorators — `createMethodDecorator()`
@@ -158,14 +158,14 @@ Metadata.apply(OnEvent, MyClass, 'handleOrder', { event: OrderCreatedEvent });
 `injectAll()` accepts a `ClassDecoratorFactory` to collect all classes decorated with a specific decorator:
 
 ```ts
-// Inject all @Controller-decorated classes
-const controllers = injectAll(Controller, 'alphabetical');
+// Inject all @Scheduled-decorated classes
+const jobs = injectAll(Scheduled, 'alphabetical');
 
 // Inject all @Component classes (all components)
 const components = injectAll(Component);
 ```
 
-This is how the HTTP layer discovers controllers without a central registry.
+This is how subsystems discover decorated classes without a central registry.
 
 ## 8. Full example
 
