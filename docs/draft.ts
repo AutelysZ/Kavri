@@ -38,23 +38,37 @@ declare function createMethodDecorator<T>(factory: MethodDecoratorFactory<T>, me
 // Section 2: Component Decorator
 // ============================================================
 
-interface ComponentOptions {
-    name?: Qualifier;
-    /**
-     * Async condition evaluated lazily on first inject(). Result is cached.
-     * Runs in an inject context.
-     */
-    condition?: () => Awaitable<boolean>;
-}
-
 interface ComponentMetadata {
-    options: ComponentOptions;
+    name?: Qualifier;
 }
 
-declare function Component(options?: ComponentOptions): ClassDecorator<ComponentMetadata>;
+/** Marks a class as a container-managed component. All components are singletons. */
+declare function Component(name?: Qualifier): ClassDecorator<ComponentMetadata>;
 
 // ============================================================
-// Section 3: Lifecycle Decorators
+// Section 3: Conditional Decorator
+// ============================================================
+
+interface ConditionalMetadata {
+    predicate: () => Awaitable<boolean>;
+}
+
+/**
+ * Marks a component as conditionally enabled.
+ * Predicate is evaluated lazily on first inject(). Result is cached.
+ * Runs in an inject context — default params can use inject()/injectConfig().
+ *
+ * CONSTRAINT: @Conditional and @OverrideConfiguration CANNOT coexist on the same class.
+ * Enforced at runtime (throws) and by @kavri/eslint-plugin.
+ * Reason: configuration must resolve before conditions are evaluated.
+ *
+ * Components with @OverrideConfiguration must NOT have @Conditional.
+ * Resolver subclasses must NOT have @Conditional.
+ */
+declare function Conditional(predicate: () => Awaitable<boolean>): ClassDecorator<ConditionalMetadata>;
+
+// ============================================================
+// Section 4: Lifecycle Decorators
 // ============================================================
 
 /**
@@ -90,12 +104,10 @@ declare function token<T>(factory: () => Awaitable<T>, options?: ProvideOptions<
 // Section 5: Providers — @Provide
 // ============================================================
 
-interface ProvideOptions<T> extends ComponentOptions {
-    /** Inject point — default params can use inject(). Return value ignored. */
+interface ProvideOptions<T> {
+    name?: Qualifier;
     onConstruct?: NoArgsMethodKeyof<T> | ((instance: T) => Awaitable<void>);
-    /** Inject point — default params can use inject(). Return value ignored. */
     onDestroy?: NoArgsMethodKeyof<T> | ((instance: T) => Awaitable<void>);
-    /** If true, takes precedence when multiple providers exist for the same target. */
     primary?: boolean;
 }
 
@@ -114,7 +126,7 @@ interface ProvideMetadata<T> extends ProvideOptions<T> {
  * requires { primary: true }.
  *
  * @Provide/@Use on a class are only processed if the class is enabled
- * (not disabled by @Component({ condition })).
+ * (not disabled by @Conditional).
  */
 declare function Provide<T>(
     target: Injectable<T>,
@@ -137,9 +149,10 @@ declare class Ref<T> {
  *   1. @Component class constructors
  *   2. token() factory functions
  *   3. @Provide factory parameters
- *   4. ComponentOptions.condition functions
+ *   4. @Conditional predicate parameters
  *   5. @OnConstruct / @OnDestroy method parameters
  *   6. onConstruct / onDestroy callback parameters (ProvideOptions)
+ *   7. injectConfig() — also an inject point for @Configuration classes
  */
 declare function inject<T>(injectable: Injectable<T>): T
 declare function inject<T>(injectable: Injectable<T>, name: Qualifier): T
@@ -208,7 +221,7 @@ declare function Use(...injectables: Injectable<any>[]): ClassDecorator<readonly
  * Resolution order for container.resolve(target):
  *   All @Use deps and target are entrypoints, instantiated serially.
  *   For each target:
- *     1. Check condition. Disabled → skip.
+ *     1. Check @Conditional. Disabled → skip. (Configuration resolves before conditions.)
  *     2. Register decorator metadata: @Touch, @Provide (pure registration).
  *        Duplicate @Provide → DuplicateProviderError (unless primary).
  *     3. Process @Use: recursively instantiate deps (depth-first).
@@ -251,8 +264,8 @@ declare class EventBus {
 // --- Loader ---
 
 /**
- * Abstract file loader. Config module touches JsonLoader, YamlLoader, TomlLoader by default.
- * Subclasses must be @Component(). Third-party loaders added via @Touch.
+ * Abstract file loader. Subclasses must be @Component().
+ * Config module touches JsonLoader, YamlLoader, TomlLoader by default.
  */
 abstract class Loader {
     abstract supports(): string[];
@@ -263,79 +276,93 @@ declare class JsonLoader extends Loader {}
 declare class YamlLoader extends Loader {}
 declare class TomlLoader extends Loader {}
 
-// --- Resolver (import resolvers) ---
+// --- Resolver ---
 
 /**
- * Abstract import resolver for kavri.config.import entries.
- * Subclasses must be @Component({ name }) — name is the protocol selector.
- * ConfigurationRegistry uses injectMap(Resolver) to find resolvers by name.
+ * Abstract variable resolver. Each resolver provides its own options class
+ * via getOptionsClass(). The registry binds the options and passes them to resolve().
+ * If the options class yields no values, resolve() is not invoked.
+ *
+ * Subclasses must be @Component(). Must NOT have @Conditional.
+ * Must NOT use injectConfig() — use getOptionsClass() instead.
+ * Discovered via injectAll(Resolver).
  */
-abstract class Resolver {
-    abstract load(resource: string): Awaitable<Record<string, string>>;
+abstract class Resolver<T = any> {
+    abstract getOptionsClass(): AnyConstructor<T>;
+    abstract resolve(options: T): Awaitable<Record<string, string>>;
 }
 
 // --- @Configuration ---
 
+interface ConfigurationOptions {
+    /** Hide from help output and/or schema generation. */
+    hidden?: boolean | 'schema';
+}
+
 interface ConfigurationMetadata {
     prefix: string;
-    bootstrap: boolean;
+    options: ConfigurationOptions;
 }
 
 /**
  * Marks a class as a configuration schema.
  * Composes @Schema() — all fields must have field decorators from @kavri/schema.
  *
- * Regular configuration (default): resolved from all sources.
- * Bootstrap configuration ({ bootstrap: true }): resolved from env/cli only,
- * before config files load.
- *
  * @example
  * @Configuration('app')
  * class AppConfig {
- *     @IsString({ default: 'my-app' })
- *     name!: string;
- *
- *     @IsInteger({ default: 3000 })
- *     port!: number;
- * }
- *
- * @Configuration('config', { bootstrap: true })
- * class BootstrapOptions {
- *     @IsString({ default: './config/config' })
- *     configBase!: string;
- *
- *     @IsArray(IsString(), { default: [] })
- *     profiles!: string[];
+ *     @IsString({ default: 'my-app' }) name!: string;
+ *     @IsInteger({ default: 3000 }) port!: number;
  * }
  */
-declare function Configuration(prefix: string, options?: { bootstrap?: boolean }): ClassDecorator<ConfigurationMetadata>;
+declare function Configuration(prefix: string, options?: ConfigurationOptions): ClassDecorator<ConfigurationMetadata>;
 
-// --- BootstrapOptions (built-in bootstrap config) ---
+// --- Built-in configuration classes ---
 
-@Configuration('config', {bootstrap: true})
-declare class BootstrapOptions {
-    configBase: string;    // default: './config/config'
-    profiles: string[];    // default: []
-    env: Record<string, string>; // default: process.env
-    argv: string[];        // default: process.argv
-    envPrefix: string;     // default: ''
-    argvPrefix: string;    // default: ''
+/** Not modifiable via env/cli/file. Hidden from help and schema. */
+@Configuration('kavri.config', {hidden: true})
+class EnvOptions {
+    env: Record<string, string> = process.env;
+    argv: string[] = process.argv.slice(2);
+}
+
+/** Config file path. Hidden from schema only. Modifiable via env/cli. */
+@Configuration('kavri.config', {hidden: 'schema')
+class ConfigFileOptions {
+    @IsString({default: './config/config')
+    configFile!: string;
+}
+
+/** Active profiles. */
+@Configuration('kavri.config')
+class ProfileOptions {
+    @IsArray(IsString(), {default: []})
+    profiles!: string[];
+}
+
+/** Variant options controlling env/cli mapping, variables, and strictness. */
+@Configuration('kavri.config')
+class VariantOptions {
+    @IsString({default: '') envPrefix!: string;
+    @IsString({default: '') argvPrefix!: string;
+    @IsRecord(IsString(), {default: {}}) variables!: Record<string, string>;
+    @IsBoolean({default: false}) allowUnused!: boolean;
 }
 
 // --- injectConfig ---
 
 /**
- * Injects a validated configuration instance.
- * The class must be decorated with @Configuration(prefix).
- * This is an inject point — usable in constructors, factories, conditions, etc.
+ * Injects a validated @Configuration class instance.
+ * This is an inject point — usable in constructors, factories, @Conditional, etc.
+ * Internally calls ConfigurationRegistry.bind(clazz).
  *
- * Regular configs: @Provide > cli > env > config file > @OverrideConfiguration > schema defaults
- * Bootstrap configs: @Provide > cli > env > @OverrideConfiguration > schema defaults
+ * Precedence: cli > env > config file > @OverrideConfiguration > schema defaults
+ * Variable substitution occurs during bind().
  */
 declare function injectConfig<T>(clazz: AnyConstructor<T>): T;
 declare function injectConfig<T>(clazz: AnyConstructor<T>, optional: true): T | undefined;
 
-// --- OverrideConfiguration ---
+// --- @OverrideConfiguration ---
 
 interface OverrideConfigurationMetadata<T> {
     clazz: AnyConstructor<T>;
@@ -344,38 +371,44 @@ interface OverrideConfigurationMetadata<T> {
 
 /**
  * Code-level defaults for a @Configuration class.
- * Lower priority than env/cli (and config files for regular configs).
+ * Lowest priority layer — overridden by config files, env, and cli.
+ *
+ * CONSTRAINT: Classes with @OverrideConfiguration must NOT have @Conditional.
  */
 declare function OverrideConfiguration<T>(
     clazz: AnyConstructor<T>,
     override: (prev: Partial<T> | undefined) => Partial<T> | undefined,
 ): ClassDecorator<OverrideConfigurationMetadata<T>>;
 
-// --- BootstrapConfigurationRegistry (internal) ---
-
-/**
- * @OnConstruct: @OverrideConfiguration defaults → merge env → merge cli.
- * No config files. No variable substitution.
- */
-declare class BootstrapConfigurationRegistry {
-    resolve<T>(clazz: AnyConstructor<T>): T;
-}
-
 // --- ConfigurationRegistry (internal) ---
 
 /**
- * @OnConstruct (in order):
- *   1. @OverrideConfiguration code defaults
- *   2. Load config files ({configBase}.{ext}, {configBase}-{profile}.{ext})
- *   3. Merge config files over code defaults
- *   4. Merge env vars
- *   5. Merge cli args
- *   6. Build env context (process.env + imports)
- *   7. Read kavri.config.import → load via injectMap(Resolver)
- *   8. Resolve ${...} variables
+ * Internal singleton. Manages layered config data.
+ *
+ * @OnConstruct lifecycle (Spring-style layered resolution):
+ *   1. pushCodeOverrides()    — @OverrideConfiguration values (lowest priority)
+ *   2. bind(EnvOptions)       — get env/argv sources
+ *   3. unshiftEnv(env)        — push env layer (higher than code, lower than cli)
+ *   4. unshiftArgv(argv)      — push cli layer (highest priority)
+ *   5. mergeEnvVariables(env) — env vars also serve as variables for ${...}
+ *   6. bind(ConfigFileOptions) — determine config file path (cli/env can override)
+ *   7. parseRootFile()        — load & parse config file, insert after cli/env layers
+ *   8. bind(ProfileOptions)   — determine active profiles (root file can specify)
+ *   9. parseProfileFiles()    — load profile files, insert before root file
+ *  10. bind(VariantOptions)   — parse variant settings (envPrefix, argvPrefix, variables, allowUnused)
+ *  11. invokeResolvers()      — for each Resolver (injectAll(Resolver)):
+ *          bind resolver's getOptionsClass() → if has values, call resolve(options)
+ *          → merge returned variables
+ *  12. validate()             — check allowUnused constraint
+ *
+ * bind<T>(configClass):
+ *   Parse config class from current layered state.
+ *   Cached: each class is bound exactly once.
+ *   Variable substitution (${key} / ${key:-default}) performed during bind
+ *   using accumulated variables (env + resolver-provided).
  */
 declare class ConfigurationRegistry {
-    resolve<T>(clazz: AnyConstructor<T>): T;
+    bind<T>(clazz: AnyConstructor<T>): T;
 }
 
 // ============================================================
@@ -474,21 +507,21 @@ abstract class Serializer {
     abstract deserialize(raw: string): any;
 }
 
-@Component({name: 'json'})
+@Component('json')
 class JsonSerializer extends Serializer {
     contentType() { return 'application/json'; }
     serialize(data: any) { return JSON.stringify(data); }
     deserialize(raw: string) { return JSON.parse(raw); }
 }
 
-@Component({name: 'xml'})
+@Component('xml')
 class XmlSerializer extends Serializer {
     contentType() { return 'text/xml'; }
     serialize(data: any) { return '<data/>'; }
     deserialize(raw: string) { return {}; }
 }
 
-@Component({name: 'yaml'})
+@Component('yaml')
 class YamlSerializer extends Serializer {
     contentType() { return 'text/yaml'; }
     serialize(data: any) { return ''; }
@@ -562,14 +595,14 @@ abstract class Driver<TConn> {
     abstract close(conn: TConn): Promise<void>;
 }
 
-@Component({name: 'mysql'})
+@Component('mysql')
 class MysqlDriver extends Driver<unknown> {
     connect() { return Promise.resolve(undefined); }
     execute<T>(conn: unknown, sql: string, values: any[]) { return Promise.resolve<T[]>([]); }
     close(conn: unknown) { return Promise.resolve(); }
 }
 
-@Component({name: 'psql'})
+@Component('psql')
 class PsqlDriver extends Driver<unknown> {
     connect() { return Promise.resolve(undefined); }
     execute<T>(conn: unknown, sql: string, values: any[]) { return Promise.resolve<T[]>([]); }
@@ -613,12 +646,12 @@ class RedisConfig {
     const seq = new Sequelize(url, {logging: false});
     await seq.authenticate();
     return seq;
-}, {onDestroy: 'close'})
+}, {onDestroy: 'close')
 @Provide(Redis, async (config = injectConfig(RedisConfig)) => {
     const redis = new Redis();
     await redis.connect(config.url);
     return redis;
-}, {onDestroy: 'disconnect'})
+}, {onDestroy: 'disconnect')
 class InfraModule {}
 
 
@@ -670,9 +703,8 @@ class TelemetryConfig {
     @IsString({optional: true}) endpoint?: string;
 }
 
-@Component({
-    condition: (config = injectConfig(TelemetryConfig, true)) => config?.enabled ?? false,
-})
+@Component()
+@Conditional((config = injectConfig(TelemetryConfig, true)) => config?.enabled ?? false)
 class TelemetryService {
     constructor(private readonly config = injectConfig(TelemetryConfig)) {}
     send(metric: string, value: number): void {}
@@ -774,18 +806,16 @@ class JobRunner {
 
 @Configuration('app')
 class AppConfig {
-    @IsString({default: 'kavri-app'}) name!: string;
-    @IsString({in: ['dev', 'staging', 'prod'], default: 'dev'}) env!: string;
+    @IsString({default: 'kavri-app') name!: string;
+    @IsString({in: ['dev', 'staging', 'prod'], default: 'dev') env!: string;
     @IsBoolean({default: false}) debug!: boolean;
 }
 
 // @OverrideConfiguration: code-level defaults (lower than file/env/cli)
 @Component()
-@OverrideConfiguration(BootstrapOptions, () => ({
-    configBase: './config/config',
-    profiles: ['staging'],
-    envPrefix: 'MYAPP_',
-}))
+@OverrideConfiguration(ConfigFileOptions, () => ({ configFile: './config/app' }))
+@OverrideConfiguration(ProfileOptions, () => ({ profiles: ['staging'] }))
+@OverrideConfiguration(VariantOptions, () => ({ envPrefix: 'MYAPP_' }))
 @OverrideConfiguration(DatabaseConfig, () => ({
     port: 5432,
     host: 'localhost',
@@ -806,35 +836,32 @@ declare class SecretsManagerClient {
     getSecretValue(params: { SecretId: string }): Promise<{ SecretString?: string }>;
 }
 
-// AwsSecretManagerResolver options — bootstrap (resolved from env/cli before config)
-@Configuration('aws', {bootstrap: true})
-class AwsResolverOptions {
-    @IsString({default: 'us-east-1'}) region!: string;
-    @IsString({optional: true}) accessKeyId?: string;
-    @IsString({optional: true}) secretAccessKey?: string;
+// AwsSecretManagerResolver options — bound early during registry init
+@Configuration('kavri.resolver.aws.secretmanager')
+class AwsSecretManagerResolverOptions {
+    @IsString() region!: string;
+    @IsString({optional: true}) keyId?: string;
+    @IsString({optional: true}) secretKey?: string;
+    @IsString({optional: true}) roleId?: string;
+    @IsArray(IsObject({name: IsString(), prefix: IsString()}))
+    items!: Array<{name: string; prefix: string}>;
 }
 
-// Name MUST match the protocol in kavri.config.import
-@Component({name: 'aws-secretmanager'})
-class AwsSecretManagerResolver extends Resolver {
-    private readonly client: SecretsManagerClient;
+// Resolver uses getOptionsClass() — no injectConfig() allowed.
+// If AwsSecretManagerResolverOptions yields no values, resolve() is not called.
+@Component()
+class AwsSecretManagerResolver extends Resolver<AwsSecretManagerResolverOptions> {
+    getOptionsClass() { return AwsSecretManagerResolverOptions; }
 
-    constructor(opts = injectConfig(AwsResolverOptions)) {
-        super();
-        this.client = new SecretsManagerClient(opts);
-    }
-
-    async load(resource: string) {
-        // resource: "prod/db-secrets?prefix=database"
-        // parse secretId and prefix from resource
-        const [secretId, params] = resource.split('?');
-        const prefix = new URLSearchParams(params).get('prefix') ?? '';
-        const result = await this.client.getSecretValue({SecretId: secretId});
-        const secrets = JSON.parse(result.SecretString ?? '{}');
-        // return as prefixed keys: { "database.password": "xxx", "database.username": "yyy" }
+    async resolve(opts: AwsSecretManagerResolverOptions) {
+        const client = new SecretsManagerClient(opts);
         const entries: Record<string, string> = {};
-        for (const [k, v] of Object.entries(secrets)) {
-            entries[prefix ? `${prefix}.${k}` : k] = String(v);
+        for (const item of opts.items) {
+            const result = await client.getSecretValue({SecretId: item.name});
+            const secrets = JSON.parse(result.SecretString ?? '{}');
+            for (const [k, v] of Object.entries(secrets)) {
+                entries[item.prefix ? `${item.prefix}.${k}` : k] = String(v);
+            }
         }
         return entries;
     }
@@ -856,7 +883,7 @@ class EnvFileLoader extends Loader {
     const redis = new Redis();
     await redis.connect(config.url);
     return redis;
-}, {onDestroy: 'disconnect'})
+}, {onDestroy: 'disconnect')
 class CacheModule {}
 
 @Component()
@@ -865,7 +892,7 @@ class CacheModule {}
     const seq = new Sequelize(url);
     await seq.authenticate();
     return seq;
-}, {onDestroy: 'close'})
+}, {onDestroy: 'close')
 class DatabaseModule {}
 
 @Component()
@@ -912,7 +939,7 @@ async function testUserService() {
     @Component()
     @Provide(Logger, () => ({ info() {}, error() {} }))
     @Provide(UserRepository, () => ({
-        findById: async (id: string) => ({id, name: 'Test User'}),
+        findById: async (id: string) => ({id, name: 'Test User'),
         findAll: async () => [{id: '1', name: 'Test User'}],
         save: async () => {},
     }))
@@ -950,13 +977,13 @@ abstract class Pet {
     abstract speech(): string;
 }
 
-@Component({name: 'dog'})
+@Component('dog')
 class Dog extends Pet { speech() { return 'woof'; } }
 
-@Component({name: 'cat'})
+@Component('cat')
 class Cat extends Pet { speech() { return 'meow'; } }
 
-@Component({name: 'bird'})
+@Component('bird')
 class Bird extends Pet { speech() { return 'tweet'; } }
 
 @Component()
@@ -989,7 +1016,7 @@ class PetAdoptedEvent {
 
 @Configuration('petstore')
 class PetStoreConfig {
-    @IsString({default: 'dog'}) defaultPet!: string;
+    @IsString({default: 'dog') defaultPet!: string;
     @IsInteger({default: 5}) maxPetsPerUser!: number;
 }
 
@@ -998,7 +1025,7 @@ class PetStoreConfig {
     const redis = new Redis();
     await redis.connect(url);
     return redis;
-}, {onDestroy: 'disconnect'})
+}, {onDestroy: 'disconnect')
 class RedisModule {}
 
 @Component()
@@ -1007,11 +1034,9 @@ class RedisModule {}
 @Touch(AwsSecretManagerResolver, EnvFileLoader)
 @Use(RedisModule)
 @Use(RedisEventSubscriber, JobMetricsListener)
-@OverrideConfiguration(BootstrapOptions, () => ({
-    configBase: './config/config',
-    profiles: ['prod'],
-    envPrefix: 'PETSTORE_',
-}))
+@OverrideConfiguration(ConfigFileOptions, () => ({ configFile: './config/petstore' }))
+@OverrideConfiguration(ProfileOptions, () => ({ profiles: ['prod'] }))
+@OverrideConfiguration(VariantOptions, () => ({ envPrefix: 'PETSTORE_' }))
 class PetStoreApplication {
     constructor(
         private readonly config = injectConfig(PetStoreConfig),
