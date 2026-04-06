@@ -419,9 +419,9 @@ interface ValidationIssue {
 
 ## 7. Service Definitions (protobuf-style)
 
-Like protobuf: `@Schema` classes are **messages** (data structure), `defineService()` defines **services** (endpoints). Both live in `@kavri/schema` and can be shared between frontend and backend.
+Like protobuf: `@Schema` classes are **messages** (data structure), `defineRoute()` defines **services** (endpoints). Both live in `@kavri/schema` and can be shared between frontend and backend.
 
-### defineService — define a typed service contract
+### defineRoute — define a typed service contract
 
 ```ts
 type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | 'HEAD';
@@ -438,11 +438,11 @@ interface RequestOptions {
     signal?: AbortSignal;
 }
 
-declare function defineService<T extends Record<string, EndpointDef>>(
+declare function defineRoute<T extends Record<string, EndpointDef>>(
     name: string,
     basePath: string,
     endpoints: T,
-): ServiceDefinition<{
+): RouteDefinition<{
     [K in keyof T]: T[K] extends EndpointDef<infer TReq, infer TRes>
         ? T[K]['response'] extends AnyConstructor<any>
             ? (input: TReq, options?: RequestOptions) => Promise<TRes>
@@ -451,7 +451,7 @@ declare function defineService<T extends Record<string, EndpointDef>>(
 }>;
 
 /** Opaque service definition. Carries typed client methods + endpoint metadata. */
-interface ServiceDefinition<TMethods> {
+interface RouteDefinition<TMethods> {
     readonly name: string;
     readonly basePath: string;
     readonly endpoints: Record<string, EndpointDef>;
@@ -460,7 +460,7 @@ interface ServiceDefinition<TMethods> {
 }
 ```
 
-`defineService()` takes a name, a base path, and an object map of endpoint definitions. The type of each endpoint is inferred from its `request` and `response` schemas. `createClient` / `injectClient` / `createController` all use the inferred `TMethods`.
+`defineRoute()` takes a name, a base path, and an object map of endpoint definitions. The type of each endpoint is inferred from its `request` and `response` schemas. `createClient` / `injectClient` / `createController` all use the inferred `TMethods`.
 
 ### Endpoint definition helpers
 
@@ -479,20 +479,20 @@ declare function head<TReq>(path: string, request: AnyConstructor<TReq>): Endpoi
 ### Example — typed service definition
 
 ```ts
-const UserService = defineService('UserService', '/user', {
+const UserRoute = defineRoute('UserRoute', '/user', {
     getUser: get('/:id', GetUserParams, UserResponse),
     createUser: post('/', CreateUserBody, UserResponse),
     deleteUser: del('/:id', GetUserParams),
 });
 
-// typeof UserService infers ServiceDefinition<{
+// typeof UserService infers RouteDefinition<{
 //     getUser(input: GetUserParams, options?: RequestOptions): Promise<UserResponse>;
 //     createUser(input: CreateUserBody, options?: RequestOptions): Promise<UserResponse>;
 //     deleteUser(input: GetUserParams, options?: RequestOptions): Promise<void>;
 // }>
 
 // Clients are fully typed:
-const client = createClient(UserService, { baseUrl: '...' });
+const client = createClient(UserRoute, { baseUrl: '...' });
 client.getUser({ id: 1 });       // Promise<UserResponse>
 client.deleteUser({ id: 1 });     // Promise<void>
 ```
@@ -501,7 +501,7 @@ client.deleteUser({ id: 1 });     // Promise<void>
 
 ```ts
 // user-service.ts — shared between frontend and backend
-import { defineService, get, post, del, Schema, IsString, IsInteger, IsEmail } from '@kavri/schema';
+import { defineRoute, get, post, del, Schema, IsString, IsInteger, IsEmail } from '@kavri/schema';
 
 @Schema()
 class GetUserParams {
@@ -530,7 +530,7 @@ class UserResponse {
     email!: string;
 }
 
-export const UserService = defineService('UserService', '/user', {
+export const UserRoute = defineRoute('UserRoute', '/user', {
     getUser: get('/:id', GetUserParams, UserResponse),
     createUser: post('/', CreateUserBody, UserResponse),
     deleteUser: del('/:id', GetUserParams),
@@ -541,10 +541,10 @@ export const UserService = defineService('UserService', '/user', {
 
 ```ts
 import { createController, ControllerImpl } from '@kavri/web';
-import { UserService } from './user-service';
+import { UserRoute } from './user-route';
 
 @ControllerImpl()
-class UserController extends createController(UserService) {
+class UserController extends createController(UserRoute) {
     constructor(private readonly repo = inject(UserRepository)) { super(); }
 
     override async getUser(input: GetUserParams): Promise<UserResponse> {
@@ -565,9 +565,9 @@ class UserController extends createController(UserService) {
 
 ```ts
 import { createClient } from '@kavri/client';
-import { UserService } from './user-service';
+import { UserRoute } from './user-route';
 
-const client = createClient(UserService, { baseUrl: 'https://api.example.com' });
+const client = createClient(UserRoute, { baseUrl: 'https://api.example.com' });
 
 const user = await client.getUser({ id: 123 });  // typed: UserResponse
 await client.createUser({ name: 'Alice', email: 'alice@example.com' });
@@ -579,12 +579,12 @@ In the backend, `injectClient()` creates a typed HTTP client for a service, usef
 
 ```ts
 import { injectClient } from '@kavri/client';
-import { OrderService } from './order-service';
+import { OrderRoute } from './order-route';
 
 @Component()
 class PaymentService {
     constructor(
-        private readonly orders = injectClient(OrderService),
+        private readonly orders = injectClient(OrderRoute),
     ) {}
 
     async refund(orderId: number) {
@@ -601,7 +601,7 @@ class PaymentService {
 ```ts
 import { generateOpenAPI } from '@kavri/schema';
 
-const spec = generateOpenAPI(UserService, {
+const spec = generateOpenAPI(UserRoute, {
     title: 'User API',
     version: '1.0.0',
 });

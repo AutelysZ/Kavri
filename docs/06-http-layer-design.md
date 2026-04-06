@@ -201,16 +201,16 @@ class BasicAuthInterceptor extends Interceptor {
 
 ### Service definitions (`@kavri/schema`)
 
-Service contracts are defined in `@kavri/schema` using `defineService()` — see [09-schema-design.md](./09-schema-design.md#8-service-definitions-protobuf-style). Shared between frontend and backend.
+Service contracts are defined in `@kavri/schema` using `defineRoute()` — see [09-schema-design.md](./09-schema-design.md#8-service-definitions-protobuf-style). Shared between frontend and backend.
 
 ### createController / @ControllerImpl (`@kavri/web`)
 
 ```ts
 import { createController, ControllerImpl } from '@kavri/web';
-import { UserService } from './user-service';
+import { UserRoute } from './user-route';
 
 @ControllerImpl()
-class UserController extends createController(UserService) {
+class UserController extends createController(UserRoute) {
     constructor(private readonly repo = inject(UserRepository)) { super(); }
 
     override async getUser(input: GetUserParams): Promise<UserResponse> {
@@ -225,7 +225,7 @@ class UserController extends createController(UserService) {
 
 ```ts
 import { createClient } from '@kavri/client';
-const client = createClient(UserService, { baseUrl: 'https://api.example.com' });
+const client = createClient(UserRoute, { baseUrl: 'https://api.example.com' });
 const user = await client.getUser({ id: 123 });
 ```
 
@@ -238,7 +238,7 @@ import { injectClient } from '@kavri/client';
 
 @Component()
 class PaymentService {
-    constructor(private readonly orders = injectClient(OrderService)) {}
+    constructor(private readonly orders = injectClient(OrderRoute)) {}
 
     async refund(orderId: number) {
         const order = await this.orders.getOrder({ id: orderId });
@@ -437,7 +437,7 @@ await app.start();
 
 ```ts
 import {
-    Schema, IsString, IsInteger, IsEmail, defineService, get, post, del,
+    Schema, IsString, IsInteger, IsEmail, defineRoute, get, post, del,
 } from '@kavri/schema';
 import {
     ControllerImpl, createController,
@@ -465,7 +465,7 @@ class UserResponse {
     @IsEmail() email!: string;
 }
 
-const UserService = defineService('UserService', '/user', {
+const UserRoute = defineRoute('UserRoute', '/user', {
     getUser: get('/:id', GetUserParams, UserResponse),
     createUser: post('/', CreateUserBody, UserResponse),
     deleteUser: del('/:id', GetUserParams),
@@ -474,7 +474,7 @@ const UserService = defineService('UserService', '/user', {
 // ---- Controller implementation ----
 
 @ControllerImpl()
-class UserController extends createController(UserService) {
+class UserController extends createController(UserRoute) {
     constructor(private readonly repo = inject(UserRepository)) { super(); }
 
     override async getUser(input: GetUserParams) {
