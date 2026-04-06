@@ -17,9 +17,9 @@ Kavri uses default parameters as the injection mechanism. No reflection, no para
 ## Example
 
 ```ts
-import { Container, Component, Provide, OverrideConfiguration, Touch, Use, inject, token } from '@kavri/core';
-import { Configuration, injectConfig, BootstrapOptions } from '@kavri/config';
-import { IsString } from '@kavri/schema';
+import { Container, Component, Conditional, Provide, OverrideConfiguration, Touch, Use, inject, token } from '@kavri/core';
+import { Configuration, injectConfig, ConfigFileOptions } from '@kavri/config';
+import { IsString, IsBoolean } from '@kavri/schema';
 
 // config
 @Configuration('database')
@@ -28,12 +28,17 @@ class DatabaseConfig {
     @IsString() url!: string;
 }
 
+@Configuration('telemetry')
+class TelemetryConfig {
+    @IsBoolean({ default: false }) enabled!: boolean;
+}
+
 // components
 abstract class Driver {
     abstract query(sql: string): Promise<any>;
 }
 
-@Component({ name: 'psql' })
+@Component('psql')
 class PsqlDriver extends Driver {
     async query(sql: string) { return `psql:${sql}`; }
 }
@@ -42,12 +47,20 @@ const SelectedDriver = token<Driver>(
     (cfg = injectConfig(DatabaseConfig), d = inject(Driver, cfg.driver)) => d
 );
 
+// conditional component
+@Component()
+@Conditional((config = injectConfig(TelemetryConfig, true)) => config?.enabled ?? false)
+class TelemetryService {
+    constructor(private readonly config = injectConfig(TelemetryConfig)) {}
+    send(metric: string, value: number): void {}
+}
+
 // external class via @Provide
 declare class Redis { connect(url: string): Promise<void>; disconnect(): Promise<void>; }
 
 @Component()
 @Provide(Redis, async () => { const r = new Redis(); await r.connect('redis://localhost'); return r; }, { onDestroy: 'disconnect' })
-@OverrideConfiguration(BootstrapOptions, () => ({ configBase: './config/app' }))
+@OverrideConfiguration(ConfigFileOptions, () => ({ configFile: './config/app' }))
 class AppModule {}
 
 // application
@@ -58,6 +71,7 @@ class App {
     constructor(
         private readonly driver = inject(SelectedDriver),
         private readonly redis = inject(Redis),
+        private readonly telemetry = inject(TelemetryService, true),
     ) {}
 
     async run() { console.log(await this.driver.query('select 1')); }

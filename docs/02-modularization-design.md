@@ -41,7 +41,7 @@ Modules use `@Provide` as a class decorator to register providers, and `@Overrid
   await r.connect(config.url);
   return r;
 }, { onDestroy: 'disconnect' })
-@OverrideConfiguration(BootstrapOptions, () => ({ configBase: './config/app' }))
+@OverrideConfiguration(ConfigFileOptions, () => ({ configFile: './config/app' }))
 class AppModule {}
 ```
 
@@ -85,7 +85,7 @@ import {
   injectMap,
   token,
 } from '@kavri/core';
-import { Configuration, injectConfig, BootstrapOptions } from '@kavri/config';
+import { Configuration, injectConfig, ConfigFileOptions, VariantOptions } from '@kavri/config';
 import { IsString } from '@kavri/schema';
 
 // ---- driver module ----
@@ -100,12 +100,12 @@ abstract class Driver {
   abstract query(sql: string): Promise<any>;
 }
 
-@Component({ name: 'psql' })
+@Component('psql')
 class PsqlDriver extends Driver {
   async query(sql: string) { return `psql:${sql}`; }
 }
 
-@Component({ name: 'mysql' })
+@Component('mysql')
 class MysqlDriver extends Driver {
   async query(sql: string) { return `mysql:${sql}`; }
 }
@@ -140,8 +140,11 @@ class CacheModule {}
 // ---- config module ----
 
 @Component()
-@OverrideConfiguration(BootstrapOptions, () => ({
-  configBase: './config/app',
+@OverrideConfiguration(ConfigFileOptions, () => ({
+  configFile: './config/app',
+}))
+@OverrideConfiguration(VariantOptions, () => ({
+  envPrefix: 'MYAPP_',
 }))
 class ConfigModule {}
 

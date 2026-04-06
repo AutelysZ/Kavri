@@ -828,8 +828,7 @@ class AppConfigModule {}
 // ============================================================
 
 // Resolvers load external key-value pairs into the env context.
-// Triggered by kavri.config.import entries in config files.
-// Format: "{resolver-name}:{resource}" e.g. "aws-secretmanager:prod/db-secrets?prefix=database"
+// Each resolver manages its own strategy via getOptionsClass()/resolve().
 
 declare class SecretsManagerClient {
     constructor(options: { region: string });

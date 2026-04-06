@@ -42,7 +42,15 @@ An inject call is valid **only** as a **default parameter value** in:
    class CacheModule {}
    ```
 
-5. **`@OnConstruct` / `@OnDestroy` method parameters**
+5. **`@Conditional` predicate parameters**
+
+   ```ts
+   @Component()
+   @Conditional((cfg = injectConfig(FeatureFlags, true)) => cfg?.enabled ?? false) // ok
+   class ConditionalService {}
+   ```
+
+6. **`@OnConstruct` / `@OnDestroy` method parameters**
 
    ```ts
    @Component()
@@ -50,15 +58,6 @@ An inject call is valid **only** as a **default parameter value** in:
        @OnConstruct()
        async init(logger = inject(Logger)) {} // ok
    }
-   ```
-
-6. **`ComponentOptions.condition` parameters**
-
-   ```ts
-   @Component({
-       condition: (cfg = inject(FeatureFlags)) => cfg.enabled, // ok
-   })
-   class ConditionalService {}
    ```
 
 ### Invalid locations
@@ -108,7 +107,7 @@ The rule walks the AST upward from each inject call and checks:
    - Constructor of a class decorated with `@Component` → valid.
    - Arrow/function passed as argument to `token()` → valid.
    - Arrow/function passed as 2nd argument of a `@Provide(target, factory)` decorator → valid.
-   - Arrow/function assigned to `condition` property in `@Component({ condition: ... })` → valid.
+   - Arrow/function passed as argument to `@Conditional(predicate)` → valid.
    - Method decorated with `@OnConstruct()` or `@OnDestroy()` → valid.
    - Arrow/function in `onConstruct`/`onDestroy` of `ProvideOptions` → valid.
    - Anything else → report.
@@ -141,8 +140,8 @@ The rule applies to these function names (configurable):
 
 ```
 `inject()` must be called as a default parameter inside a valid inject point
-(@Component constructor, token() factory, @Provide factory, @OnConstruct/@OnDestroy,
-@OnConstruct/@OnDestroy method, or condition function).
+(@Component constructor, token() factory, @Provide factory, @Conditional predicate,
+@OnConstruct/@OnDestroy method, or onConstruct/onDestroy callback).
 ```
 
 ## 3. Rule: `@kavri/no-inject-after-side-effect`
@@ -182,7 +181,52 @@ If the factory is retried during async resolution, preceding defaults
 will re-execute. Move inject() calls before side-effecting defaults.
 ```
 
-## 4. Recommended config
+## 4. Rule: `@kavri/no-conditional-override`
+
+Prevents `@Conditional` and `@OverrideConfiguration` from coexisting on the same class. Configuration must resolve before conditions are evaluated, so a class that provides config overrides cannot itself be conditional.
+
+### Examples
+
+```ts
+// error — @Conditional and @OverrideConfiguration on the same class
+@Component()
+@Conditional((config = injectConfig(FeatureFlags, true)) => config?.enabled ?? false)
+@OverrideConfiguration(ConfigFileOptions, () => ({ configFile: './config/app' }))
+class BadModule {}
+
+// ok — only @OverrideConfiguration
+@Component()
+@OverrideConfiguration(ConfigFileOptions, () => ({ configFile: './config/app' }))
+class GoodConfigModule {}
+
+// ok — only @Conditional
+@Component()
+@Conditional((config = injectConfig(FeatureFlags, true)) => config?.enabled ?? false)
+class GoodConditionalService {}
+```
+
+### Detection logic
+
+The rule checks each class declaration for the presence of both `@Conditional` and `@OverrideConfiguration` decorators. If both are found, report an error.
+
+### Error message
+
+```
+@Conditional and @OverrideConfiguration cannot coexist on the same class.
+Configuration must resolve before conditions are evaluated.
+```
+
+### Configuration
+
+```jsonc
+{
+  "rules": {
+    "@kavri/no-conditional-override": "error"
+  }
+}
+```
+
+## 5. Recommended config
 
 ```jsonc
 // eslint.config.js (flat config)
@@ -194,6 +238,7 @@ export default [
     rules: {
       '@kavri/inject-context': 'error',
       '@kavri/no-inject-after-side-effect': 'warn',
+      '@kavri/no-conditional-override': 'error',
     },
   },
 ];

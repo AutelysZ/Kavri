@@ -30,19 +30,38 @@ export type Injectable<T> =
 ## 3. Component decorator
 
 ```ts
-interface ComponentOptions {
-  name?: Qualifier;
-  condition?: () => Awaitable<boolean>;
-}
-
 interface ComponentMetadata {
-  options: ComponentOptions;
+  name?: Qualifier;
 }
 
-declare function Component(options?: ComponentOptions): ClassDecorator<ComponentMetadata>;
+/** Marks a class as a container-managed component. All components are singletons. */
+declare function Component(name?: Qualifier): ClassDecorator<ComponentMetadata>;
 ```
 
+`@Component()` registers a class with the container. `@Component('name')` registers with a qualifier name.
+
 All decorators return typed `ClassDecorator<T>` or `MethodDecorator<T>` carrying their metadata. See [05-metadata-design.md](./05-metadata-design.md) for the full metadata system.
+
+## 3.1. Conditional decorator
+
+```ts
+interface ConditionalMetadata {
+  predicate: () => Awaitable<boolean>;
+}
+
+/**
+ * Marks a component as conditionally enabled.
+ * Predicate is evaluated lazily on first inject(). Result is cached.
+ * Runs in an inject context — default params can use inject()/injectConfig().
+ *
+ * CONSTRAINT: @Conditional and @OverrideConfiguration CANNOT coexist on the same class.
+ * Enforced at runtime (throws) and by @kavri/eslint-plugin.
+ * Reason: configuration must resolve before conditions are evaluated.
+ */
+declare function Conditional(predicate: () => Awaitable<boolean>): ClassDecorator<ConditionalMetadata>;
+```
+
+`@Conditional` is a separate decorator from `@Component`. Components with `@OverrideConfiguration` must NOT have `@Conditional`. Resolver subclasses must NOT have `@Conditional`.
 
 ## 4. Lifecycle decorators
 
@@ -83,7 +102,8 @@ Duplicate providers for the same target throw `DuplicateProviderError` (unless e
 The factory and `onConstruct`/`onDestroy` callbacks are **inject points** -- their parameters can use `inject()` in default values. Return value of callbacks is ignored.
 
 ```ts
-interface ProvideOptions<T> extends ComponentOptions {
+interface ProvideOptions<T> {
+  name?: Qualifier;
   /** Inject point. Return value ignored. */
   onConstruct?: NoArgsMethodKeyof<T> | ((instance: T) => Awaitable<void>);
   /** Inject point. Return value ignored. */
@@ -120,10 +140,10 @@ declare function inject<T>(injectable: Injectable<T>, name: Qualifier, optional:
 1. `@Component` class constructors
 2. `token()` factory functions
 3. `@Provide` factory parameters
-4. `ComponentOptions.condition` functions
+4. `@Conditional` predicate parameters
 5. `@OnConstruct` / `@OnDestroy` method parameters
 6. `onConstruct` / `onDestroy` callback parameters (`ProvideOptions`)
-7. `injectConfig()` -- injects a validated `@Configuration` class instance
+7. `injectConfig()` -- also an inject point for `@Configuration` classes
 
 ### 6.2 `injectRef()` — circular references
 
@@ -159,7 +179,7 @@ declare class Container {
 
 When `container.resolve(target)` is called, all `@Use` deps and the target itself are treated as entrypoints, instantiated serially. For each target:
 
-1. **Check condition.** Disabled -> skip.
+1. **Check `@Conditional`.** Disabled -> skip. (Configuration resolves before conditions.)
 2. **Register decorator metadata:** `@Touch`, `@Provide` (pure registration). Duplicate `@Provide` -> `DuplicateProviderError` (unless primary).
 3. **Process `@Use`:** recursively instantiate deps (depth-first).
 4. **Call factory** (inject context active).
@@ -212,13 +232,13 @@ All `inject()` calls are synchronous. Async providers are handled via throw-and-
 
 ```ts
 import {
-  Container, Component, Provide, Touch, Use,
+  Container, Component, Conditional, Provide, Touch, Use,
   OnConstruct, OnDestroy, OverrideConfiguration,
   token, inject, injectAll, injectRef,
   Metadata,
 } from '@kavri/core';
-import { Configuration, injectConfig, BootstrapOptions } from '@kavri/config';
-import { IsString } from '@kavri/schema';
+import { Configuration, injectConfig, ConfigFileOptions } from '@kavri/config';
+import { IsString, IsBoolean } from '@kavri/schema';
 
 @Configuration('database')
 class DatabaseConfig {
@@ -226,11 +246,16 @@ class DatabaseConfig {
   @IsString() url!: string;
 }
 
+@Configuration('telemetry')
+class TelemetryConfig {
+  @IsBoolean({ default: false }) enabled!: boolean;
+}
+
 abstract class Driver {
   abstract query(sql: string): Promise<any>;
 }
 
-@Component({ name: 'psql' })
+@Component('psql')
 class PsqlDriver extends Driver {
   async query(sql: string) { return `psql:${sql}`; }
 }
@@ -250,14 +275,22 @@ declare class Redis {
   await r.connect('redis://localhost');
   return r;
 }, { onDestroy: 'disconnect' })
-@OverrideConfiguration(BootstrapOptions, () => ({ configBase: './config/app' }))
+@OverrideConfiguration(ConfigFileOptions, () => ({ configFile: './config/app' }))
 class AppModule {}
+
+@Component()
+@Conditional((config = injectConfig(TelemetryConfig, true)) => config?.enabled ?? false)
+class TelemetryService {
+  constructor(private readonly config = injectConfig(TelemetryConfig)) {}
+  send(metric: string, value: number): void {}
+}
 
 @Component()
 class UserService {
   constructor(
     private readonly driver = inject(SelectedDriver),
     private readonly redis = inject(Redis),
+    private readonly telemetry = inject(TelemetryService, true),
   ) {}
 
   @OnConstruct()

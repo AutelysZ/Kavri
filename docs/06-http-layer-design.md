@@ -140,9 +140,8 @@ class BasicAuthConfig {
     @IsString({ default: 'Restricted' }) realm!: string;
 }
 
-@Component({
-    condition: (config = injectConfig(BasicAuthConfig, true)) => config !== undefined,
-})
+@Component()
+@Conditional((config = injectConfig(BasicAuthConfig, true)) => config !== undefined)
 class BasicAuthInterceptor extends Interceptor {
     constructor(private readonly config = injectConfig(BasicAuthConfig)) { super(); }
 
@@ -200,9 +199,8 @@ class StaticConfig {
     @IsString({ default: '/static' }) prefix!: string;
 }
 
-@Component({
-    condition: (config = injectConfig(StaticConfig, true)) => config !== undefined,
-})
+@Component()
+@Conditional((config = injectConfig(StaticConfig, true)) => config !== undefined)
 class StaticFileInterceptor extends Interceptor {
     constructor(private readonly config = injectConfig(StaticConfig)) { super(); }
 

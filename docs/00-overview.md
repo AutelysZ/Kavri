@@ -21,7 +21,7 @@ Kavri is a TypeScript IoC framework focused on explicit dependency wiring with o
 @kavri/schema  → Schema, field decorators, parse, validate, toJsonSchema (no @kavri/core dependency)
 @kavri/core    → Component, Container, inject, Token, etc.
 @kavri/event   → EventType, EventBus, OnEvent, defineEvent
-@kavri/config  → @Configuration, injectConfig, Loader, Resolver, BootstrapOptions
+@kavri/config  → @Configuration, injectConfig, Loader, Resolver, EnvOptions, ConfigFileOptions, ProfileOptions, VariantOptions
 @kavri/web     → ControllerImpl, createController, Interceptor, WebApplication, RequestContext
 @kavri/client  → createClient, injectClient, typed HTTP clients from service definitions
 @kavri/eslint-plugin → ESLint rules for inject-point enforcement
@@ -35,7 +35,7 @@ Kavri is a TypeScript IoC framework focused on explicit dependency wiring with o
 |---|---|
 | [`01-ioc-core-design.md`](./01-ioc-core-design.md) | Components, providers, injection, container |
 | [`02-modularization-design.md`](./02-modularization-design.md) | @Touch, @Use, @Provide, module composition |
-| [`03-configuration-design.md`](./03-configuration-design.md) | @Configuration, injectConfig, BootstrapOptions, sources, precedence |
+| [`03-configuration-design.md`](./03-configuration-design.md) | @Configuration, injectConfig, ConfigFileOptions, ProfileOptions, VariantOptions, sources, precedence |
 | [`04-event-design.md`](./04-event-design.md) | @EventType, @OnEvent, defineEvent, EventBus |
 | [`05-metadata-design.md`](./05-metadata-design.md) | Metadata.of, createClassDecorator, createMethodDecorator |
 | [`06-http-layer-design.md`](./06-http-layer-design.md) | ControllerImpl, createController, interceptors, WebApplication |
