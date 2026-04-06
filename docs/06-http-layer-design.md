@@ -201,7 +201,7 @@ class BasicAuthInterceptor extends Interceptor {
 
 ### Service definitions (`@kavri/schema`)
 
-Service contracts are defined in `@kavri/schema` using `createService()` — see [09-schema-design.md](./09-schema-design.md#8-service-definitions-protobuf-style). Shared between frontend and backend.
+Service contracts are defined in `@kavri/schema` using `defineService()` — see [09-schema-design.md](./09-schema-design.md#8-service-definitions-protobuf-style). Shared between frontend and backend.
 
 ### createController / @ControllerImpl (`@kavri/web`)
 
@@ -437,7 +437,7 @@ await app.start();
 
 ```ts
 import {
-    Schema, IsString, IsInteger, IsEmail, createService, get, post, del,
+    Schema, IsString, IsInteger, IsEmail, defineService, get, post, del,
 } from '@kavri/schema';
 import {
     ControllerImpl, createController,
@@ -465,7 +465,7 @@ class UserResponse {
     @IsEmail() email!: string;
 }
 
-const UserService = createService('/user', {
+const UserService = defineService('UserService', '/user', {
     getUser: get('/:id', GetUserParams, UserResponse),
     createUser: post('/', CreateUserBody, UserResponse),
     deleteUser: del('/:id', GetUserParams),

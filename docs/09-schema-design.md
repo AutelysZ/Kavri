@@ -419,9 +419,9 @@ interface ValidationIssue {
 
 ## 7. Service Definitions (protobuf-style)
 
-Like protobuf: `@Schema` classes are **messages** (data structure), `createService()` defines **services** (endpoints). Both live in `@kavri/schema` and can be shared between frontend and backend.
+Like protobuf: `@Schema` classes are **messages** (data structure), `defineService()` defines **services** (endpoints). Both live in `@kavri/schema` and can be shared between frontend and backend.
 
-### createService — define a typed service contract
+### defineService — define a typed service contract
 
 ```ts
 type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | 'HEAD';
@@ -438,7 +438,8 @@ interface RequestOptions {
     signal?: AbortSignal;
 }
 
-declare function createService<T extends Record<string, EndpointDef>>(
+declare function defineService<T extends Record<string, EndpointDef>>(
+    name: string,
     basePath: string,
     endpoints: T,
 ): ServiceDefinition<{
@@ -451,6 +452,7 @@ declare function createService<T extends Record<string, EndpointDef>>(
 
 /** Opaque service definition. Carries typed client methods + endpoint metadata. */
 interface ServiceDefinition<TMethods> {
+    readonly name: string;
     readonly basePath: string;
     readonly endpoints: Record<string, EndpointDef>;
     /** Phantom type for client inference. */
@@ -458,7 +460,7 @@ interface ServiceDefinition<TMethods> {
 }
 ```
 
-`createService()` takes a base path and an object map of endpoint definitions. The type of each endpoint is inferred from its `request` and `response` schemas. `createClient` / `injectClient` / `createController` all use the inferred `TMethods`.
+`defineService()` takes a name, a base path, and an object map of endpoint definitions. The type of each endpoint is inferred from its `request` and `response` schemas. `createClient` / `injectClient` / `createController` all use the inferred `TMethods`.
 
 ### Endpoint definition helpers
 
@@ -477,7 +479,7 @@ declare function head<TReq>(path: string, request: AnyConstructor<TReq>): Endpoi
 ### Example — typed service definition
 
 ```ts
-const UserService = createService('/user', {
+const UserService = defineService('UserService', '/user', {
     getUser: get('/:id', GetUserParams, UserResponse),
     createUser: post('/', CreateUserBody, UserResponse),
     deleteUser: del('/:id', GetUserParams),
@@ -499,7 +501,7 @@ client.deleteUser({ id: 1 });     // Promise<void>
 
 ```ts
 // user-service.ts — shared between frontend and backend
-import { createService, get, post, del, Schema, IsString, IsInteger, IsEmail } from '@kavri/schema';
+import { defineService, get, post, del, Schema, IsString, IsInteger, IsEmail } from '@kavri/schema';
 
 @Schema()
 class GetUserParams {
@@ -528,7 +530,7 @@ class UserResponse {
     email!: string;
 }
 
-export const UserService = createService('/user', {
+export const UserService = defineService('UserService', '/user', {
     getUser: get('/:id', GetUserParams, UserResponse),
     createUser: post('/', CreateUserBody, UserResponse),
     deleteUser: del('/:id', GetUserParams),
