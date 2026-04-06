@@ -424,7 +424,7 @@ Like protobuf: `@Schema` classes are **messages** (data structure), `createServi
 ### createService — define a service contract
 
 ```ts
-interface ServiceDefinition {
+interface Serviceinition {
     readonly basePath: string;
     readonly endpoints: readonly EndpointDefinition[];
 }
@@ -457,7 +457,7 @@ declare class ServiceBuilder {
     patch<TReq, TRes>(name: string, path: string, requestSchema?: AnyConstructor<TReq>, responseSchema?: AnyConstructor<TRes>): this;
     head<TReq>(name: string, path: string, requestSchema?: AnyConstructor<TReq>): this;
 
-    build(): ServiceDefinition;
+    build(): Serviceinition;
 }
 ```
 
@@ -494,7 +494,7 @@ class UserResponse {
     email!: string;
 }
 
-export const UserServiceDef = createService('/user')
+export const UserService = createService('/user')
     .get('getUser', '/:id', GetUserParams, UserResponse)
     .post('createUser', '/', CreateUserBody, UserResponse)
     .delete('deleteUser', '/:id', GetUserParams)
@@ -505,10 +505,10 @@ export const UserServiceDef = createService('/user')
 
 ```ts
 import { createController, ControllerImpl } from '@kavri/web';
-import { UserServiceDef } from './user-service';
+import { UserService } from './user-service';
 
 @ControllerImpl()
-class UserController extends createController(UserServiceDef) {
+class UserController extends createController(UserService) {
     constructor(private readonly repo = inject(UserRepository)) { super(); }
 
     override async getUser(input: GetUserParams): Promise<UserResponse> {
@@ -529,9 +529,9 @@ class UserController extends createController(UserServiceDef) {
 
 ```ts
 import { createClient } from '@kavri/client';
-import { UserServiceDef } from './user-service';
+import { UserService } from './user-service';
 
-const client = createClient(UserServiceDef, { baseUrl: 'https://api.example.com' });
+const client = createClient(UserService, { baseUrl: 'https://api.example.com' });
 
 const user = await client.getUser({ id: 123 });  // typed: UserResponse
 await client.createUser({ name: 'Alice', email: 'alice@example.com' });
@@ -543,12 +543,12 @@ In the backend, `injectClient()` creates a typed HTTP client for a service, usef
 
 ```ts
 import { injectClient } from '@kavri/web';
-import { OrderServiceDef } from './order-service';
+import { OrderService } from './order-service';
 
 @Component()
 class PaymentService {
     constructor(
-        private readonly orders = injectClient(OrderServiceDef),
+        private readonly orders = injectClient(OrderService),
     ) {}
 
     async refund(orderId: number) {
@@ -565,13 +565,13 @@ class PaymentService {
 ```ts
 import { generateOpenAPI } from '@kavri/schema';
 
-const spec = generateOpenAPI(UserServiceDef, {
+const spec = generateOpenAPI(UserService, {
     title: 'User API',
     version: '1.0.0',
 });
 ```
 
-Generates an OpenAPI 3.x document from a `ServiceDefinition`. Request/response schemas are converted to JSON Schema via `toJsonSchema()`. Static — no running container needed.
+Generates an OpenAPI 3.x document from a `Serviceinition`. Request/response schemas are converted to JSON Schema via `toJsonSchema()`. Static — no running container needed.
 
 ## 8. ConfigParser Compatibility
 

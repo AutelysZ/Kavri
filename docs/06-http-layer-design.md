@@ -207,10 +207,10 @@ Service contracts are defined in `@kavri/schema` using `createService()` — see
 
 ```ts
 import { createController, ControllerImpl } from '@kavri/web';
-import { UserServiceDef } from './user-service';
+import { UserService } from './user-service';
 
 @ControllerImpl()
-class UserController extends createController(UserServiceDef) {
+class UserController extends createController(UserService) {
     constructor(private readonly repo = inject(UserRepository)) { super(); }
 
     override async getUser(input: GetUserParams): Promise<UserResponse> {
@@ -225,7 +225,7 @@ class UserController extends createController(UserServiceDef) {
 
 ```ts
 import { createClient } from '@kavri/client';
-const client = createClient(UserServiceDef, { baseUrl: 'https://api.example.com' });
+const client = createClient(UserService, { baseUrl: 'https://api.example.com' });
 const user = await client.getUser({ id: 123 });
 ```
 
@@ -238,7 +238,7 @@ import { injectClient } from '@kavri/web';
 
 @Component()
 class PaymentService {
-    constructor(private readonly orders = injectClient(OrderServiceDef)) {}
+    constructor(private readonly orders = injectClient(OrderService)) {}
 
     async refund(orderId: number) {
         const order = await this.orders.getOrder({ id: orderId });
@@ -465,7 +465,7 @@ class UserResponse {
     @IsEmail() email!: string;
 }
 
-const UserServiceDef = createService('/user')
+const UserService = createService('/user')
     .get('getUser', '/:id', GetUserParams, UserResponse)
     .post('createUser', '/', CreateUserBody, UserResponse)
     .delete('deleteUser', '/:id', GetUserParams)
@@ -474,7 +474,7 @@ const UserServiceDef = createService('/user')
 // ---- Controller implementation ----
 
 @ControllerImpl()
-class UserController extends createController(UserServiceDef) {
+class UserController extends createController(UserService) {
     constructor(private readonly repo = inject(UserRepository)) { super(); }
 
     override async getUser(input: GetUserParams) {
