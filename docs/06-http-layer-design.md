@@ -6,7 +6,7 @@
 - **Parsed input only.** Handlers receive validated, typed data — not raw streams. Body parsing happens before handlers and interceptors see the request (gRPC-style).
 - **Single interception mechanism.** Interceptors replace middleware, guards, pipes, and filters. One abstraction, one chain.
 - **Controllers are singletons.** Per-request data lives in `RequestContext` (AsyncLocalStorage), not in the controller instance.
-- **Definition/implementation separation.** Service definitions (`@kavri/schema`) are shared contracts. `createController()` and `@ControllerImpl()` wire them. `@kavri/client` produces typed HTTP clients. `injectClient()` enables server-side service-to-service calls.
+- **Definition/implementation separation.** Service definitions (`@kavri/schema`) are shared contracts. `createController()` and `@ControllerImpl()` wire them. `@kavri/client` produces typed HTTP clients and `injectClient()` for server-side service-to-service calls.
 
 ## 2. Core HTTP Types
 
@@ -229,12 +229,12 @@ const client = createClient(UserService, { baseUrl: 'https://api.example.com' })
 const user = await client.getUser({ id: 123 });
 ```
 
-### injectClient (`@kavri/web`)
+### injectClient (`@kavri/client`)
 
 Server-side typed client for service-to-service calls:
 
 ```ts
-import { injectClient } from '@kavri/web';
+import { injectClient } from '@kavri/client';
 
 @Component()
 class PaymentService {
@@ -440,7 +440,7 @@ import {
     Schema, IsString, IsInteger, IsEmail, createService,
 } from '@kavri/schema';
 import {
-    ControllerImpl, createController, injectClient,
+    ControllerImpl, createController,
     Interceptor, RequestContext, HttpException, WebApplication,
 } from '@kavri/web';
 import { Component, Touch, inject } from '@kavri/core';

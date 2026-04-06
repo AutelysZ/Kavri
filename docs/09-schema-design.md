@@ -537,12 +537,12 @@ const user = await client.getUser({ id: 123 });  // typed: UserResponse
 await client.createUser({ name: 'Alice', email: 'alice@example.com' });
 ```
 
-### injectClient — server-side typed client (`@kavri/web`)
+### injectClient — server-side typed client (`@kavri/client`)
 
 In the backend, `injectClient()` creates a typed HTTP client for a service, useful for service-to-service calls:
 
 ```ts
-import { injectClient } from '@kavri/web';
+import { injectClient } from '@kavri/client';
 import { OrderService } from './order-service';
 
 @Component()
