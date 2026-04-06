@@ -468,8 +468,7 @@ class UserResponse {
 const UserService = createService('/user')
     .get('getUser', '/:id', GetUserParams, UserResponse)
     .post('createUser', '/', CreateUserBody, UserResponse)
-    .delete('deleteUser', '/:id', GetUserParams)
-    .build();
+    .delete('deleteUser', '/:id', GetUserParams);
 
 // ---- Controller implementation ----
 

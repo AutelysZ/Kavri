@@ -421,44 +421,69 @@ interface ValidationIssue {
 
 Like protobuf: `@Schema` classes are **messages** (data structure), `createService()` defines **services** (endpoints). Both live in `@kavri/schema` and can be shared between frontend and backend.
 
-### createService — define a service contract
+### createService — define a typed service contract
 
 ```ts
-interface Serviceinition {
-    readonly basePath: string;
-    readonly endpoints: readonly EndpointDefinition[];
-}
-
-interface EndpointDefinition {
-    readonly name: string;
-    readonly method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | 'HEAD';
-    readonly path: string;
-    readonly requestSchema?: AnyConstructor<any>;  // @Schema class
-    readonly responseSchema?: AnyConstructor<any>; // @Schema class
-}
-
-declare function createService(basePath: string): ServiceBuilder;
+declare function createService(basePath: string): ServiceBuilder<{}>;
 ```
 
-`ServiceBuilder` is a fluent builder that accumulates endpoints. Each method call adds an endpoint with typed request/response schemas:
+`createService()` returns a fluent builder. Each `.get()` / `.post()` / etc. call adds a typed method to the service type. No `.build()` needed — the builder IS the service definition. The type accumulates with each chained call.
 
 ```ts
-declare class ServiceBuilder {
-    get<TReq, TRes>(
-        name: string,
+// Each method returns a new builder with the accumulated type:
+//   ServiceBuilder<{ getUser(input: GetUserParams, options?: RequestOptions): Promise<UserResponse> }>
+// The builder itself is the ServiceDefinition — pass it to createController/createClient/injectClient.
+
+interface ServiceBuilder<TMethods> {
+    get<N extends string, TReq, TRes>(
+        name: N,
         path: string,
-        requestSchema?: AnyConstructor<TReq>,
-        responseSchema?: AnyConstructor<TRes>,
-    ): this;
+        requestSchema: AnyConstructor<TReq>,
+        responseSchema: AnyConstructor<TRes>,
+    ): ServiceBuilder<TMethods & { [K in N]: (input: TReq, options?: RequestOptions) => Promise<TRes> }>;
 
-    post<TReq, TRes>(name: string, path: string, requestSchema?: AnyConstructor<TReq>, responseSchema?: AnyConstructor<TRes>): this;
-    put<TReq, TRes>(name: string, path: string, requestSchema?: AnyConstructor<TReq>, responseSchema?: AnyConstructor<TRes>): this;
-    delete<TReq, TRes>(name: string, path: string, requestSchema?: AnyConstructor<TReq>, responseSchema?: AnyConstructor<TRes>): this;
-    patch<TReq, TRes>(name: string, path: string, requestSchema?: AnyConstructor<TReq>, responseSchema?: AnyConstructor<TRes>): this;
-    head<TReq>(name: string, path: string, requestSchema?: AnyConstructor<TReq>): this;
+    get<N extends string, TReq>(
+        name: N,
+        path: string,
+        requestSchema: AnyConstructor<TReq>,
+    ): ServiceBuilder<TMethods & { [K in N]: (input: TReq, options?: RequestOptions) => Promise<void> }>;
 
-    build(): Serviceinition;
+    post<N extends string, TReq, TRes>(name: N, path: string, requestSchema: AnyConstructor<TReq>, responseSchema: AnyConstructor<TRes>): ServiceBuilder<TMethods & { [K in N]: (input: TReq, options?: RequestOptions) => Promise<TRes> }>;
+    put<N extends string, TReq, TRes>(name: N, path: string, requestSchema: AnyConstructor<TReq>, responseSchema: AnyConstructor<TRes>): ServiceBuilder<TMethods & { [K in N]: (input: TReq, options?: RequestOptions) => Promise<TRes> }>;
+    delete<N extends string, TReq>(name: N, path: string, requestSchema: AnyConstructor<TReq>): ServiceBuilder<TMethods & { [K in N]: (input: TReq, options?: RequestOptions) => Promise<void> }>;
+    patch<N extends string, TReq, TRes>(name: N, path: string, requestSchema: AnyConstructor<TReq>, responseSchema: AnyConstructor<TRes>): ServiceBuilder<TMethods & { [K in N]: (input: TReq, options?: RequestOptions) => Promise<TRes> }>;
+    head<N extends string, TReq>(name: N, path: string, requestSchema: AnyConstructor<TReq>): ServiceBuilder<TMethods & { [K in N]: (input: TReq, options?: RequestOptions) => Promise<void> }>;
 }
+
+interface RequestOptions {
+    headers?: Record<string, string>;
+    signal?: AbortSignal;
+}
+
+// The ServiceBuilder is also the ServiceDefinition:
+type ServiceDefinition<TMethods> = ServiceBuilder<TMethods>;
+```
+
+When you call `injectClient(UserService)` or `createClient(UserService)`, the returned client is typed as `TMethods`:
+
+```ts
+const UserService = createService('/user')
+    .get('getUser', '/:id', GetUserParams, UserResponse)
+    .post('createUser', '/', CreateUserBody, UserResponse)
+    .delete('deleteUser', '/:id', GetUserParams);
+
+// typeof UserService infers:
+// ServiceBuilder<{
+//     getUser(input: GetUserParams, options?: RequestOptions): Promise<UserResponse>;
+//     createUser(input: CreateUserBody, options?: RequestOptions): Promise<UserResponse>;
+//     deleteUser(input: GetUserParams, options?: RequestOptions): Promise<void>;
+// }>
+
+// createClient / injectClient returns the typed methods:
+const client = createClient(UserService, { baseUrl: '...' });
+client.getUser({ id: 1 });       // typed: Promise<UserResponse>
+client.createUser({ name: 'Alice', email: 'a@b.com' }); // typed: Promise<UserResponse>
+client.deleteUser({ id: 1 });     // typed: Promise<void>
 ```
 
 ### Example — shared definition file
@@ -497,8 +522,7 @@ class UserResponse {
 export const UserService = createService('/user')
     .get('getUser', '/:id', GetUserParams, UserResponse)
     .post('createUser', '/', CreateUserBody, UserResponse)
-    .delete('deleteUser', '/:id', GetUserParams)
-    .build();
+    .delete('deleteUser', '/:id', GetUserParams);
 ```
 
 ### createController — backend implementation (`@kavri/web`)
