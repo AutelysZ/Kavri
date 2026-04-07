@@ -410,18 +410,7 @@ declare class WebApplication {
 }
 ```
 
-### Per-request lifecycle
-
-1. Receive HTTP request
-2. Route matching → find controller instance (singleton) + method from route metadata
-3. Parse request: extract params, query, body. Validate with request schema.
-4. `RequestContext.run()` — enter request context, set built-in keys
-5. Run interceptor chain → call handler with `(parsedInput)`
-6. Handler returns typed value or special response
-7. If response schema exists, validate response. Serialize as JSON with 200.
-8. If special response (`Redirect`, `FileResponse`, etc.), handle accordingly.
-
-### Bootstrap example
+### Bootstrap
 
 ```ts
 @Component()
@@ -432,6 +421,366 @@ class MyApplication {}
 
 const app = new WebApplication(MyApplication);
 await app.start();
+```
+
+### Core process pseudocode
+
+```ts
+class WebApplication {
+    private container: Container;
+    private interceptors: Interceptor[];
+
+    constructor(private readonly entrypoint: AnyConstructor<any>) {}
+
+    async start() {
+        this.container = new Container();
+        await this.container.resolve(this.entrypoint);
+
+        // Collect all interceptors, sorted by @Priority (smaller first)
+        this.interceptors = injectAll(Interceptor, 'priority');
+
+        const config = injectConfig(HttpConfig);
+        const server = http.createServer(this.toHandler());
+        server.listen(config.port, config.host);
+    }
+
+    toHandler(): (req: IncomingMessage, res: ServerResponse) => void {
+        return (req, res) => {
+            RequestContext.run(async () => {
+                // Set framework-level keys
+                Request.set(req);
+                Response.set(res);
+
+                // Build and execute the interceptor chain
+                const chain = this.buildChain(this.interceptors, 0);
+                const result = await chain();
+
+                // Write response if not already written
+                if (!res.headersSent) {
+                    this.writeResponse(res, result);
+                }
+            }).catch(err => {
+                // Last-resort error handling (interceptor chain failed entirely)
+                if (!res.headersSent) {
+                    res.writeHead(500);
+                    res.end('Internal Server Error');
+                }
+            });
+        };
+    }
+
+    private buildChain(interceptors: Interceptor[], index: number): () => unknown {
+        if (index >= interceptors.length) {
+            // End of chain — should not reach here if HandlerInterceptor is present
+            return () => { throw new HttpException(404, 'Not Found'); };
+        }
+        return () => interceptors[index].intercept(this.buildChain(interceptors, index + 1));
+    }
+
+    private writeResponse(res: ServerResponse, result: unknown) {
+        if (result instanceof Redirect) {
+            res.writeHead(result.status ?? 302, { Location: result.url });
+            res.end();
+        } else if (result instanceof FileResponse) {
+            res.writeHead(200, { 'Content-Type': result.contentType ?? 'application/octet-stream' });
+            createReadStream(result.path).pipe(res);
+        } else if (result instanceof StreamResponse) {
+            res.writeHead(200, { 'Content-Type': result.contentType });
+            Readable.fromWeb(result.stream).pipe(res);
+        } else if (result instanceof RawResponse) {
+            res.writeHead(result.status, result.headers);
+            res.end(result.body);
+        } else if (result !== undefined) {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(result));
+        } else {
+            res.writeHead(204);
+            res.end();
+        }
+    }
+}
+```
+
+## 13. Built-in Interceptors
+
+All built-in interceptors are registered by the framework automatically. Users `@Touch` their own interceptors to insert into the chain.
+
+### ExceptionInterceptor (EXCEPTION = 2000)
+
+Catches errors from downstream interceptors and maps them to HTTP responses.
+
+```ts
+@Component()
+@Priority(Interceptor.EXCEPTION)
+class ExceptionInterceptor extends Interceptor {
+    async intercept(next: () => unknown) {
+        try {
+            return await next();
+        } catch (err) {
+            if (err instanceof HttpException) {
+                return new RawResponse(
+                    err.status,
+                    { 'Content-Type': 'application/json', ...err.headers },
+                    JSON.stringify({ status: err.status, message: err.message }),
+                );
+            }
+            // Unknown error → 500, hide message in production
+            const message = process.env.NODE_ENV === 'production'
+                ? 'Internal Server Error'
+                : (err as Error).message;
+            return new RawResponse(500,
+                { 'Content-Type': 'application/json' },
+                JSON.stringify({ status: 500, message }),
+            );
+        }
+    }
+}
+```
+
+### RouteInterceptor (ROUTE = 3000)
+
+Matches the request URL against registered routes. Sets `Endpoint`, `Controller`, `PathParams`.
+
+```ts
+@Component()
+@Priority(Interceptor.ROUTE)
+class RouteInterceptor extends Interceptor {
+    // Router is built at startup from all @Controller classes' route metadata
+    private router: Router;
+
+    @OnConstruct()
+    init() {
+        // Collect all controllers, read their route definitions via Metadata
+        const controllers = injectAll(Controller);
+        this.router = new Router();
+        for (const ctrl of controllers) {
+            const route = Metadata.of(Controller, ctrl); // → RouteDefinition
+            for (const [name, endpoint] of Object.entries(route.endpoints)) {
+                const fullPath = route.basePath + endpoint.path;
+                this.router.add(endpoint.method, fullPath, { ctrl, name, endpoint });
+            }
+        }
+    }
+
+    async intercept(next: () => unknown) {
+        const req = Request.getOrThrow();
+        const match = this.router.match(req.method!, req.url!);
+
+        if (match) {
+            Endpoint.set(match.endpoint);
+            Controller.set(match.ctrl);
+            PathParams.set(match.params);
+        } else {
+            Endpoint.set(null);
+            Controller.set(null);
+            PathParams.set({});
+        }
+
+        return next();
+    }
+}
+```
+
+### ParseInterceptor (PARSE = 6000)
+
+Parses the request URL query string and body based on the endpoint's `requestType`.
+
+```ts
+@Component()
+@Priority(Interceptor.PARSE)
+class ParseInterceptor extends Interceptor {
+    async intercept(next: () => unknown) {
+        const req = Request.getOrThrow();
+        const endpoint = Endpoint.get();
+
+        // Parse query string
+        const url = new URL(req.url!, `http://${req.headers.host}`);
+        Query.set(Object.fromEntries(url.searchParams));
+
+        if (!endpoint || endpoint.request === 'void') {
+            Body.set(undefined);
+            Files.set({});
+            return next();
+        }
+
+        const requestType = endpoint.options.requestType ?? 'data';
+
+        if (requestType === 'data') {
+            // Read body, parse as JSON
+            const raw = await readBody(req);
+            Body.set(JSON.parse(raw));
+        } else if (requestType === 'multipart') {
+            // Parse multipart/form-data → fields + files
+            const { fields, files } = await parseMultipart(req, endpoint.options.multipart!);
+            Body.set(fields);
+            Files.set(files);
+        } else if (requestType === 'binary') {
+            // Raw stream — body is the request stream itself
+            Body.set(req);  // IncomingMessage is a ReadableStream
+        }
+
+        return next();
+    }
+}
+```
+
+### ResolveInterceptor (RESOLVE = 7000)
+
+Merges raw pieces (PathParams, Query, Body, Files) into a single object matching the request schema shape. Sets `Params`.
+
+```ts
+@Component()
+@Priority(Interceptor.RESOLVE)
+class ResolveInterceptor extends Interceptor {
+    async intercept(next: () => unknown) {
+        const endpoint = Endpoint.get();
+        if (!endpoint || endpoint.request === 'void') {
+            Params.set(undefined);
+            return next();
+        }
+
+        const pathParams = PathParams.get() ?? {};
+        const query = Query.get() ?? {};
+        const body = Body.get();
+        const files = Files.get() ?? {};
+
+        // Merge: path params + query + body fields + files
+        // Path params and query are always merged.
+        // Body is spread if it's an object, otherwise set as-is.
+        // Files are merged by field name.
+        const merged: Record<string, any> = { ...pathParams, ...query };
+
+        if (body && typeof body === 'object' && !(body instanceof ReadableStream)) {
+            Object.assign(merged, body);
+        } else if (body !== undefined) {
+            // Binary body — find the @IsBody() field and assign
+            merged['body'] = body;
+        }
+
+        // Merge files into their corresponding fields
+        for (const [fieldName, fileOrFiles] of Object.entries(files)) {
+            merged[fieldName] = fileOrFiles;
+        }
+
+        Params.set(merged);
+        return next();
+    }
+}
+```
+
+### ValidateInterceptor (VALIDATE = 8000)
+
+Validates `Params` against the endpoint's request schema. Throws `HttpException(400)` on failure.
+
+```ts
+@Component()
+@Priority(Interceptor.VALIDATE)
+class ValidateInterceptor extends Interceptor {
+    async intercept(next: () => unknown) {
+        const endpoint = Endpoint.get();
+        if (!endpoint || endpoint.request === 'void') {
+            return next();
+        }
+
+        const params = Params.get();
+        const requestClass = endpoint.request as AnyConstructor<any>;
+
+        // Validate and parse using @kavri/schema
+        const error = validate(requestClass, params);
+        if (error) {
+            throw new HttpException(400, 'Validation failed', {
+                'Content-Type': 'application/json',
+            });
+            // Body: { status: 400, message: 'Validation failed', issues: error.issues }
+        }
+
+        // Parse into typed instance (applies custom parsers like @IsDate)
+        const parsed = parse(requestClass, params);
+        Params.set(parsed);
+
+        return next();
+    }
+}
+```
+
+### HandlerInterceptor (HANDLER = 9000)
+
+Calls the matched controller method with the validated params. Validates the response if a response schema exists.
+
+```ts
+@Component()
+@Priority(Interceptor.HANDLER)
+class HandlerInterceptor extends Interceptor {
+    async intercept(next: () => unknown) {
+        const endpoint = Endpoint.get();
+        const ctrl = Controller.get();
+
+        if (!endpoint || !ctrl) {
+            throw new HttpException(404, 'Not Found');
+        }
+
+        // Find the method name on the controller that matches this endpoint
+        const methodName = /* resolved from endpoint name */;
+        const handler = (ctrl as any)[methodName];
+
+        if (typeof handler !== 'function') {
+            throw new HttpException(500, `Handler method ${String(methodName)} not found`);
+        }
+
+        // Call handler with parsed params (or no args if void)
+        const params = Params.get();
+        const result = endpoint.request === 'void'
+            ? await handler.call(ctrl)
+            : await handler.call(ctrl, params);
+
+        // Validate response if schema exists
+        if (endpoint.response !== 'void' && endpoint.response !== 'stream' && result !== undefined) {
+            const responseClass = endpoint.response as AnyConstructor<any>;
+            const error = validate(responseClass, result);
+            if (error) {
+                throw new HttpException(500, 'Response validation failed');
+            }
+        }
+
+        return result;
+    }
+}
+```
+
+### Pipeline summary
+
+```
+Request
+  │
+  ▼
+ExceptionInterceptor (2000)    ← catches all errors from below
+  │
+  ▼
+RouteInterceptor (3000)        ← sets Endpoint, Controller, PathParams
+  │
+  ▼
+[CorsInterceptor (4000)]       ← user-provided
+  │
+  ▼
+[AuthInterceptor (5000)]       ← user-provided
+  │
+  ▼
+ParseInterceptor (6000)        ← sets Query, Body, Files
+  │
+  ▼
+ResolveInterceptor (7000)      ← merges → sets Params
+  │
+  ▼
+ValidateInterceptor (8000)     ← validates Params, throws 400
+  │
+  ▼
+[TransactionInterceptor (8999)] ← user-provided
+  │
+  ▼
+HandlerInterceptor (9000)      ← calls controller method
+  │
+  ▼
+Response
 ```
 
 ## 13. Full Example
