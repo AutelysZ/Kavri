@@ -412,7 +412,9 @@ class ErrorInterceptor extends Interceptor {
 
 ```ts
 @Component()
-@Touch(WebLoggingInterceptor)
+@Touch(ResponseInterceptor, ExceptionInterceptor, RouteInterceptor,
+       ParseInterceptor, ResolveInterceptor, ValidateInterceptor, HandlerInterceptor,
+       WebLoggingInterceptor)
 class WebApplication {
     constructor(
         // Inject all interceptors sorted by priority — all must have @Priority
