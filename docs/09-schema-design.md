@@ -398,15 +398,6 @@ declare function IsFile(isArray?: boolean, options?: ValidateOptions): SchemaFie
  */
 declare function IsBody(options?: ValidateOptions): SchemaFieldDecorator;
 
-/**
- * Marks a field as sourced from an HTTP header.
- * The field is extracted from the request header, not from body/params/query.
- * Auto-sets schema to string (headers are always strings).
- * Do NOT combine with other schema decorators.
- *
- * @param name — the HTTP header name (case-insensitive). E.g., 'Authorization', 'X-Request-Id'.
- */
-declare function InHeader(name: string, options?: ValidateOptions): SchemaFieldDecorator;
 ```
 
 Usage:
@@ -433,13 +424,6 @@ class RawUploadParams {
     @IsBody() body!: ReadableStream;
 }
 
-// Header field
-@Schema()
-class AuthenticatedRequest {
-    @InHeader('Authorization') authorization!: string;
-    @InHeader('X-Request-Id', { optional: true }) requestId?: string;
-    @IsInteger() userId!: number;  // from path/query/body
-}
 ```
 
 ### HTTP method helpers
