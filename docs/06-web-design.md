@@ -152,13 +152,14 @@ abstract class Interceptor {
     abstract intercept(next: () => unknown): Awaitable<unknown>;
 
     /** Priority anchors. Use with @Priority() to order interceptors. */
-    static readonly BOOTSTRAP = 1000;
-    static readonly EXCEPTION = 2000;
-    static readonly ROUTE     = 3000;
-    static readonly GUARD     = 4000;
-    static readonly DECODE    = 5000;
-    static readonly VALIDATE  = 6000;
-    static readonly EXECUTE   = 7000;
+    static readonly BOOTSTRAP = 1000;   // logging, metrics, request ID
+    static readonly EXCEPTION = 2000;   // error handling, error formatting
+    static readonly ROUTE     = 3000;   // route matching, static files
+    static readonly CORS      = 4000;   // CORS preflight handling
+    static readonly GUARD     = 5000;   // auth, rate limiting, RBAC
+    static readonly PARSE     = 6000;   // body parsing (JSON, multipart)
+    static readonly VALIDATE  = 7000;   // schema validation
+    static readonly HANDLER   = 8000;   // handler execution, transactions
 }
 ```
 
@@ -285,7 +286,7 @@ function Transactional(): MethodDecorator<{}> {
 }
 
 @Component()
-@Priority(Interceptor.EXECUTE - 1)
+@Priority(Interceptor.HANDLER - 1)
 class TransactionInterceptor extends Interceptor {
     constructor(private readonly db = inject(DrizzleDatabase)) { super(); }
 
