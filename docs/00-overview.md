@@ -12,7 +12,7 @@ Kavri is a TypeScript IoC framework focused on explicit dependency wiring with o
 6. **Simple modules** — `@Component()` classes with `@Provide`/`@Touch`/`@Use` decorators. No module hierarchy.
 7. **Event pub/sub** — `@EventType`/`@OnEvent`/`defineEvent` for decoupled communication.
 8. **Class-based schemas** — `@Schema` + field decorators replace Zod. Full JSON Schema coverage, no `z.infer<>`.
-9. **Optional HTTP upper layer** — built on IoC core but not required.
+9. **Optional web module** — `@kavri/web`, built on IoC core but not required.
 
 ## Package structure
 
@@ -38,7 +38,7 @@ Kavri is a TypeScript IoC framework focused on explicit dependency wiring with o
 | [`03-configuration-design.md`](./03-configuration-design.md) | @Configuration, injectConfig, ConfigFileOptions, ProfileOptions, VariantOptions, sources, precedence |
 | [`04-event-design.md`](./04-event-design.md) | @EventType, @OnEvent, defineEvent, EventBus |
 | [`05-metadata-design.md`](./05-metadata-design.md) | Metadata.of, createClassDecorator, createMethodDecorator |
-| [`06-http-layer-design.md`](./06-http-layer-design.md) | Controller, createController, interceptors, WebApplication |
+| [`06-web-design.md`](./06-web-design.md) | Controller, createController, interceptors, WebApplication |
 | [`08-eslint-plugin-design.md`](./08-eslint-plugin-design.md) | ESLint rules for inject-point enforcement |
 | [`09-schema-design.md`](./09-schema-design.md) | @Schema, field decorators, parse, validate, toJsonSchema |
 | [`draft.ts`](./draft.ts) | Complete API declarations with usage examples |

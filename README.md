@@ -90,7 +90,7 @@ await container.destroy();
 - [Configuration](./docs/03-configuration-design.md) — @Configuration, injectConfig, multi-source config
 - [Events](./docs/04-event-design.md) — @EventType, @OnEvent, EventBus
 - [Metadata](./docs/05-metadata-design.md) — Metadata.of, createClassDecorator, createFieldDecorator
-- [HTTP Layer](./docs/06-http-layer-design.md) — Controller, interceptors, WebApplication
+- [Web](./docs/06-web-design.md) — Controller, interceptors, WebApplication
 - [ESLint Plugin](./docs/08-eslint-plugin-design.md) — inject-point enforcement, @Conditional rules
 - [Schema](./docs/09-schema-design.md) — @Schema, field decorators, defineRoute, parse, toJsonSchema
 - [API Reference](./docs/draft.ts) — complete type declarations with examples
