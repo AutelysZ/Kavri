@@ -78,11 +78,7 @@ The framework sets these during request processing:
 ```ts
 import { IncomingMessage, ServerResponse } from 'node:http';
 
-/** The matched endpoint metadata from defineRoute. Null if no route matched. */
-const Endpoint = RequestContext.key<Endpoint<any, any> | null>('endpoint');
-
-/** The matched controller instance. Null if no route matched. */
-const Controller = RequestContext.key<object | null>('controller');
+// --- Set by framework at request start ---
 
 /** The raw Node.js request. */
 const Request = RequestContext.key<IncomingMessage>('request');
@@ -90,7 +86,31 @@ const Request = RequestContext.key<IncomingMessage>('request');
 /** The raw Node.js response. */
 const Response = RequestContext.key<ServerResponse>('response');
 
-/** Decoded request params (path params + query + parsed body merged). */
+// --- Set by ROUTE stage ---
+
+/** The matched endpoint metadata from defineRoute. Null if no route matched. */
+const Endpoint = RequestContext.key<Endpoint<any, any> | null>('endpoint');
+
+/** The matched controller instance. Null if no route matched. */
+const Controller = RequestContext.key<object | null>('controller');
+
+// --- Set by PARSE stage (raw pieces) ---
+
+/** Path parameters extracted by the router. */
+const PathParams = RequestContext.key<Record<string, string>>('pathParams');
+
+/** Query string parameters. */
+const Query = RequestContext.key<Record<string, string>>('query');
+
+/** Parsed request body (JSON object, string, etc.). */
+const Body = RequestContext.key<unknown>('body');
+
+/** Uploaded files (multipart requests only). */
+const Files = RequestContext.key<Record<string, MultipartFile | MultipartFile[]>>('files');
+
+// --- Set by RESOLVE stage (merged) ---
+
+/** Final merged params: path params + query + body + files, shaped to request schema. */
 const Params = RequestContext.key<unknown>('params');
 ```
 
@@ -157,9 +177,10 @@ abstract class Interceptor {
     static readonly ROUTE     = 3000;   // route matching, static files
     static readonly CORS      = 4000;   // CORS preflight handling
     static readonly GUARD     = 5000;   // auth, rate limiting, RBAC
-    static readonly PARSE     = 6000;   // body parsing (JSON, multipart)
-    static readonly VALIDATE  = 7000;   // schema validation
-    static readonly HANDLER   = 8000;   // handler execution, transactions
+    static readonly PARSE     = 6000;   // decode raw body (JSON, multipart, binary)
+    static readonly RESOLVE   = 7000;   // merge path params + query + body + files → Params
+    static readonly VALIDATE  = 8000;   // validate Params against request schema
+    static readonly HANDLER   = 9000;   // handler execution, transactions
 }
 ```
 
