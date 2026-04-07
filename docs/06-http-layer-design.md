@@ -6,7 +6,7 @@
 - **Parsed input only.** Handlers receive validated, typed data — not raw streams. Body parsing happens before handlers and interceptors see the request (gRPC-style).
 - **Single interception mechanism.** Interceptors replace middleware, guards, pipes, and filters. One abstraction, one chain.
 - **Controllers are singletons.** Per-request data lives in `RequestContext` (AsyncLocalStorage), not in the controller instance.
-- **Route-first.** All endpoints are defined via `defineRoute()` in `@kavri/schema`. Controllers are implementations of routes — no ad-hoc `@Controller(path)` or `@Get()` decorators.
+- **Route-first.** All endpoints are defined via `defineRoute()` in `@kavri/schema`. Controllers implement routes via `@Controller()` + `createController(route)`.
 
 ## 2. Core HTTP Types
 
@@ -87,7 +87,7 @@ class UserController extends createController(UserRoute) {
 ```
 
 - `createController(route)` returns an abstract class with abstract methods matching the route definition. Types are inferred from the route's request/response schemas.
-- `@Controller()` composes `@Component()` and registers all routing metadata from the route definition. No manual `@Controller(path)` or `@Get()/@Post()` needed.
+- `@Controller()` composes `@Component()` and registers all routing metadata from the route definition.
 - Handlers receive parsed input. Return typed response or a special response object (`Redirect`, `FileResponse`, etc.).
 - Access per-request data via `RequestContext.get()`.
 
