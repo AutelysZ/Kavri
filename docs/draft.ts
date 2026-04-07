@@ -8,17 +8,17 @@ type Qualifier = string | symbol;
 type Awaitable<T> = T | Promise<T>;
 export type CollectionOrder = 'topological' | 'provided' | 'alphabetical';
 
-type AnyConstructor<T> = abstract new (...args: any[]) => T;
+export type AnyConstructor<T> = abstract new (...args: any[]) => T;
 
 type NoArgsMethodKeyof<T> = T extends object
     ? { [P in keyof T]-?: T[P] extends () => any ? P : never; }[keyof T]
     : never;
 
 type DecoratorStatic<T> = {
-    readonly __metadata__: T | undefined;
+    readonly metadata: T | undefined;
 }
 
-type ClassDecorator<T> =
+export type ClassDecorator<T> =
     globalThis.ClassDecorator
     & ((target: Function, context: ClassDecoratorContext) => void)
     & DecoratorStatic<T>;
@@ -28,11 +28,20 @@ type MethodDecorator<T> =
     & ((target: Function, context: ClassMethodDecoratorContext) => void)
     & DecoratorStatic<T>;
 
+export type FieldDecorator<T> =
+    globalThis.MethodDecorator
+    & ((value: any, context: ClassFieldDecoratorContext) => void)
+    & DecoratorStatic<T>;
+
 type ClassDecoratorFactory<T> = (...args: any[]) => ClassDecorator<T>
 type MethodDecoratorFactory<T> = (...args: any[]) => MethodDecorator<T>
+export type FieldDecoratorFactory<T> = (...args: any[]) => FieldDecorator<T>
 
-declare function createClassDecorator<T>(factory: ClassDecoratorFactory<T>, metadata: T, extra?: ClassDecorator<any>[]): ClassDecorator<T>;
+export declare function createClassDecorator<T>(factory: ClassDecoratorFactory<T>, metadata: T, extra?: ClassDecorator<any>[]): ClassDecorator<T>;
+
 declare function createMethodDecorator<T>(factory: MethodDecoratorFactory<T>, metadata: T, extra?: MethodDecorator<any>[]): MethodDecorator<T>;
+
+export declare function createFieldDecorator<T>(factory: FieldDecoratorFactory<T>, metadata: T, extra?: FieldDecorator<any>[]): FieldDecorator<T>;
 
 // ============================================================
 // Section 2: Component Decorator
@@ -163,7 +172,9 @@ declare function injectRef<T>(injectable: Injectable<T>): Ref<T>
 declare function injectRef<T>(injectable: Injectable<T>, optional: true): Ref<T> | undefined
 
 declare function injectAll<T>(injectable: Injectable<T> | ClassDecoratorFactory<any>, order?: CollectionOrder): readonly T[]
+
 declare function injectSet<T>(injectable: Injectable<T> | ClassDecoratorFactory<any>): ReadonlySet<T>;
+
 declare function injectMap<T>(injectable: Injectable<T> | ClassDecoratorFactory<any>): ReadonlyMap<Qualifier, T>;
 
 // ============================================================
@@ -231,6 +242,7 @@ declare function Use(...injectables: Injectable<any>[]): ClassDecorator<readonly
  */
 declare class Container {
     resolve<T>(injectable: Injectable<T>): Promise<T>;
+
     destroy(): Promise<void>;
 }
 
@@ -269,12 +281,18 @@ declare class EventBus {
  */
 abstract class Loader {
     abstract supports(): string[];
+
     abstract load(content: string): Awaitable<object>;
 }
 
-declare class JsonLoader extends Loader {}
-declare class YamlLoader extends Loader {}
-declare class TomlLoader extends Loader {}
+declare class JsonLoader extends Loader {
+}
+
+declare class YamlLoader extends Loader {
+}
+
+declare class TomlLoader extends Loader {
+}
 
 // --- Resolver ---
 
@@ -289,6 +307,7 @@ declare class TomlLoader extends Loader {}
  */
 abstract class Resolver<T = any> {
     abstract getOptionsClass(): AnyConstructor<T>;
+
     abstract resolve(options: T): Awaitable<Record<string, string>>;
 }
 
@@ -423,9 +442,11 @@ declare class MissingProviderError extends Error {
     readonly injectable: Injectable<any>;
 }
 
-declare class InjectContextError extends Error {}
+declare class InjectContextError extends Error {
+}
 
-declare class DestroyedContainerError extends Error {}
+declare class DestroyedContainerError extends Error {
+}
 
 declare class ConfigValidationError extends Error {
     readonly prefix: string;
@@ -450,13 +471,18 @@ declare class DuplicateProviderError extends Error {
 // Example: Custom Decorator Creation
 // ============================================================
 
-interface ScheduledMetadata { cron: string; }
+interface ScheduledMetadata {
+    cron: string;
+}
 
 function Scheduled(cron: string): ClassDecorator<ScheduledMetadata> {
     return createClassDecorator<ScheduledMetadata>(Scheduled, {cron}, [Component()])
 }
 
-interface RateLimitMetadata { maxRequests: number; windowMs: number; }
+interface RateLimitMetadata {
+    maxRequests: number;
+    windowMs: number;
+}
 
 function RateLimit(opts: RateLimitMetadata): MethodDecorator<RateLimitMetadata> {
     return createMethodDecorator<RateLimitMetadata>(RateLimit, opts);
@@ -472,15 +498,26 @@ function RateLimit(opts: RateLimitMetadata): MethodDecorator<RateLimitMetadata> 
 
 @Component()
 class Logger {
-    info(message: string): void {}
-    error(message: string, err?: Error): void {}
+    info(message: string): void {
+    }
+
+    error(message: string, err?: Error): void {
+    }
 }
 
 @Component()
 class UserRepository {
-    findById(id: string): Promise<any> { return Promise.resolve(); }
-    findAll(): Promise<any[]> { return Promise.resolve([]); }
-    save(user: any): Promise<void> { return Promise.resolve(); }
+    findById(id: string): Promise<any> {
+        return Promise.resolve();
+    }
+
+    findAll(): Promise<any[]> {
+        return Promise.resolve([]);
+    }
+
+    save(user: any): Promise<void> {
+        return Promise.resolve();
+    }
 }
 
 @Component()
@@ -488,7 +525,8 @@ class UserService {
     constructor(
         private readonly logger = inject(Logger),
         private readonly repo = inject(UserRepository),
-    ) {}
+    ) {
+    }
 
     async getUser(id: string) {
         this.logger.info(`Fetching user ${id}`);
@@ -503,29 +541,55 @@ class UserService {
 
 abstract class Serializer {
     abstract contentType(): string;
+
     abstract serialize(data: any): string;
+
     abstract deserialize(raw: string): any;
 }
 
 @Component('json')
 class JsonSerializer extends Serializer {
-    contentType() { return 'application/json'; }
-    serialize(data: any) { return JSON.stringify(data); }
-    deserialize(raw: string) { return JSON.parse(raw); }
+    contentType() {
+        return 'application/json';
+    }
+
+    serialize(data: any) {
+        return JSON.stringify(data);
+    }
+
+    deserialize(raw: string) {
+        return JSON.parse(raw);
+    }
 }
 
 @Component('xml')
 class XmlSerializer extends Serializer {
-    contentType() { return 'text/xml'; }
-    serialize(data: any) { return '<data/>'; }
-    deserialize(raw: string) { return {}; }
+    contentType() {
+        return 'text/xml';
+    }
+
+    serialize(data: any) {
+        return '<data/>';
+    }
+
+    deserialize(raw: string) {
+        return {};
+    }
 }
 
 @Component('yaml')
 class YamlSerializer extends Serializer {
-    contentType() { return 'text/yaml'; }
-    serialize(data: any) { return ''; }
-    deserialize(raw: string) { return {}; }
+    contentType() {
+        return 'text/yaml';
+    }
+
+    serialize(data: any) {
+        return '';
+    }
+
+    deserialize(raw: string) {
+        return {};
+    }
 }
 
 @Component()
@@ -535,7 +599,8 @@ class DataExporter {
         private readonly allSerializers = injectAll(Serializer, 'alphabetical'),
         private readonly serializerMap = injectMap(Serializer),
         private readonly serializerSet = injectSet(Serializer),
-    ) {}
+    ) {
+    }
 
     export(data: any, format: string): string {
         const serializer = this.serializerMap.get(format);
@@ -571,7 +636,9 @@ const DatabaseUrl = token<string>(
 
 declare class ExternalHttpClient {
     constructor(baseUrl: string);
+
     get(path: string): Promise<any>;
+
     close(): Promise<void>;
 }
 
@@ -591,22 +658,40 @@ const SecretKey = token<string>(() => {
 
 abstract class Driver<TConn> {
     abstract connect(): Promise<TConn>;
+
     abstract execute<T>(conn: TConn, sql: string, values: any[]): Promise<T[]>;
+
     abstract close(conn: TConn): Promise<void>;
 }
 
 @Component('mysql')
 class MysqlDriver extends Driver<unknown> {
-    connect() { return Promise.resolve(undefined); }
-    execute<T>(conn: unknown, sql: string, values: any[]) { return Promise.resolve<T[]>([]); }
-    close(conn: unknown) { return Promise.resolve(); }
+    connect() {
+        return Promise.resolve(undefined);
+    }
+
+    execute<T>(conn: unknown, sql: string, values: any[]) {
+        return Promise.resolve<T[]>([]);
+    }
+
+    close(conn: unknown) {
+        return Promise.resolve();
+    }
 }
 
 @Component('psql')
 class PsqlDriver extends Driver<unknown> {
-    connect() { return Promise.resolve(undefined); }
-    execute<T>(conn: unknown, sql: string, values: any[]) { return Promise.resolve<T[]>([]); }
-    close(conn: unknown) { return Promise.resolve(); }
+    connect() {
+        return Promise.resolve(undefined);
+    }
+
+    execute<T>(conn: unknown, sql: string, values: any[]) {
+        return Promise.resolve<T[]>([]);
+    }
+
+    close(conn: unknown) {
+        return Promise.resolve();
+    }
 }
 
 const SelectedDriver = token<Driver<any>>(
@@ -624,15 +709,21 @@ const Connection = token<any>(
 
 declare class Sequelize {
     constructor(url: string, options?: any);
+
     authenticate(): Promise<void>;
+
     close(): Promise<void>;
+
     query(sql: string): Promise<any>;
 }
 
 declare class Redis {
     connect(url: string): Promise<void>;
+
     disconnect(): Promise<void>;
+
     get(key: string): Promise<string | null>;
+
     set(key: string, value: string, ttl?: number): Promise<void>;
 }
 
@@ -652,7 +743,8 @@ class RedisConfig {
     await redis.connect(config.url);
     return redis;
 }, {onDestroy: 'disconnect')
-class InfraModule {}
+class InfraModule {
+}
 
 
 // ============================================================
@@ -661,13 +753,18 @@ class InfraModule {}
 
 @Component()
 class OrderService {
-    constructor(private readonly inventoryRef: Ref<InventoryService> = injectRef(InventoryService)) {}
+    constructor(private readonly inventoryRef: Ref<InventoryService> = injectRef(InventoryService)) {
+    }
 }
 
 @Component()
 class InventoryService {
-    constructor(private readonly orderRef: Ref<OrderService> = injectRef(OrderService)) {}
-    async checkStock(productId: string, qty: number): Promise<boolean> { return true; }
+    constructor(private readonly orderRef: Ref<OrderService> = injectRef(OrderService)) {
+    }
+
+    async checkStock(productId: string, qty: number): Promise<boolean> {
+        return true;
+    }
 }
 
 
@@ -706,14 +803,21 @@ class TelemetryConfig {
 @Component()
 @Conditional((config = injectConfig(TelemetryConfig, true)) => config?.enabled ?? false)
 class TelemetryService {
-    constructor(private readonly config = injectConfig(TelemetryConfig)) {}
-    send(metric: string, value: number): void {}
+    constructor(private readonly config = injectConfig(TelemetryConfig)) {
+    }
+
+    send(metric: string, value: number): void {
+    }
 }
 
 @Component()
 class AppService {
-    constructor(private readonly telemetry = inject(TelemetryService, true)) {}
-    doWork() { this.telemetry?.send('work.done', 1); }
+    constructor(private readonly telemetry = inject(TelemetryService, true)) {
+    }
+
+    doWork() {
+        this.telemetry?.send('work.done', 1);
+    }
 }
 
 
@@ -723,17 +827,20 @@ class AppService {
 
 @EventType('job.started')
 class JobStartedEvent {
-    constructor(public readonly jobId: string, public readonly startedAt: number = Date.now()) {}
+    constructor(public readonly jobId: string, public readonly startedAt: number = Date.now()) {
+    }
 }
 
 @EventType('job.completed')
 class JobCompletedEvent {
-    constructor(public readonly jobId: string, public readonly result: any) {}
+    constructor(public readonly jobId: string, public readonly result: any) {
+    }
 }
 
 @EventType('job.failed')
 class JobFailedEvent {
-    constructor(public readonly jobId: string, public readonly error: Error) {}
+    constructor(public readonly jobId: string, public readonly error: Error) {
+    }
 }
 
 const CacheInvalidated = defineEvent<{ key: string; reason: string }>('cache.invalidated');
@@ -741,16 +848,23 @@ const SystemShutdown = defineEvent<{ timeout: number }>('system.shutdown');
 
 @Component()
 class JobMetricsListener {
-    constructor(private readonly telemetry = inject(TelemetryService, true)) {}
+    constructor(private readonly telemetry = inject(TelemetryService, true)) {
+    }
 
     @OnEvent(JobStartedEvent)
-    onJobStarted(ev: JobStartedEvent) { this.telemetry?.send('job.started', 1); }
+    onJobStarted(ev: JobStartedEvent) {
+        this.telemetry?.send('job.started', 1);
+    }
 
     @OnEvent(JobCompletedEvent)
-    onJobCompleted(ev: JobCompletedEvent) { this.telemetry?.send('job.completed', 1); }
+    onJobCompleted(ev: JobCompletedEvent) {
+        this.telemetry?.send('job.completed', 1);
+    }
 
     @OnEvent(JobFailedEvent)
-    onJobFailed(ev: JobFailedEvent) { this.telemetry?.send('job.failed', 1); }
+    onJobFailed(ev: JobFailedEvent) {
+        this.telemetry?.send('job.failed', 1);
+    }
 }
 
 @Component()
@@ -758,15 +872,20 @@ class CacheManager {
     private readonly cache = new Map<string, any>();
 
     @OnEvent(CacheInvalidated)
-    onCacheInvalidated(data: { key: string; reason: string }) { this.cache.delete(data.key); }
+    onCacheInvalidated(data: { key: string; reason: string }) {
+        this.cache.delete(data.key);
+    }
 
     @OnEvent(SystemShutdown)
-    onShutdown(data: { timeout: number }) { this.cache.clear(); }
+    onShutdown(data: { timeout: number }) {
+        this.cache.clear();
+    }
 }
 
 @Component()
 class JobRunner {
-    constructor(private readonly events = inject(EventBus)) {}
+    constructor(private readonly events = inject(EventBus)) {
+    }
 
     async run(jobId: string) {
         await this.events.emit(new JobStartedEvent(jobId));
@@ -813,14 +932,15 @@ class AppConfig {
 
 // @OverrideConfiguration: code-level defaults (lower than file/env/cli)
 @Component()
-@OverrideConfiguration(ConfigFileOptions, () => ({ configFile: './config/app' }))
-@OverrideConfiguration(ProfileOptions, () => ({ profiles: ['staging'] }))
-@OverrideConfiguration(VariantOptions, () => ({ envPrefix: 'MYAPP_' }))
+@OverrideConfiguration(ConfigFileOptions, () => ({configFile: './config/app'}))
+@OverrideConfiguration(ProfileOptions, () => ({profiles: ['staging']}))
+@OverrideConfiguration(VariantOptions, () => ({envPrefix: 'MYAPP_'}))
 @OverrideConfiguration(DatabaseConfig, () => ({
     port: 5432,
     host: 'localhost',
 }))
-class AppConfigModule {}
+class AppConfigModule {
+}
 
 
 // ============================================================
@@ -832,6 +952,7 @@ class AppConfigModule {}
 
 declare class SecretsManagerClient {
     constructor(options: { region: string });
+
     getSecretValue(params: { SecretId: string }): Promise<{ SecretString?: string }>;
 }
 
@@ -843,14 +964,16 @@ class AwsSecretManagerResolverOptions {
     @IsString({optional: true}) secretKey?: string;
     @IsString({optional: true}) roleId?: string;
     @IsArray(IsObject({name: IsString(), prefix: IsString()}))
-    items!: Array<{name: string; prefix: string}>;
+    items!: Array<{ name: string; prefix: string }>;
 }
 
 // Resolver uses getOptionsClass() — no injectConfig() allowed.
 // If AwsSecretManagerResolverOptions yields no values, resolve() is not called.
 @Component()
 class AwsSecretManagerResolver extends Resolver<AwsSecretManagerResolverOptions> {
-    getOptionsClass() { return AwsSecretManagerResolverOptions; }
+    getOptionsClass() {
+        return AwsSecretManagerResolverOptions;
+    }
 
     async resolve(opts: AwsSecretManagerResolverOptions) {
         const client = new SecretsManagerClient(opts);
@@ -868,8 +991,13 @@ class AwsSecretManagerResolver extends Resolver<AwsSecretManagerResolverOptions>
 
 @Component()
 class EnvFileLoader extends Loader {
-    supports() { return ['.env']; }
-    load(content: string) { return {} as any; }
+    supports() {
+        return ['.env'];
+    }
+
+    load(content: string) {
+        return {} as any;
+    }
 }
 
 
@@ -883,7 +1011,8 @@ class EnvFileLoader extends Loader {
     await redis.connect(config.url);
     return redis;
 }, {onDestroy: 'disconnect')
-class CacheModule {}
+class CacheModule {
+}
 
 @Component()
 @Touch(MysqlDriver, PsqlDriver)
@@ -892,7 +1021,8 @@ class CacheModule {}
     await seq.authenticate();
     return seq;
 }, {onDestroy: 'close')
-class DatabaseModule {}
+class DatabaseModule {
+}
 
 @Component()
 class RedisEventSubscriber {
@@ -902,11 +1032,14 @@ class RedisEventSubscriber {
         private readonly redis = inject(Redis),
         private readonly events = inject(EventBus),
     ) {
-        this.unsub = () => {};
+        this.unsub = () => {
+        };
     }
 
     @OnDestroy()
-    dispose() { this.unsub(); }
+    dispose() {
+        this.unsub();
+    }
 }
 
 @Component()
@@ -919,7 +1052,8 @@ class Application {
         private readonly serializers = injectAll(Serializer, 'alphabetical'),
         private readonly jobs = inject(JobRunner),
         private readonly events = inject(EventBus),
-    ) {}
+    ) {
+    }
 
     @OnDestroy()
     async onShutdown() {
@@ -936,15 +1070,21 @@ declare var console: { assert(value: boolean): void; }
 
 async function testUserService() {
     @Component()
-    @Provide(Logger, () => ({ info() {}, error() {} }))
+    @Provide(Logger, () => ({
+        info() {
+        }, error() {
+        }
+    }))
     @Provide(UserRepository, () => ({
         findById: async (id: string) => ({id, name: 'Test User'),
         findAll: async () => [{id: '1', name: 'Test User'}],
-        save: async () => {},
+        save: async () => {
+        },
     }))
     @Use(UserService)
     class TestHarness {
-        constructor(readonly service = inject(UserService)) {}
+        constructor(readonly service = inject(UserService)) {
+        }
     }
 
     const container = new Container();
@@ -954,124 +1094,161 @@ async function testUserService() {
     await container.destroy();
 }
 
-async function testConditionalComponent() {
-    @Component()
-    @Provide(TelemetryConfig, () => ({ enabled: true, endpoint: 'http://localhost:9090' }))
-    class TestHarness {
-        constructor(readonly telemetry = inject(TelemetryService)) {}
-    }
+    async function testConditionalComponent() {
+        @Component()
+        @Provide(TelemetryConfig, () => ({enabled: true, endpoint: 'http://localhost:9090'}))
+        class TestHarness {
+            constructor(readonly telemetry = inject(TelemetryService)) {
+            }
+        }
 
-    const container = new Container();
-    const harness = await container.resolve(TestHarness);
-    harness.telemetry.send('test.metric', 42);
-    await container.destroy();
-}
+        const container = new Container();
+        const harness = await container.resolve(TestHarness);
+        harness.telemetry.send('test.metric', 42);
+        await container.destroy();
+    }
 
 
 // ============================================================
 // Example 15: Full Application
 // ============================================================
 
-abstract class Pet {
-    abstract speech(): string;
-}
-
-@Component('dog')
-class Dog extends Pet { speech() { return 'woof'; } }
-
-@Component('cat')
-class Cat extends Pet { speech() { return 'meow'; } }
-
-@Component('bird')
-class Bird extends Pet { speech() { return 'tweet'; } }
-
-@Component()
-abstract class Repository<T> {
-    constructor(
-        private readonly conn = inject(Connection),
-        private readonly driver = inject(SelectedDriver),
-    ) {}
-
-    abstract tableName(): string;
-    findOne(id: string): Promise<T | undefined> { return Promise.resolve(undefined); }
-    findAll(): Promise<readonly T[]> { return Promise.resolve([]); }
-    create(input: T): Promise<T> { return Promise.resolve(input); }
-    delete(id: string): Promise<void> { return Promise.resolve(); }
-}
-
-interface PetRecord { id: string; name: string; species: string; greeting: string; }
-
-@Component()
-class PetRepository extends Repository<PetRecord> {
-    tableName() { return 'pets'; }
-}
-
-const RedisUrl = token<string>((config = injectConfig(RedisConfig)) => config.url);
-
-@EventType('pet.adopted')
-class PetAdoptedEvent {
-    constructor(public readonly petId: string, public readonly species: string) {}
-}
-
-@Configuration('petstore')
-class PetStoreConfig {
-    @IsString({default: 'dog') defaultPet!: string;
-    @IsInteger({default: 5}) maxPetsPerUser!: number;
-}
-
-@Component()
-@Provide(Redis, async (url = inject(RedisUrl)) => {
-    const redis = new Redis();
-    await redis.connect(url);
-    return redis;
-}, {onDestroy: 'disconnect')
-class RedisModule {}
-
-@Component()
-@Touch(Dog, Cat, Bird)
-@Touch(PsqlDriver)
-@Touch(AwsSecretManagerResolver, EnvFileLoader)
-@Use(RedisModule)
-@Use(RedisEventSubscriber, JobMetricsListener)
-@OverrideConfiguration(ConfigFileOptions, () => ({ configFile: './config/petstore' }))
-@OverrideConfiguration(ProfileOptions, () => ({ profiles: ['prod'] }))
-@OverrideConfiguration(VariantOptions, () => ({ envPrefix: 'PETSTORE_' }))
-class PetStoreApplication {
-    constructor(
-        private readonly config = injectConfig(PetStoreConfig),
-        private readonly appConfig = injectConfig(AppConfig),
-        private readonly petRepo = inject(PetRepository),
-        private readonly allPets = injectAll(Pet, 'alphabetical'),
-        private readonly defaultPet = inject(Pet, config.defaultPet),
-        private readonly events = inject(EventBus),
-        private readonly telemetry = inject(TelemetryService, true),
-    ) {}
-
-    @OnConstruct()
-    async init() {}
-
-    async adoptPet(userId: string, species: string): Promise<PetRecord> {
-        const pet = this.allPets.find(p => Metadata.of(Component, p)[0].options.name === species);
-        if (!pet) throw new Error(`Unknown species: ${species}`);
-
-        const record = await this.petRepo.create({
-            id: Math.random().toString(36).slice(2),
-            name: species,
-            species,
-            greeting: pet.speech(),
-        });
-
-        await this.events.emit(new PetAdoptedEvent(record.id, species));
-        return record;
+    abstract class Pet {
+        abstract speech(): string;
     }
 
-    @OnDestroy()
-    async shutdown() {
-        await this.events.emit(SystemShutdown, {timeout: 5000});
+    @Component('dog')
+    class Dog extends Pet {
+        speech() {
+            return 'woof';
+        }
     }
-}
 
-const container = new Container();
-const app = await container.resolve(PetStoreApplication);
-await app.adoptPet('user-1', 'cat');
-await container.destroy();
+    @Component('cat')
+    class Cat extends Pet {
+        speech() {
+            return 'meow';
+        }
+    }
+
+    @Component('bird')
+    class Bird extends Pet {
+        speech() {
+            return 'tweet';
+        }
+    }
+
+    @Component()
+    abstract class Repository<T> {
+        constructor(
+            private readonly conn = inject(Connection),
+            private readonly driver = inject(SelectedDriver),
+        ) {
+        }
+
+        abstract tableName(): string;
+
+        findOne(id: string): Promise<T | undefined> {
+            return Promise.resolve(undefined);
+        }
+
+        findAll(): Promise<readonly T[]> {
+            return Promise.resolve([]);
+        }
+
+        create(input: T): Promise<T> {
+            return Promise.resolve(input);
+        }
+
+        delete(id: string): Promise<void> {
+            return Promise.resolve();
+        }
+    }
+
+    interface PetRecord {
+        id: string;
+        name: string;
+        species: string;
+        greeting: string;
+    }
+
+    @Component()
+    class PetRepository extends Repository<PetRecord> {
+        tableName() {
+            return 'pets';
+        }
+    }
+
+    const RedisUrl = token<string>((config = injectConfig(RedisConfig)) => config.url);
+
+    @EventType('pet.adopted')
+    class PetAdoptedEvent {
+        constructor(public readonly petId: string, public readonly species: string) {
+        }
+    }
+
+    @Configuration('petstore')
+    class PetStoreConfig {
+        @IsString({default: 'dog') defaultPet!: string;
+        @IsInteger({default: 5}) maxPetsPerUser!: number;
+    }
+
+    @Component()
+    @Provide(Redis, async (url = inject(RedisUrl)) => {
+        const redis = new Redis();
+        await redis.connect(url);
+        return redis;
+    }, {onDestroy: 'disconnect')
+    class RedisModule {
+    }
+
+    @Component()
+    @Touch(Dog, Cat, Bird)
+    @Touch(PsqlDriver)
+    @Touch(AwsSecretManagerResolver, EnvFileLoader)
+    @Use(RedisModule)
+    @Use(RedisEventSubscriber, JobMetricsListener)
+    @OverrideConfiguration(ConfigFileOptions, () => ({configFile: './config/petstore'}))
+    @OverrideConfiguration(ProfileOptions, () => ({profiles: ['prod']}))
+    @OverrideConfiguration(VariantOptions, () => ({envPrefix: 'PETSTORE_'}))
+    class PetStoreApplication {
+        constructor(
+            private readonly config = injectConfig(PetStoreConfig),
+            private readonly appConfig = injectConfig(AppConfig),
+            private readonly petRepo = inject(PetRepository),
+            private readonly allPets = injectAll(Pet, 'alphabetical'),
+            private readonly defaultPet = inject(Pet, config.defaultPet),
+            private readonly events = inject(EventBus),
+            private readonly telemetry = inject(TelemetryService, true),
+        ) {
+        }
+
+        @OnConstruct()
+        async init() {
+        }
+
+        async adoptPet(userId: string, species: string): Promise<PetRecord> {
+            const pet = this.allPets.find(p => Metadata.of(Component, p)[0].options.name === species);
+            if (!pet) throw new Error(`Unknown species: ${species}`);
+
+            const record = await this.petRepo.create({
+                id: Math.random().toString(36).slice(2),
+                name: species,
+                species,
+                greeting: pet.speech(),
+            });
+
+            await this.events.emit(new PetAdoptedEvent(record.id, species));
+            return record;
+        }
+
+        @OnDestroy()
+        async shutdown() {
+            await this.events.emit(SystemShutdown, {timeout: 5000});
+        }
+    }
+
+    const container = new Container();
+    const app = await container.resolve(PetStoreApplication);
+    await app.adoptPet('user-1', 'cat');
+    await container.destroy();
