@@ -367,7 +367,9 @@ interface Endpoint<TReq = any, TRes = any> {
 - `'multipart'` — multipart/form-data. Use `@IsFile()` fields in the request schema.
 - `'binary'` — raw binary body. Use `@IsBody()` field in the request schema.
 
-### MultipartFile and field decorators
+### Route-specific field decorators
+
+These decorators are exclusive to route request schemas. They auto-set the field's schema — do NOT compose with other schema decorators (`@IsString`, `@IsInteger`, etc.).
 
 ```ts
 /** Represents an uploaded file in a multipart request. */
@@ -378,11 +380,66 @@ interface MultipartFile {
     readonly path: string;
 }
 
-/** Marks a field as a file upload. Use in multipart request schemas. */
-declare function IsFile(options?: ValidateOptions): SchemaFieldDecorator;
+/**
+ * Marks a field as a file upload. Use in multipart request schemas only.
+ * Auto-sets schema to MultipartFile (or MultipartFile[] if isArray=true).
+ * Do NOT wrap with @IsArray(IsFile()) — use @IsFile(true) instead.
+ * Do NOT combine with other schema decorators.
+ */
+declare function IsFile(isArray?: boolean, options?: ValidateOptions): SchemaFieldDecorator;
+// @IsFile()     → field type: MultipartFile
+// @IsFile(true) → field type: MultipartFile[]
 
-/** Marks a field as the raw binary request body. Use in binary request schemas. */
+/**
+ * Marks a field as the raw binary request body stream.
+ * Use in binary request schemas only. At most one @IsBody per schema.
+ * Auto-sets schema to ReadableStream.
+ * Do NOT combine with other schema decorators.
+ */
 declare function IsBody(options?: ValidateOptions): SchemaFieldDecorator;
+
+/**
+ * Marks a field as sourced from an HTTP header.
+ * The field is extracted from the request header, not from body/params/query.
+ * Auto-sets schema to string (headers are always strings).
+ * Do NOT combine with other schema decorators.
+ *
+ * @param name — the HTTP header name (case-insensitive). E.g., 'Authorization', 'X-Request-Id'.
+ */
+declare function InHeader(name: string, options?: ValidateOptions): SchemaFieldDecorator;
+```
+
+Usage:
+
+```ts
+// Multipart upload — single file
+@Schema()
+class AvatarUpload {
+    @IsString() description!: string;
+    @IsFile() avatar!: MultipartFile;
+}
+
+// Multipart upload — multiple files
+@Schema()
+class BulkUpload {
+    @IsString() batchId!: string;
+    @IsFile(true) files!: MultipartFile[];
+}
+
+// Binary body
+@Schema()
+class RawUploadParams {
+    @IsInteger() id!: number;      // from path/query
+    @IsBody() body!: ReadableStream;
+}
+
+// Header field
+@Schema()
+class AuthenticatedRequest {
+    @InHeader('Authorization') authorization!: string;
+    @InHeader('X-Request-Id', { optional: true }) requestId?: string;
+    @IsInteger() userId!: number;  // from path/query/body
+}
 ```
 
 ### HTTP method helpers
@@ -467,7 +524,7 @@ class AvatarUpload {
 @Schema()
 class BulkUpload {
     @IsString() batchId!: string;
-    @IsArray(IsFile()) files!: MultipartFile[];
+    @IsFile(true) files!: MultipartFile[];
 }
 
 const FileRoute = defineRoute('FileRoute', '/file', {
