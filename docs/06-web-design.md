@@ -86,6 +86,9 @@ const kRequest = RequestContext.key<IncomingMessage>('request');
 /** The raw Node.js response. */
 const kResponse = RequestContext.key<ServerResponse>('response');
 
+/** Parsed URL of the request. */
+const kURL = RequestContext.key<URL>('url');
+
 // --- Set by ROUTE stage ---
 
 /** The matched endpoint metadata from defineRoute. Null if no route matched. */
@@ -445,6 +448,7 @@ class WebApplication {
             RequestContext.run(async () => {
                 kRequest.set(req);
                 kResponse.set(res);
+                kURL.set(new URL(req.url!, `http://${req.headers.host}`));
 
                 const chain = this.buildChain(this.interceptors, 0);
                 await chain();
@@ -608,11 +612,10 @@ Parses the request URL query string and body based on the endpoint's `requestTyp
 @Priority(Interceptor.PARSE)
 class ParseInterceptor extends Interceptor {
     async intercept(next: () => unknown) {
-        const req = kRequest.getOrThrow();
         const endpoint = kEndpoint.get();
 
-        // Parse query string
-        const url = new URL(req.url!, `http://${req.headers.host}`);
+        // Query string from pre-parsed URL
+        const url = kURL.getOrThrow();
         kQuery.set(Object.fromEntries(url.searchParams));
 
         if (!endpoint || endpoint.request === 'void') {
