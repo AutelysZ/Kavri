@@ -150,10 +150,21 @@ class UserController extends createController(UserRoute) {
 ```ts
 abstract class Interceptor {
     abstract intercept(next: () => unknown): Awaitable<unknown>;
+
+    /** Priority anchors. Use with @Priority() to order interceptors. */
+    static readonly BOOTSTRAP = 1000;
+    static readonly EXCEPTION = 2000;
+    static readonly ROUTE     = 3000;
+    static readonly GUARD     = 4000;
+    static readonly DECODE    = 5000;
+    static readonly VALIDATE  = 6000;
+    static readonly EXECUTE   = 7000;
 }
 ```
 
-Interceptors are `@Component()` classes extending `Interceptor`. Discovered via `injectAll(Interceptor)`. Called in dependency order, serially. `next()` invokes the next interceptor or the handler. Use built-in `RequestContext` keys (`Request`, `Endpoint`, `Controller`, `Params`) to access request data.
+Interceptors are `@Component()` classes extending `Interceptor`. Discovered via `injectAll(Interceptor, 'priority')`. Sorted by `@Priority` value (smaller first). `next()` invokes the next interceptor or the handler. Use built-in `RequestContext` keys (`Request`, `Endpoint`, `Controller`, `Params`) to access request data.
+
+Use `@Priority(Interceptor.EXCEPTION)` to place an interceptor at the exception-handling stage. Fine-tune with `+1`/`-1` if needed, but avoid unless necessary.
 
 Interceptors can:
 - Short-circuit: `throw new HttpException(401)` or return without calling `next()`
@@ -162,6 +173,7 @@ Interceptors can:
 
 ```ts
 @Component()
+@Priority(Interceptor.BOOTSTRAP)
 class LoggingInterceptor extends Interceptor {
     async intercept(next: () => unknown) {
         const start = Date.now();
@@ -185,6 +197,7 @@ class BasicAuthConfig {
 }
 
 @Component()
+@Priority(Interceptor.GUARD)
 @Conditional((config = injectConfig(BasicAuthConfig, true)) => config !== undefined)
 class BasicAuthInterceptor extends Interceptor {
     constructor(private readonly config = injectConfig(BasicAuthConfig)) { super(); }
@@ -244,6 +257,7 @@ class StaticConfig {
 }
 
 @Component()
+@Priority(Interceptor.ROUTE - 1)
 @Conditional((config = injectConfig(StaticConfig, true)) => config !== undefined)
 class StaticFileInterceptor extends Interceptor {
     constructor(private readonly config = injectConfig(StaticConfig)) { super(); }
@@ -271,6 +285,7 @@ function Transactional(): MethodDecorator<{}> {
 }
 
 @Component()
+@Priority(Interceptor.EXECUTE - 1)
 class TransactionInterceptor extends Interceptor {
     constructor(private readonly db = inject(DrizzleDatabase)) { super(); }
 
@@ -346,6 +361,7 @@ Custom error handling via interceptor:
 
 ```ts
 @Component()
+@Priority(Interceptor.EXCEPTION)
 class ErrorInterceptor extends Interceptor {
     async intercept(next: () => unknown) {
         try {
@@ -458,6 +474,7 @@ class UserController extends createController(UserRoute) {
 // ---- Interceptor ----
 
 @Component()
+@Priority(Interceptor.GUARD)
 class AuthInterceptor extends Interceptor {
     async intercept(next: () => unknown) {
         const token = Request.getOrThrow().headers['authorization'];

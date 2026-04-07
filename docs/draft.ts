@@ -6,7 +6,7 @@ export {}
 
 type Qualifier = string | symbol;
 type Awaitable<T> = T | Promise<T>;
-export type CollectionOrder = 'topological' | 'provided' | 'alphabetical';
+export type CollectionOrder = 'topology' | 'priority' | 'alphabet';
 
 export type AnyConstructor<T> = abstract new (...args: any[]) => T;
 
@@ -75,6 +75,21 @@ interface ConditionalMetadata {
  * Resolver subclasses must NOT have @Conditional.
  */
 declare function Conditional(predicate: () => Awaitable<boolean>): ClassDecorator<ConditionalMetadata>;
+
+// ============================================================
+// Section 3b: Priority Decorator
+// ============================================================
+
+interface PriorityMetadata {
+    value: number;
+}
+
+/**
+ * Marks a component's ordering priority for injectAll(..., 'priority').
+ * Smaller value = higher priority (comes first).
+ * Components without @Priority default to Infinity (sorted last).
+ */
+declare function Priority(value: number): ClassDecorator<PriorityMetadata>;
 
 // ============================================================
 // Section 4: Lifecycle Decorators
@@ -596,7 +611,7 @@ class YamlSerializer extends Serializer {
 class DataExporter {
     constructor(
         private readonly json = inject(Serializer, 'json'),
-        private readonly allSerializers = injectAll(Serializer, 'alphabetical'),
+        private readonly allSerializers = injectAll(Serializer, 'alphabet'),
         private readonly serializerMap = injectMap(Serializer),
         private readonly serializerSet = injectSet(Serializer),
     ) {
@@ -1045,7 +1060,7 @@ class RedisEventSubscriber {
 class Application {
     constructor(
         private readonly appConfig = injectConfig(AppConfig),
-        private readonly serializers = injectAll(Serializer, 'alphabetical'),
+        private readonly serializers = injectAll(Serializer, 'alphabet'),
         private readonly jobs = inject(JobRunner),
         private readonly events = inject(EventBus),
     ) {
@@ -1212,7 +1227,7 @@ async function testUserService() {
             private readonly config = injectConfig(PetStoreConfig),
             private readonly appConfig = injectConfig(AppConfig),
             private readonly petRepo = inject(PetRepository),
-            private readonly allPets = injectAll(Pet, 'alphabetical'),
+            private readonly allPets = injectAll(Pet, 'alphabet'),
             private readonly defaultPet = inject(Pet, config.defaultPet),
             private readonly events = inject(EventBus),
             private readonly telemetry = inject(TelemetryService, true),

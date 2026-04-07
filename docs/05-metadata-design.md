@@ -184,7 +184,7 @@ Metadata.apply(OnEvent, MyClass, 'handleOrder', { event: OrderCreatedEvent });
 
 ```ts
 // Inject all @Scheduled-decorated classes
-const jobs = injectAll(Scheduled, 'alphabetical');
+const jobs = injectAll(Scheduled, 'alphabet');
 
 // Inject all @Component classes (all components)
 const components = injectAll(Component);

@@ -11,7 +11,7 @@ For the metadata system that underpins all decorators, see [05-metadata-design.m
 ```ts
 export type Qualifier = string | symbol;
 export type Awaitable<T> = T | Promise<T>;
-export type CollectionOrder = 'topological' | 'provided' | 'alphabetical';
+export type CollectionOrder = 'topology' | 'priority' | 'alphabet';
 
 export type AnyConstructor<T> = abstract new (...args: any[]) => T;
 export type NoArgsMethodKeyof<T> = T extends object

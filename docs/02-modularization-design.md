@@ -183,7 +183,7 @@ class UserService {
 class Application {
   constructor(
     private readonly users = inject(UserService),
-    private readonly drivers = injectAll(Driver, 'alphabetical'),
+    private readonly drivers = injectAll(Driver, 'alphabet'),
   ) {}
 
   async run() {
