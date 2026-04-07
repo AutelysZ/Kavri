@@ -91,7 +91,7 @@ class PlainClass {
     constructor(private readonly db = inject(Database)) {} // error
 }
 
-// inside an arrow function that is not a token/computed/provide/decorate factory
+// inside an arrow function that is not a token/provide/conditional factory
 const fn = () => inject(Database); // error
 
 // inside a setTimeout / Promise callback
@@ -119,6 +119,8 @@ The rule applies to these function names (configurable):
 - `inject`
 - `injectRef`
 - `injectAll`
+- `injectSet`
+- `injectMap`
 - `injectConfig`
 
 ### Configuration

@@ -564,9 +564,7 @@ class RouteInterceptor extends Interceptor {
     private router: Router;
 
     @OnConstruct()
-    init() {
-        // Collect all controllers, read their route definitions via Metadata
-        const controllers = injectAll(Controller);
+    init(controllers = injectAll(Controller)) {
         this.router = new Router();
         for (const ctrl of controllers) {
             const route = Metadata.of(Controller, ctrl); // → RouteDefinition
