@@ -172,6 +172,7 @@ abstract class Interceptor {
     abstract intercept(next: () => unknown): Awaitable<unknown>;
 
     /** Priority anchors. Use with @Priority() to order interceptors. */
+    static readonly RESPONSE  = 0;      // write result to HTTP response
     static readonly BOOTSTRAP = 1000;   // logging, metrics, request ID
     static readonly EXCEPTION = 2000;   // error handling, error formatting
     static readonly ROUTE     = 3000;   // route matching, static files
@@ -447,20 +448,15 @@ class WebApplication {
     toHandler(): (req: IncomingMessage, res: ServerResponse) => void {
         return (req, res) => {
             RequestContext.run(async () => {
-                // Set framework-level keys
                 Request.set(req);
                 Response.set(res);
 
-                // Build and execute the interceptor chain
+                // The entire pipeline — including response writing — is interceptors
                 const chain = this.buildChain(this.interceptors, 0);
-                const result = await chain();
-
-                // Write response if not already written
-                if (!res.headersSent) {
-                    this.writeResponse(res, result);
-                }
+                await chain();
             }).catch(err => {
-                // Last-resort error handling (interceptor chain failed entirely)
+                // Last-resort: interceptor chain itself threw (should not happen
+                // if ResponseInterceptor and ExceptionInterceptor are present)
                 if (!res.headersSent) {
                     res.writeHead(500);
                     res.end('Internal Server Error');
@@ -471,13 +467,32 @@ class WebApplication {
 
     private buildChain(interceptors: Interceptor[], index: number): () => unknown {
         if (index >= interceptors.length) {
-            // End of chain — should not reach here if HandlerInterceptor is present
             return () => { throw new HttpException(404, 'Not Found'); };
         }
         return () => interceptors[index].intercept(this.buildChain(interceptors, index + 1));
     }
+}
+```
 
-    private writeResponse(res: ServerResponse, result: unknown) {
+## 13. Built-in Interceptors
+
+All built-in interceptors are registered by the framework automatically. Users `@Touch` their own interceptors to insert into the chain.
+
+### ResponseInterceptor (RESPONSE = 0)
+
+The outermost interceptor. Awaits the result from the entire downstream chain and writes it to the HTTP response.
+
+```ts
+@Component()
+@Priority(Interceptor.RESPONSE)
+class ResponseInterceptor extends Interceptor {
+    async intercept(next: () => unknown) {
+        const res = Response.getOrThrow();
+        const result = await next();
+
+        // If response already written (e.g., static file interceptor piped directly), skip
+        if (res.headersSent) return;
+
         if (result instanceof Redirect) {
             res.writeHead(result.status ?? 302, { Location: result.url });
             res.end();
@@ -489,7 +504,7 @@ class WebApplication {
             Readable.fromWeb(result.stream).pipe(res);
         } else if (result instanceof RawResponse) {
             res.writeHead(result.status, result.headers);
-            res.end(result.body);
+            res.end(typeof result.body === 'string' ? result.body : JSON.stringify(result.body));
         } else if (result !== undefined) {
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify(result));
@@ -500,10 +515,6 @@ class WebApplication {
     }
 }
 ```
-
-## 13. Built-in Interceptors
-
-All built-in interceptors are registered by the framework automatically. Users `@Touch` their own interceptors to insert into the chain.
 
 ### ExceptionInterceptor (EXCEPTION = 2000)
 
@@ -753,34 +764,40 @@ class HandlerInterceptor extends Interceptor {
 Request
   │
   ▼
-ExceptionInterceptor (2000)    ← catches all errors from below
+ResponseInterceptor (0)         ← writes result to HTTP response
   │
   ▼
-RouteInterceptor (3000)        ← sets Endpoint, Controller, PathParams
+[LoggingInterceptor (1000)]     ← user-provided
   │
   ▼
-[CorsInterceptor (4000)]       ← user-provided
+ExceptionInterceptor (2000)     ← catches errors → RawResponse
   │
   ▼
-[AuthInterceptor (5000)]       ← user-provided
+RouteInterceptor (3000)         ← sets Endpoint, Controller, PathParams
   │
   ▼
-ParseInterceptor (6000)        ← sets Query, Body, Files
+[CorsInterceptor (4000)]        ← user-provided
   │
   ▼
-ResolveInterceptor (7000)      ← merges → sets Params
+[AuthInterceptor (5000)]        ← user-provided
   │
   ▼
-ValidateInterceptor (8000)     ← validates Params, throws 400
+ParseInterceptor (6000)         ← sets Query, Body, Files
+  │
+  ▼
+ResolveInterceptor (7000)       ← merges → sets Params
+  │
+  ▼
+ValidateInterceptor (8000)      ← validates Params, throws 400
   │
   ▼
 [TransactionInterceptor (8999)] ← user-provided
   │
   ▼
-HandlerInterceptor (9000)      ← calls controller method
+HandlerInterceptor (9000)       ← calls controller method, returns result
   │
   ▼
-Response
+(result bubbles back up through the chain to ResponseInterceptor)
 ```
 
 ## 13. Full Example
