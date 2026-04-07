@@ -331,54 +331,183 @@ interface ValidationIssue {
 
 Like protobuf: `@Schema` classes are messages, `defineRoute` defines HTTP endpoints. Both shareable between frontend and backend.
 
-### defineRoute
+### Core types
 
 ```ts
 type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | 'HEAD';
 
-interface EndpointDef<TReq = any, TRes = any> {
-    method: HttpMethod;
-    path: string;
-    request?: AnyConstructor<TReq>;
-    response?: AnyConstructor<TRes>;
+/** Request/response type markers. */
+type RequestInput<T> = AnyConstructor<T> | 'void';
+type ResponseOutput<T> = AnyConstructor<T> | 'void' | 'stream';
+
+interface EndpointOptions {
+    path?: string;
+    /** HTTP method semantics. */
+    idempotency?: 'safe' | 'idempotent' | 'volatile';
+    /** Request body encoding. Default: 'data'. */
+    requestType?: 'data' | 'multipart' | 'binary';
+    /** Required when requestType = 'multipart'. */
+    multipart?: { maxFileSize: number; maxBodySize: number };
+    /** Required when requestType = 'binary'. */
+    binary?: { maxBodySize: number };
 }
 
-declare function defineRoute<T extends Record<string, EndpointDef>>(
+interface Endpoint<TReq = any, TRes = any> {
+    method: HttpMethod;
+    path: string;
+    request: RequestInput<TReq>;
+    response: ResponseOutput<TRes>;
+    options: EndpointOptions;
+}
+```
+
+- `'void'` — no request/response body.
+- `'stream'` — response is a binary stream (only for response, not request).
+- `'data'` — structured body (JSON, form-data, etc.). Default for `requestType`.
+- `'multipart'` — multipart/form-data. Use `@IsFile()` fields in the request schema.
+- `'binary'` — raw binary body. Use `@IsBody()` field in the request schema.
+
+### MultipartFile and field decorators
+
+```ts
+/** Represents an uploaded file in a multipart request. */
+interface MultipartFile {
+    /** Original uploaded filename. */
+    readonly name: string;
+    /** Temp file path on disk. */
+    readonly path: string;
+}
+
+/** Marks a field as a file upload. Use in multipart request schemas. */
+declare function IsFile(options?: ValidateOptions): SchemaFieldDecorator;
+
+/** Marks a field as the raw binary request body. Use in binary request schemas. */
+declare function IsBody(options?: ValidateOptions): SchemaFieldDecorator;
+```
+
+### HTTP method helpers
+
+All helpers share the signature: `method(request, response, pathOrOptions?, options?)`.
+
+- `request` and `response` are **required**. Use `'void'` or `'stream'` for non-structured.
+- `path` is optional. If omitted, the method name is used as the path (e.g., `getUser` → `/getUser`).
+- `options` for advanced settings (idempotency, requestType, multipart/binary limits).
+
+```ts
+declare function get<TReq, TRes>(
+    request: RequestInput<TReq>,
+    response: ResponseOutput<TRes>,
+    pathOrOptions?: string | EndpointOptions,
+    options?: EndpointOptions,
+): Endpoint<TReq, TRes>;
+
+declare function post<TReq, TRes>(request: RequestInput<TReq>, response: ResponseOutput<TRes>, pathOrOptions?: string | EndpointOptions, options?: EndpointOptions): Endpoint<TReq, TRes>;
+declare function put<TReq, TRes>(request: RequestInput<TReq>, response: ResponseOutput<TRes>, pathOrOptions?: string | EndpointOptions, options?: EndpointOptions): Endpoint<TReq, TRes>;
+declare function del<TReq, TRes>(request: RequestInput<TReq>, response: ResponseOutput<TRes>, pathOrOptions?: string | EndpointOptions, options?: EndpointOptions): Endpoint<TReq, TRes>;
+declare function patch<TReq, TRes>(request: RequestInput<TReq>, response: ResponseOutput<TRes>, pathOrOptions?: string | EndpointOptions, options?: EndpointOptions): Endpoint<TReq, TRes>;
+declare function head<TReq, TRes>(request: RequestInput<TReq>, response: ResponseOutput<TRes>, pathOrOptions?: string | EndpointOptions, options?: EndpointOptions): Endpoint<TReq, TRes>;
+```
+
+### defineRoute
+
+```ts
+declare function defineRoute<T extends Record<string, Endpoint>>(
     name: string,
     basePath: string,
     endpoints: T,
 ): RouteDefinition<{
-    [K in keyof T]: T[K] extends EndpointDef<infer TReq, infer TRes>
-        ? T[K]['response'] extends AnyConstructor<any>
-            ? (input: TReq) => Promise<TRes>
-            : (input: TReq) => Promise<void>
+    [K in keyof T]: T[K] extends Endpoint<infer TReq, infer TRes>
+        ? TRes extends 'void'
+            ? TReq extends 'void'
+                ? () => Promise<void>
+                : (input: TReq) => Promise<void>
+            : TRes extends 'stream'
+                ? TReq extends 'void'
+                    ? () => Promise<ReadableStream>
+                    : (input: TReq) => Promise<ReadableStream>
+                : TReq extends 'void'
+                    ? () => Promise<TRes>
+                    : (input: TReq) => Promise<TRes>
         : never;
 }>;
 
 interface RouteDefinition<TMethods> {
     readonly name: string;
     readonly basePath: string;
-    readonly endpoints: Record<string, EndpointDef>;
+    readonly endpoints: Record<string, Endpoint>;
     readonly __methods: TMethods;
 }
-```
-
-### Endpoint helpers
-
-```ts
-declare function get<TReq, TRes>(path: string, request: AnyConstructor<TReq>, response: AnyConstructor<TRes>): EndpointDef<TReq, TRes>;
-declare function get<TReq>(path: string, request: AnyConstructor<TReq>): EndpointDef<TReq, void>;
-declare function post<TReq, TRes>(path: string, request: AnyConstructor<TReq>, response: AnyConstructor<TRes>): EndpointDef<TReq, TRes>;
-declare function del<TReq>(path: string, request: AnyConstructor<TReq>): EndpointDef<TReq, void>;
-declare function put<TReq, TRes>(path: string, request: AnyConstructor<TReq>, response: AnyConstructor<TRes>): EndpointDef<TReq, TRes>;
-declare function patch<TReq, TRes>(path: string, request: AnyConstructor<TReq>, response: AnyConstructor<TRes>): EndpointDef<TReq, TRes>;
-declare function head<TReq>(path: string, request: AnyConstructor<TReq>): EndpointDef<TReq, void>;
 ```
 
 ### OpenAPI generation
 
 ```ts
 declare function generateOpenAPI(route: RouteDefinition<any>, options: { title: string; version: string }): object;
+```
+
+### Examples
+
+```ts
+// --- Normal JSON endpoints ---
+
+const UserRoute = defineRoute('UserRoute', '/user', {
+    getUser: get(GetUserParams, UserResponse, '/:id'),
+    createUser: post(CreateUserBody, UserResponse),     // path = /createUser
+    deleteUser: del(GetUserParams, 'void', '/:id'),
+});
+
+// --- File upload (multipart) ---
+
+@Schema()
+class AvatarUpload {
+    @IsString() description!: string;
+    @IsFile() avatar!: MultipartFile;
+}
+
+@Schema()
+class BulkUpload {
+    @IsString() batchId!: string;
+    @IsArray(IsFile()) files!: MultipartFile[];
+}
+
+const FileRoute = defineRoute('FileRoute', '/file', {
+    uploadAvatar: post(AvatarUpload, AvatarResponse, '/avatar', {
+        requestType: 'multipart',
+        multipart: { maxFileSize: 5_000_000, maxBodySize: 10_000_000 },
+    }),
+    bulkUpload: post(BulkUpload, BulkResponse, '/bulk', {
+        requestType: 'multipart',
+        multipart: { maxFileSize: 10_000_000, maxBodySize: 50_000_000 },
+    }),
+});
+
+// --- Binary upload (raw body) ---
+
+@Schema()
+class RawUploadParams {
+    @IsInteger() id!: number;
+    @IsBody() body!: ReadableStream;
+}
+
+const RawRoute = defineRoute('RawRoute', '/raw', {
+    putFile: put(RawUploadParams, 'void', '/:id', {
+        requestType: 'binary',
+        binary: { maxBodySize: 100_000_000 },
+    }),
+});
+
+// --- File download (stream response) ---
+
+const DownloadRoute = defineRoute('DownloadRoute', '/download', {
+    downloadFile: get(DownloadParams, 'stream', '/:id'),
+    healthCheck: get('void', 'void', '/health'),
+});
+
+// Client types:
+// client.uploadAvatar({ description: '...', avatar: file })  → Promise<AvatarResponse>
+// client.putFile({ id: 1, body: stream })                     → Promise<void>
+// client.downloadFile({ id: 1 })                              → Promise<ReadableStream>
+// client.healthCheck()                                        → Promise<void>
 ```
 
 ## 8. Required vs Optional vs Nullable
@@ -459,8 +588,8 @@ const jsonSchema = toJsonSchema(User);
 
 // Define route
 const UserRoute = defineRoute('UserRoute', '/user', {
-    getUser: get('/:id', GetUserParams, User),
-    createUser: post('/', CreateUserBody, User),
-    deleteUser: del('/:id', GetUserParams),
+    getUser: get(GetUserParams, User, '/:id'),
+    createUser: post(CreateUserBody, User),
+    deleteUser: del(GetUserParams, 'void', '/:id'),
 });
 ```

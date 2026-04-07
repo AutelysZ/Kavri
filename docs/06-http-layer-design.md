@@ -382,9 +382,9 @@ class UserResponse {
 }
 
 const UserRoute = defineRoute('UserRoute', '/user', {
-    getUser: get('/:id', GetUserParams, UserResponse),
-    createUser: post('/', CreateUserBody, UserResponse),
-    deleteUser: del('/:id', GetUserParams),
+    getUser: get(GetUserParams, UserResponse, '/:id'),
+    createUser: post(CreateUserBody, UserResponse),
+    deleteUser: del(GetUserParams, 'void', '/:id'),
 });
 
 // ---- Controller ----
