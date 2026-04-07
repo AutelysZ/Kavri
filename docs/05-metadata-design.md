@@ -53,10 +53,17 @@ declare const Metadata: {
 
   // Get all registered [injectable, key, metadata] triples for a method decorator
   entries<T>(factory: MethodDecoratorFactory<T>): readonly [Injectable<any>, Qualifier, T][];
+
+  // Lookup metadata on a class and its entire prototype chain (walks up inheritance)
+  lookup<T>(factory: ClassDecoratorFactory<T>, clazz: AnyConstructor<any>): readonly T[];
+  lookup<T>(factory: MethodDecoratorFactory<T>, clazz: AnyConstructor<any>, key: Qualifier): readonly T[];
+  lookup<T>(factory: FieldDecoratorFactory<T>, clazz: AnyConstructor<any>, key: Qualifier): readonly T[];
 };
 ```
 
-`Metadata.of()` returns `readonly T[]` because a decorator can be applied multiple times (e.g., multiple `@Provide` on one class).
+`Metadata.of()` returns metadata on the exact target only. Returns `readonly T[]` because a decorator can be applied multiple times.
+
+`Metadata.lookup()` walks the prototype chain — returns metadata from the class and all its ancestors, merged. Useful when a base class has decorators that subclasses should inherit.
 
 `Metadata.entries()` returns all registered pairs/triples for a decorator factory. This is how subsystems discover all classes decorated with a given decorator without a central registry.
 
