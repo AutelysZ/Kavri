@@ -906,16 +906,12 @@ class JobRunner {
 
 // config/config.yaml (base config, loaded automatically):
 // ---
-// kavri:
-//   config:
-//     import:
-//       - "aws-secretmanager:prod/db-secrets?prefix=database"
 // app:
 //   name: pet-store
 //   env: "${APP_ENV:-dev}"
 // database:
 //   host: "${DATABASE_HOST:-localhost}"
-//   password: "${database.password}"   # injected from AWS via import
+//   password: "${database.password}"   # resolved from AWS resolver variables
 //   url: "postgres://${database.host}:${database.port}"
 //
 // config/config-staging.yaml (profile override):
