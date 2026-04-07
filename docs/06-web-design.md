@@ -148,22 +148,12 @@ class UserController extends createController(UserRoute) {
 ## 5. Interceptors
 
 ```ts
-interface InterceptorContext {
-    readonly controller: AnyConstructor<any>;
-    readonly method: string | symbol;
-    readonly route: RouteDefinition<any>;
-    readonly endpointName: string;
-}
-
 abstract class Interceptor {
-    abstract intercept(
-        context: InterceptorContext,
-        next: () => Promise<unknown>,
-    ): Promise<unknown>;
+    abstract intercept(next: () => unknown): Awaitable<unknown>;
 }
 ```
 
-Interceptors are `@Component()` classes extending `Interceptor`. Discovered via `injectAll(Interceptor)`. Called in dependency order, serially. `next()` invokes the next interceptor or the handler.
+Interceptors are `@Component()` classes extending `Interceptor`. Discovered via `injectAll(Interceptor)`. Called in dependency order, serially. `next()` invokes the next interceptor or the handler. Use built-in `RequestContext` keys (`Request`, `Endpoint`, `Controller`, `Params`) to access request data.
 
 Interceptors can:
 - Short-circuit: `throw new HttpException(401)` or return without calling `next()`
@@ -173,12 +163,12 @@ Interceptors can:
 ```ts
 @Component()
 class LoggingInterceptor extends Interceptor {
-    async intercept(ctx: InterceptorContext, next: () => Promise<unknown>) {
+    async intercept(next: () => unknown) {
         const start = Date.now();
         try {
             return await next();
         } finally {
-            console.log(`${ctx.endpointName} ${Request.getOrThrow().url} ${Date.now() - start}ms`);
+            console.log(`${Request.getOrThrow().method} ${Request.getOrThrow().url} ${Date.now() - start}ms`);
         }
     }
 }
@@ -199,7 +189,7 @@ class BasicAuthConfig {
 class BasicAuthInterceptor extends Interceptor {
     constructor(private readonly config = injectConfig(BasicAuthConfig)) { super(); }
 
-    async intercept(ctx: InterceptorContext, next: () => Promise<unknown>) {
+    async intercept(next: () => unknown) {
         const auth = Request.getOrThrow().headers['authorization'];
         // parse Basic auth, compare, throw HttpException(401) on failure
         return next();
@@ -258,7 +248,7 @@ class StaticConfig {
 class StaticFileInterceptor extends Interceptor {
     constructor(private readonly config = injectConfig(StaticConfig)) { super(); }
 
-    async intercept(ctx: InterceptorContext, next: () => Promise<unknown>) {
+    async intercept(next: () => unknown) {
         const url = Request.getOrThrow().url ?? '';
         if (url.startsWith(this.config.prefix)) {
             const filePath = resolve(this.config.root, url.slice(this.config.prefix.length));
@@ -284,8 +274,10 @@ function Transactional(): MethodDecorator<{}> {
 class TransactionInterceptor extends Interceptor {
     constructor(private readonly db = inject(DrizzleDatabase)) { super(); }
 
-    async intercept(ctx: InterceptorContext, next: () => Promise<unknown>) {
-        const isTx = Metadata.of(Transactional, ctx.controller, ctx.method).length > 0;
+    async intercept(next: () => unknown) {
+        const ctrl = Controller.get();
+        const endpoint = Endpoint.get();
+        const isTx = ctrl && endpoint && Metadata.of(Transactional, ctrl.constructor, endpoint.path).length > 0;
         if (isTx) {
             return this.db.transaction((tx) => txStorage.run(tx, next));
         }
@@ -355,7 +347,7 @@ Custom error handling via interceptor:
 ```ts
 @Component()
 class ErrorInterceptor extends Interceptor {
-    async intercept(ctx: InterceptorContext, next: () => Promise<unknown>) {
+    async intercept(next: () => unknown) {
         try {
             return await next();
         } catch (err) {
@@ -467,7 +459,7 @@ class UserController extends createController(UserRoute) {
 
 @Component()
 class AuthInterceptor extends Interceptor {
-    async intercept(ctx: InterceptorContext, next: () => Promise<unknown>) {
+    async intercept(next: () => unknown) {
         const token = Request.getOrThrow().headers['authorization'];
         if (!token) throw new HttpException(401);
         CurrentUser.set(verifyToken(token));
