@@ -19,7 +19,7 @@ Kavri uses default parameters as the injection mechanism. No reflection, no para
 ```ts
 import { Container, Component, Conditional, Provide, Touch, Use, inject, token } from '@kavri/core';
 import { Configuration, injectConfig, OverrideConfiguration, ConfigFileOptions } from '@kavri/config';
-import { IsString, IsBoolean } from '@kavri/schema';
+import { IsString, IsInteger, IsBoolean } from '@kavri/schema';
 
 // config
 @Configuration('database')
@@ -85,11 +85,14 @@ await container.destroy();
 
 ## Documentation
 
-- [IoC Core](./docs/01-ioc-core-design.md) — components, providers, injection, scopes
+- [IoC Core](./docs/01-ioc-core-design.md) — components, providers, injection, container
 - [Modules](./docs/02-modularization-design.md) — @Touch, @Use, @Provide, @OverrideConfiguration
-- [Configuration](./docs/03-configuration-design.md) — @Configuration classes, multi-source config
+- [Configuration](./docs/03-configuration-design.md) — @Configuration, injectConfig, multi-source config
 - [Events](./docs/04-event-design.md) — @EventType, @OnEvent, EventBus
-- [Metadata](./docs/05-metadata-design.md) — Metadata.of, createClassDecorator
+- [Metadata](./docs/05-metadata-design.md) — Metadata.of, createClassDecorator, createFieldDecorator
+- [HTTP Layer](./docs/06-http-layer-design.md) — ControllerImpl, interceptors, WebApplication
+- [ESLint Plugin](./docs/08-eslint-plugin-design.md) — inject-point enforcement, @Conditional rules
+- [Schema](./docs/09-schema-design.md) — @Schema, field decorators, defineRoute, parse, toJsonSchema
 - [API Reference](./docs/draft.ts) — complete type declarations with examples
 
 ## Status
