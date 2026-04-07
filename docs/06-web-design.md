@@ -425,8 +425,7 @@ class WebApplication {
     /** Create and resolve the application. */
     static async create(entrypoint: AnyConstructor<any>): Promise<WebApplication> {
         const container = new Container();
-        const [, app] = await container.resolve([entrypoint, WebApplication]);
-        return app;
+        return container.resolve(WebApplication, [entrypoint]);
     }
 
     /** Start HTTP server. */

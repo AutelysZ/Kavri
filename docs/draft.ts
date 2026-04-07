@@ -256,8 +256,8 @@ declare function Use(...injectables: Injectable<any>[]): ClassDecorator<readonly
  *     6. Mark instantiated.
  */
 declare class Container {
-    resolve<T>(injectable: Injectable<T>): Promise<T>;
-    resolve<T extends readonly Injectable<any>[]>(injectables: [...T]): Promise<{
+    resolve<T>(injectable: Injectable<T>, dependencies?: Injectable<any>[]): Promise<T>;
+    resolve<T extends readonly Injectable<any>[]>(injectables: [...T], dependencies?: Injectable<any>[]): Promise<{
         [K in keyof T]: T[K] extends Injectable<infer U> ? U : never;
     }>;
 
