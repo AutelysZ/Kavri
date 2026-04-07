@@ -7,8 +7,8 @@ All decorators in Kavri are built on a unified metadata system. Every decorator 
 ## 2. Core types
 
 ```ts
-// Decorators carry typed metadata via a static __metadata__ field
-type DecoratorStatic<T> = { readonly __metadata__: T | undefined };
+// Decorators carry typed metadata via a static metadata field
+type DecoratorStatic<T> = { readonly metadata: T | undefined };
 
 type ClassDecorator<T> =
   globalThis.ClassDecorator
@@ -20,8 +20,14 @@ type MethodDecorator<T> =
   & ((target: Function, context: ClassMethodDecoratorContext) => void)
   & DecoratorStatic<T>;
 
+type FieldDecorator<T> =
+  globalThis.MethodDecorator
+  & ((value: any, context: ClassFieldDecoratorContext) => void)
+  & DecoratorStatic<T>;
+
 type ClassDecoratorFactory<T> = (...args: any[]) => ClassDecorator<T>;
 type MethodDecoratorFactory<T> = (...args: any[]) => MethodDecorator<T>;
+type FieldDecoratorFactory<T> = (...args: any[]) => FieldDecorator<T>;
 ```
 
 Every decorator is both a decorator and a metadata carrier. The factory function that creates it serves as the metadata key.
@@ -118,11 +124,23 @@ Metadata.of(Component, HourlyCleanup);  // [{ ... }]  ← also a Component
 declare function createMethodDecorator<T>(
   factory: MethodDecoratorFactory<T>,
   metadata: T,
-  extra?: ClassDecorator<any>[],
+  extra?: MethodDecorator<any>[],
 ): MethodDecorator<T>;
 ```
 
 Same pattern for method-level metadata.
+
+### Field decorators — `createFieldDecorator()`
+
+```ts
+declare function createFieldDecorator<T>(
+  factory: FieldDecoratorFactory<T>,
+  metadata: T,
+  extra?: FieldDecorator<any>[],
+): FieldDecorator<T>;
+```
+
+Used by `@kavri/schema` for schema field decorators (`@IsString`, `@IsInteger`, etc.). See [09-schema-design.md](./09-schema-design.md).
 
 ## 5. Built-in decorators as metadata
 
