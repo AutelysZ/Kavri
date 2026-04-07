@@ -42,26 +42,26 @@ Normal handler return → JSON serialized with 200. Return `Redirect`, `FileResp
 A typed key-value store for per-request state. Static API backed by `AsyncLocalStorage`. Accessible anywhere during a request — controllers, interceptors, services.
 
 ```ts
-/** Typed key for RequestContext. */
+/** Typed context key. Public API lives on Key, not on RequestContext. */
 declare class Key<T> {
     readonly name?: string;
+
+    /** Get value from current request context. Returns undefined if not set. */
+    get(): T | undefined;
+
+    /** Get value or throw if not set. */
+    getOrThrow(): T;
+
+    /** Get value, or insert one computed by fn if not present. */
+    getOrInsertComputed(fn: () => T): T;
+
+    /** Set value in current request context. */
+    set(value: T): void;
 }
 
 declare const RequestContext: {
     /** Create a typed key. */
     key<T>(name?: string): Key<T>;
-
-    /** Get a value by typed Key or class constructor. Returns undefined if not set. */
-    get<T>(key: Key<T> | AnyConstructor<T>): T | undefined;
-
-    /** Get a value, or insert one computed by fn if not present. */
-    getOrInsertComputed<T>(key: Key<T> | AnyConstructor<T>, fn: () => T): T;
-
-    /** Get a value or throw if not set. */
-    getOrThrow<T>(key: Key<T> | AnyConstructor<T>): T;
-
-    /** Set a value. */
-    set<T>(key: Key<T> | AnyConstructor<T>, value: T): void;
 
     /** Check if currently inside a request context. */
     isActive(): boolean;
@@ -76,29 +76,39 @@ declare const RequestContext: {
 The framework sets these during request processing:
 
 ```ts
-const HttpMethod = RequestContext.key<string>('httpMethod');
-const HttpUrl = RequestContext.key<string>('httpUrl');
-const HttpHeaders = RequestContext.key<ReadonlyMap<string, string>>('httpHeaders');
-const HttpParams = RequestContext.key<Readonly<Record<string, string>>>('httpParams');
-const HttpQuery = RequestContext.key<Readonly<Record<string, string>>>('httpQuery');
-const HttpBody = RequestContext.key<unknown>('httpBody');
+import { IncomingMessage, ServerResponse } from 'node:http';
+
+/** The matched endpoint metadata from defineRoute. Null if no route matched. */
+const Endpoint = RequestContext.key<Endpoint<any, any> | null>('endpoint');
+
+/** The matched controller instance. Null if no route matched. */
+const Controller = RequestContext.key<object | null>('controller');
+
+/** The raw Node.js request. */
+const Request = RequestContext.key<IncomingMessage>('request');
+
+/** The raw Node.js response. */
+const Response = RequestContext.key<ServerResponse>('response');
+
+/** Decoded request params (path params + query + parsed body merged). */
+const Params = RequestContext.key<unknown>('params');
 ```
 
 ### Usage
 
 ```ts
 // Read built-in request data
-const method = RequestContext.getOrThrow(HttpMethod);
-const headers = RequestContext.getOrThrow(HttpHeaders);
+const req = Request.getOrThrow();
+const params = Params.get();
 
 // Custom keys for interceptor → handler communication
 const CurrentUser = RequestContext.key<User>('currentUser');
 
 // In interceptor:
-RequestContext.set(CurrentUser, authenticatedUser);
+CurrentUser.set(authenticatedUser);
 
 // In handler:
-const user = RequestContext.getOrThrow(CurrentUser);
+const user = CurrentUser.getOrThrow();
 ```
 
 ## 4. Controllers
@@ -120,7 +130,7 @@ class UserController extends createController(UserRoute) {
     }
 
     override async createUser(input: CreateUserBody): Promise<UserResponse> {
-        const userId = RequestContext.getOrThrow(CurrentUser).id;
+        const userId = CurrentUser.getOrThrow().id;
         return this.repo.create({ ...input, createdBy: userId });
     }
 
@@ -133,7 +143,7 @@ class UserController extends createController(UserRoute) {
 - `createController(route)` returns an abstract class with abstract methods matching the route definition. Types are inferred from the route's request/response schemas.
 - `@Controller()` composes `@Component()` and registers all routing metadata from the route definition.
 - Handlers receive parsed input. Return typed response or a special response object (`Redirect`, `FileResponse`, etc.).
-- Access per-request data via `RequestContext.get(key)` / `RequestContext.getOrThrow(key)`.
+- Access per-request data via `Key.get()` / `Key.getOrThrow()`.
 
 ## 5. Interceptors
 
@@ -157,7 +167,7 @@ Interceptors are `@Component()` classes extending `Interceptor`. Discovered via 
 
 Interceptors can:
 - Short-circuit: `throw new HttpException(401)` or return without calling `next()`
-- Modify request state: `RequestContext.set(CurrentUser, authUser)`
+- Modify request state: `CurrentUser.set(authUser)`
 - Transform response: `const res = await next(); return transform(res);`
 
 ```ts
@@ -168,7 +178,7 @@ class LoggingInterceptor extends Interceptor {
         try {
             return await next();
         } finally {
-            console.log(`${ctx.endpointName} ${RequestContext.getOrThrow(HttpUrl)} ${Date.now() - start}ms`);
+            console.log(`${ctx.endpointName} ${Request.getOrThrow().url} ${Date.now() - start}ms`);
         }
     }
 }
@@ -190,7 +200,7 @@ class BasicAuthInterceptor extends Interceptor {
     constructor(private readonly config = injectConfig(BasicAuthConfig)) { super(); }
 
     async intercept(ctx: InterceptorContext, next: () => Promise<unknown>) {
-        const auth = RequestContext.getOrThrow(HttpHeaders).get('authorization');
+        const auth = Request.getOrThrow().headers['authorization'];
         // parse Basic auth, compare, throw HttpException(401) on failure
         return next();
     }
@@ -249,7 +259,7 @@ class StaticFileInterceptor extends Interceptor {
     constructor(private readonly config = injectConfig(StaticConfig)) { super(); }
 
     async intercept(ctx: InterceptorContext, next: () => Promise<unknown>) {
-        const url = RequestContext.getOrThrow(HttpUrl);
+        const url = Request.getOrThrow().url ?? '';
         if (url.startsWith(this.config.prefix)) {
             const filePath = resolve(this.config.root, url.slice(this.config.prefix.length));
             return new FileResponse(filePath);
@@ -458,10 +468,9 @@ class UserController extends createController(UserRoute) {
 @Component()
 class AuthInterceptor extends Interceptor {
     async intercept(ctx: InterceptorContext, next: () => Promise<unknown>) {
-        const headers = RequestContext.getOrThrow(HttpHeaders);
-        const token = headers.get('authorization');
+        const token = Request.getOrThrow().headers['authorization'];
         if (!token) throw new HttpException(401);
-        RequestContext.set(CurrentUser, verifyToken(token));
+        CurrentUser.set(verifyToken(token));
         return next();
     }
 }
