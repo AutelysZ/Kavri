@@ -22,6 +22,7 @@ Kavri is a TypeScript IoC framework focused on explicit dependency wiring with o
 @kavri/core    → Component, Container, inject, Token, etc.
 @kavri/event   → EventType, EventBus, OnEvent, defineEvent
 @kavri/config  → @Configuration, injectConfig, OverrideConfiguration, Loader, Resolver, ConfigFileOptions, ProfileOptions, VariantOptions
+@kavri/log     → Logger, injectLogger, structured logging (Pino)
 @kavri/web     → Controller, createController, Interceptor, WebApplication, RequestContext, Key
 @kavri/client  → createClient, injectClient, typed HTTP clients from service definitions
 @kavri/eslint-plugin → ESLint rules for inject-point enforcement
@@ -40,7 +41,8 @@ Kavri is a TypeScript IoC framework focused on explicit dependency wiring with o
 | [`05-metadata-design.md`](./05-metadata-design.md) | Metadata.of, createClassDecorator, createMethodDecorator |
 | [`06-web-design.md`](./06-web-design.md) | Controller, createController, interceptors, WebApplication |
 | [`08-eslint-plugin-design.md`](./08-eslint-plugin-design.md) | ESLint rules for inject-point enforcement |
-| [`09-schema-design.md`](./09-schema-design.md) | @Schema, field decorators, parse, validate, toJsonSchema |
+| [`09-schema-design.md`](./09-schema-design.md) | @Schema, field decorators, defineRoute, parse, toJsonSchema |
+| [`10-logging-design.md`](./10-logging-design.md) | Logger, injectLogger, Pino, request-aware logging |
 | [`draft.ts`](./draft.ts) | Complete API declarations with usage examples |
 
 ## Current focus

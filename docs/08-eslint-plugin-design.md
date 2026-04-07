@@ -122,6 +122,7 @@ The rule applies to these function names (configurable):
 - `injectSet`
 - `injectMap`
 - `injectConfig`
+- `injectLogger`
 
 ### Configuration
 

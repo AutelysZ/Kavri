@@ -81,45 +81,50 @@ import { IncomingMessage, ServerResponse } from 'node:http';
 // --- Set by framework at request start ---
 
 /** The raw Node.js request. */
-const Request = RequestContext.key<IncomingMessage>('request');
+const kRequest = RequestContext.key<IncomingMessage>('request');
 
 /** The raw Node.js response. */
-const Response = RequestContext.key<ServerResponse>('response');
+const kResponse = RequestContext.key<ServerResponse>('response');
 
 // --- Set by ROUTE stage ---
 
 /** The matched endpoint metadata from defineRoute. Null if no route matched. */
-const Endpoint = RequestContext.key<Endpoint<any, any> | null>('endpoint');
+const kEndpoint = RequestContext.key<Endpoint<any, any> | null>('endpoint');
 
 /** The matched controller instance. Null if no route matched. */
-const Controller = RequestContext.key<object | null>('controller');
+const kController = RequestContext.key<object | null>('controller');
 
 // --- Set by PARSE stage (raw pieces) ---
 
 /** Path parameters extracted by the router. */
-const PathParams = RequestContext.key<Record<string, string>>('pathParams');
+const kPathParams = RequestContext.key<Record<string, string>>('pathParams');
 
 /** Query string parameters. */
-const Query = RequestContext.key<Record<string, string>>('query');
+const kQuery = RequestContext.key<Record<string, string>>('query');
 
 /** Parsed request body (JSON object, string, etc.). */
-const Body = RequestContext.key<unknown>('body');
+const kBody = RequestContext.key<unknown>('body');
 
 /** Uploaded files (multipart requests only). */
-const Files = RequestContext.key<Record<string, MultipartFile | MultipartFile[]>>('files');
+const kFiles = RequestContext.key<Record<string, MultipartFile | MultipartFile[]>>('files');
 
 // --- Set by RESOLVE stage (merged) ---
 
 /** Final merged params: path params + query + body + files, shaped to request schema. */
-const Params = RequestContext.key<unknown>('params');
+const kParams = RequestContext.key<unknown>('params');
+
+// --- For logging (from @kavri/log integration) ---
+
+/** Request-scoped logging context. Interceptors append data here. */
+const kLogging = RequestContext.key<Record<string, unknown>>('logging');
 ```
 
 ### Usage
 
 ```ts
 // Read built-in request data
-const req = Request.getOrThrow();
-const params = Params.get();
+const req = kRequest.getOrThrow();
+const params = kParams.get();
 
 // Custom keys for interceptor → handler communication
 const CurrentUser = RequestContext.key<User>('currentUser');
@@ -204,7 +209,7 @@ class LoggingInterceptor extends Interceptor {
         try {
             return await next();
         } finally {
-            console.log(`${Request.getOrThrow().method} ${Request.getOrThrow().url} ${Date.now() - start}ms`);
+            console.log(`${kRequest.getOrThrow().method} ${kRequest.getOrThrow().url} ${Date.now() - start}ms`);
         }
     }
 }
@@ -213,7 +218,7 @@ class LoggingInterceptor extends Interceptor {
 ### Built-in: BasicAuthInterceptor
 
 ```ts
-@Configuration('auth.basic')
+@Configuration('kavri.web.auth.basic')
 class BasicAuthConfig {
     @IsString() username!: string;
     @IsString() password!: string;
@@ -227,7 +232,7 @@ class BasicAuthInterceptor extends Interceptor {
     constructor(private readonly config = injectConfig(BasicAuthConfig)) { super(); }
 
     async intercept(next: () => unknown) {
-        const auth = Request.getOrThrow().headers['authorization'];
+        const auth = kRequest.getOrThrow().headers['authorization'];
         // parse Basic auth, compare, throw HttpException(401) on failure
         return next();
     }
@@ -274,7 +279,7 @@ See [09-schema-design.md](./09-schema-design.md#openapi-generation). `generateOp
 ## 8. Static Assets
 
 ```ts
-@Configuration('static')
+@Configuration('kavri.web.static')
 class StaticConfig {
     @IsString({ default: './public' }) root!: string;
     @IsString({ default: '/static' }) prefix!: string;
@@ -287,7 +292,7 @@ class StaticFileInterceptor extends Interceptor {
     constructor(private readonly config = injectConfig(StaticConfig)) { super(); }
 
     async intercept(next: () => unknown) {
-        const url = Request.getOrThrow().url ?? '';
+        const url = kRequest.getOrThrow().url ?? '';
         if (url.startsWith(this.config.prefix)) {
             const filePath = resolve(this.config.root, url.slice(this.config.prefix.length));
             return new FileResponse(filePath);
@@ -314,8 +319,8 @@ class TransactionInterceptor extends Interceptor {
     constructor(private readonly db = inject(DrizzleDatabase)) { super(); }
 
     async intercept(next: () => unknown) {
-        const ctrl = Controller.get();
-        const endpoint = Endpoint.get();
+        const ctrl = kController.get();
+        const endpoint = kEndpoint.get();
         const isTx = ctrl && endpoint && Metadata.of(Transactional, ctrl.constructor, endpoint.path).length > 0;
         if (isTx) {
             return this.db.transaction((tx) => txStorage.run(tx, next));
@@ -351,8 +356,8 @@ class OrderController extends createController(OrderRoute) {
 ## 10. Configuration
 
 ```ts
-@Configuration('http')
-class HttpConfig {
+@Configuration('kavri.web')
+class WebConfig {
     @IsString({ default: '0.0.0.0' }) host!: string;
     @IsInteger({ default: 3000 }) port!: number;
 }
@@ -408,7 +413,7 @@ class WebApplication {
     constructor(
         // Inject all interceptors sorted by priority — all must have @Priority
         private readonly interceptors = injectAll(Interceptor, 'priority'),
-        private readonly config = injectConfig(HttpConfig),
+        private readonly config = injectConfig(WebConfig),
     ) {
         // Validate: every Interceptor subclass MUST have @Priority
         for (const interceptor of this.interceptors) {
@@ -438,8 +443,8 @@ class WebApplication {
     toHandler(): (req: IncomingMessage, res: ServerResponse) => void {
         return (req, res) => {
             RequestContext.run(async () => {
-                Request.set(req);
-                Response.set(res);
+                kRequest.set(req);
+                kResponse.set(res);
 
                 const chain = this.buildChain(this.interceptors, 0);
                 await chain();
@@ -491,7 +496,7 @@ The outermost interceptor. Awaits the result from the entire downstream chain an
 @Priority(Interceptor.RESPONSE)
 class ResponseInterceptor extends Interceptor {
     async intercept(next: () => unknown) {
-        const res = Response.getOrThrow();
+        const res = kResponse.getOrThrow();
         const result = await next();
 
         // If response already written (e.g., static file interceptor piped directly), skip
@@ -576,17 +581,17 @@ class RouteInterceptor extends Interceptor {
     }
 
     async intercept(next: () => unknown) {
-        const req = Request.getOrThrow();
+        const req = kRequest.getOrThrow();
         const match = this.router.match(req.method!, req.url!);
 
         if (match) {
-            Endpoint.set(match.endpoint);
-            Controller.set(match.ctrl);
-            PathParams.set(match.params);
+            kEndpoint.set(match.endpoint);
+            kController.set(match.ctrl);
+            kPathParams.set(match.params);
         } else {
-            Endpoint.set(null);
-            Controller.set(null);
-            PathParams.set({});
+            kEndpoint.set(null);
+            kController.set(null);
+            kPathParams.set({});
         }
 
         return next();
@@ -603,16 +608,16 @@ Parses the request URL query string and body based on the endpoint's `requestTyp
 @Priority(Interceptor.PARSE)
 class ParseInterceptor extends Interceptor {
     async intercept(next: () => unknown) {
-        const req = Request.getOrThrow();
-        const endpoint = Endpoint.get();
+        const req = kRequest.getOrThrow();
+        const endpoint = kEndpoint.get();
 
         // Parse query string
         const url = new URL(req.url!, `http://${req.headers.host}`);
-        Query.set(Object.fromEntries(url.searchParams));
+        kQuery.set(Object.fromEntries(url.searchParams));
 
         if (!endpoint || endpoint.request === 'void') {
-            Body.set(undefined);
-            Files.set({});
+            kBody.set(undefined);
+            kFiles.set({});
             return next();
         }
 
@@ -621,15 +626,15 @@ class ParseInterceptor extends Interceptor {
         if (requestType === 'data') {
             // Read body, parse as JSON
             const raw = await readBody(req);
-            Body.set(JSON.parse(raw));
+            kBody.set(JSON.parse(raw));
         } else if (requestType === 'multipart') {
             // Parse multipart/form-data → fields + files
             const { fields, files } = await parseMultipart(req, endpoint.options.multipart!);
-            Body.set(fields);
-            Files.set(files);
+            kBody.set(fields);
+            kFiles.set(files);
         } else if (requestType === 'binary') {
             // Raw stream — body is the request stream itself
-            Body.set(req);  // IncomingMessage is a ReadableStream
+            kBody.set(req);  // IncomingMessage is a ReadableStream
         }
 
         return next();
@@ -646,16 +651,16 @@ Merges raw pieces (PathParams, Query, Body, Files) into a single object matching
 @Priority(Interceptor.RESOLVE)
 class ResolveInterceptor extends Interceptor {
     async intercept(next: () => unknown) {
-        const endpoint = Endpoint.get();
+        const endpoint = kEndpoint.get();
         if (!endpoint || endpoint.request === 'void') {
-            Params.set(undefined);
+            kParams.set(undefined);
             return next();
         }
 
-        const pathParams = PathParams.get() ?? {};
-        const query = Query.get() ?? {};
-        const body = Body.get();
-        const files = Files.get() ?? {};
+        const pathParams = kPathParams.get() ?? {};
+        const query = kQuery.get() ?? {};
+        const body = kBody.get();
+        const files = kFiles.get() ?? {};
 
         // Merge: path params + query + body fields + files
         // Path params and query are always merged.
@@ -675,7 +680,7 @@ class ResolveInterceptor extends Interceptor {
             merged[fieldName] = fileOrFiles;
         }
 
-        Params.set(merged);
+        kParams.set(merged);
         return next();
     }
 }
@@ -690,12 +695,12 @@ Validates `Params` against the endpoint's request schema. Throws `HttpException(
 @Priority(Interceptor.VALIDATE)
 class ValidateInterceptor extends Interceptor {
     async intercept(next: () => unknown) {
-        const endpoint = Endpoint.get();
+        const endpoint = kEndpoint.get();
         if (!endpoint || endpoint.request === 'void') {
             return next();
         }
 
-        const params = Params.get();
+        const params = kParams.get();
         const requestClass = endpoint.request as AnyConstructor<any>;
 
         // Validate and parse using @kavri/schema
@@ -709,7 +714,7 @@ class ValidateInterceptor extends Interceptor {
 
         // Parse into typed instance (applies custom parsers like @IsDate)
         const parsed = parse(requestClass, params);
-        Params.set(parsed);
+        kParams.set(parsed);
 
         return next();
     }
@@ -725,8 +730,8 @@ Calls the matched controller method with the validated params. Validates the res
 @Priority(Interceptor.HANDLER)
 class HandlerInterceptor extends Interceptor {
     async intercept(next: () => unknown) {
-        const endpoint = Endpoint.get();
-        const ctrl = Controller.get();
+        const endpoint = kEndpoint.get();
+        const ctrl = kController.get();
 
         if (!endpoint || !ctrl) {
             throw new HttpException(404, 'Not Found');
@@ -741,7 +746,7 @@ class HandlerInterceptor extends Interceptor {
         }
 
         // Call handler with parsed params (or no args if void)
-        const params = Params.get();
+        const params = kParams.get();
         const result = endpoint.request === 'void'
             ? await handler.call(ctrl)
             : await handler.call(ctrl, params);
@@ -867,7 +872,7 @@ class UserController extends createController(UserRoute) {
 @Priority(Interceptor.GUARD)
 class AuthInterceptor extends Interceptor {
     async intercept(next: () => unknown) {
-        const token = Request.getOrThrow().headers['authorization'];
+        const token = kRequest.getOrThrow().headers['authorization'];
         if (!token) throw new HttpException(401);
         CurrentUser.set(verifyToken(token));
         return next();
