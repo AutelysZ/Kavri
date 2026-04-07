@@ -44,10 +44,13 @@ A typed key-value store for per-request state. Static API backed by `AsyncLocalS
 ```ts
 /** Typed key for RequestContext. */
 declare class Key<T> {
-    constructor(name?: string);
+    readonly name?: string;
 }
 
 declare const RequestContext: {
+    /** Create a typed key. */
+    key<T>(name?: string): Key<T>;
+
     /** Get a value by typed Key or class constructor. Returns undefined if not set. */
     get<T>(key: Key<T> | AnyConstructor<T>): T | undefined;
 
@@ -63,11 +66,8 @@ declare const RequestContext: {
     /** Check if currently inside a request context. */
     isActive(): boolean;
 
-    /** Enter a new request context. Called by the framework per-request. */
-    activate(): void;
-
-    /** Exit the current request context. Called by the framework after response. */
-    deactivate(): void;
+    /** Run fn inside a new request context. Called by the framework per-request. */
+    run<T>(fn: () => Awaitable<T>): Promise<T>;
 };
 ```
 
@@ -76,12 +76,12 @@ declare const RequestContext: {
 The framework sets these during request processing:
 
 ```ts
-const HttpMethod: Key<string>;      // 'GET', 'POST', etc.
-const HttpUrl: Key<string>;          // full request URL
-const HttpHeaders: Key<ReadonlyMap<string, string>>;
-const HttpParams: Key<Readonly<Record<string, string>>>;   // route params
-const HttpQuery: Key<Readonly<Record<string, string>>>;
-const HttpBody: Key<unknown>;        // parsed body
+const HttpMethod = RequestContext.key<string>('httpMethod');
+const HttpUrl = RequestContext.key<string>('httpUrl');
+const HttpHeaders = RequestContext.key<ReadonlyMap<string, string>>('httpHeaders');
+const HttpParams = RequestContext.key<Readonly<Record<string, string>>>('httpParams');
+const HttpQuery = RequestContext.key<Readonly<Record<string, string>>>('httpQuery');
+const HttpBody = RequestContext.key<unknown>('httpBody');
 ```
 
 ### Usage
@@ -92,7 +92,7 @@ const method = RequestContext.getOrThrow(HttpMethod);
 const headers = RequestContext.getOrThrow(HttpHeaders);
 
 // Custom keys for interceptor → handler communication
-const CurrentUser = new Key<User>('currentUser');
+const CurrentUser = RequestContext.key<User>('currentUser');
 
 // In interceptor:
 RequestContext.set(CurrentUser, authenticatedUser);
@@ -375,7 +375,7 @@ declare class WebApplication {
 1. Receive HTTP request
 2. Route matching → find controller instance (singleton) + method from route metadata
 3. Parse request: extract params, query, body. Validate with request schema.
-4. `RequestContext.activate()` — enter request context
+4. `RequestContext.run()` — enter request context, set built-in keys
 5. Run interceptor chain → call handler with `(parsedInput)`
 6. Handler returns typed value or special response
 7. If response schema exists, validate response. Serialize as JSON with 200.
