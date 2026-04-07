@@ -456,27 +456,12 @@ declare function defineRoute<T extends Record<string, Endpoint>>(
     name: string,
     basePath: string,
     endpoints: T,
-): RouteDefinition<{
-    [K in keyof T]: T[K] extends Endpoint<infer TReq, infer TRes>
-        ? TRes extends 'void'
-            ? TReq extends 'void'
-                ? () => Promise<void>
-                : (input: TReq) => Promise<void>
-            : TRes extends 'stream'
-                ? TReq extends 'void'
-                    ? () => Promise<ReadableStream>
-                    : (input: TReq) => Promise<ReadableStream>
-                : TReq extends 'void'
-                    ? () => Promise<TRes>
-                    : (input: TReq) => Promise<TRes>
-        : never;
-}>;
+): RouteDefinition<T>;
 
-interface RouteDefinition<TMethods> {
+interface RouteDefinition<T extends Record<string, Endpoint>> {
     readonly name: string;
     readonly basePath: string;
-    readonly endpoints: Record<string, Endpoint>;
-    readonly __methods: TMethods;
+    readonly endpoints: T;
 }
 ```
 
