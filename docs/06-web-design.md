@@ -412,6 +412,7 @@ class ErrorInterceptor extends Interceptor {
 
 ```ts
 @Component()
+@Touch(WebLoggingInterceptor)
 class WebApplication {
     constructor(
         // Inject all interceptors sorted by priority — all must have @Priority

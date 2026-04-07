@@ -2,68 +2,116 @@
 
 Package: `@kavri/log` — depends on `@kavri/core` and `@kavri/config`. Does NOT depend on `@kavri/web`.
 
-Built on [Pino](https://github.com/pinojs/pino).
+Framework-independent. Uses `LoggingProvider` abstraction — implementations (Pino, Winston, etc.) are pluggable via `@Component('name')`.
 
 ## 1. Principles
 
 - **Structured logging.** JSON by default. Pretty-print for development.
 - **Contextual loggers.** `injectLogger(context)` creates child loggers with pre-set fields.
-- **Request-aware.** When inside a request context (`@kavri/web`), loggers automatically include request-scoped data (request ID, tracing, etc.) via `kLogging` key.
-- **Configurable.** Format, level, destinations, rotation, redaction — all via `@Configuration('kavri.log')`.
+- **Provider-agnostic.** `LoggingProvider` abstraction — select implementation via config (`kavri.log.provider`).
+- **Configurable.** Format, level, output destinations, rotation, redaction — all via `@Configuration('kavri.log')`.
 
 ## 2. Configuration
 
 ```ts
+enum LogFormat {
+    JSON = 'json',
+    Pretty = 'pretty',
+}
+
+enum LogLevel {
+    Trace = 'trace',
+    Debug = 'debug',
+    Info = 'info',
+    Warn = 'warn',
+    Error = 'error',
+    Fatal = 'fatal',
+    Silent = 'silent',
+}
+
 @Configuration('kavri.log')
-class LogConfig {
-    /** Log format. 'json' for production, 'pretty' for development. */
-    @IsString({ default: 'json' })
-    format!: string;
+class LogConfiguration {
+    /** Logging provider name. Matches @Component('name') on a LoggingProvider subclass. */
+    @IsString({ default: 'pino' })
+    provider!: string;
+
+    /** Log format. */
+    @IsEnum(LogFormat, { default: LogFormat.JSON })
+    format!: LogFormat;
 
     /** Minimum log level. */
-    @IsString({ default: 'info' })
-    level!: string;  // 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal' | 'silent'
+    @IsEnum(LogLevel, { default: LogLevel.Info })
+    level!: LogLevel;
+
+    /** Default output destination for all levels. */
+    @IsString({ default: 'stdout' })
+    output!: string;
 
     /**
-     * Output destinations. Each entry routes logs at a given level to a destination.
-     * Default: all levels → stdout.
-     *
-     * Example:
-     *   - { level: 'info', destination: 'stdout' }
-     *   - { level: 'error', destination: './logs/error.log' }
-     *   - { level: 'trace', destination: './logs/all.log' }
+     * Per-level output overrides. Key = level name, value = destination.
+     * Example: { error: './logs/error.log', fatal: './logs/fatal.log' }
+     * Levels not listed here use `output` as the destination.
      */
-    @IsArray(IsObject({
-        level: IsString(),
-        destination: IsString(),
-    }), { optional: true })
-    outputs?: Array<{ level: string; destination: string }>;
+    @IsRecord(IsString(), { optional: true })
+    outputs?: Record<string, string>;
 
-    /**
-     * Log rotation rules. Applied to file destinations.
-     */
+    /** Log rotation rules. Applied to file destinations. */
     @IsObject({
-        maxSize: IsString({ optional: true }),    // e.g., '10m', '100m', '1g'
-        maxFiles: IsInteger({ optional: true }),   // max rotated files to keep
-        interval: IsString({ optional: true }),    // e.g., '1d', '12h'
+        maxSize: IsString({ optional: true }),
+        maxFiles: IsInteger({ optional: true }),
+        interval: IsString({ optional: true }),
     }, { optional: true })
     rotation?: {
-        maxSize?: string;
+        maxSize?: string;     // e.g., '10m', '100m', '1g'
         maxFiles?: number;
-        interval?: string;
+        interval?: string;    // e.g., '1d', '12h'
     };
 
-    /**
-     * Paths to redact from log output.
-     * Uses Pino's built-in redaction. Supports wildcards.
-     * Example: ['password', 'creditCard', '*.secret', 'headers.authorization']
-     */
+    /** Paths to redact from log output. Supports wildcards. */
     @IsArray(IsString(), { optional: true })
     redact?: string[];
 }
 ```
 
-## 3. Logger
+## 3. LoggingProvider
+
+Abstract provider — implementations are pluggable via `@Component('name')`.
+
+```ts
+abstract class LoggingProvider {
+    /** Create a root logger from configuration. */
+    abstract createLogger(config: LogConfiguration): Logger;
+
+    /** Create a child logger with additional context fields. */
+    abstract createChild(parent: Logger, context: object): Logger;
+}
+```
+
+The framework selects a provider by name from config:
+
+```ts
+// Internally in @kavri/log:
+const provider = inject(LoggingProvider, injectConfig(LogConfiguration).provider);
+const rootLogger = provider.createLogger(config);
+```
+
+### Pino implementation (`@kavri/pino`)
+
+```ts
+@Component('pino')
+class PinoLoggingProvider extends LoggingProvider {
+    createLogger(config: LogConfiguration): Logger {
+        // Build pino instance from config (format, level, outputs, rotation, redact)
+    }
+    createChild(parent: Logger, context: object): Logger {
+        // return parent.child(context) via pino's child logger
+    }
+}
+```
+
+Other implementations: `@kavri/winston`, `@kavri/console`, etc.
+
+## 4. Logger
 
 ```ts
 abstract class Logger {
@@ -74,7 +122,6 @@ abstract class Logger {
     abstract error(msg: string, ...args: unknown[]): void;
     abstract fatal(msg: string, ...args: unknown[]): void;
 
-    /** Log with structured data. */
     abstract trace(data: object, msg?: string): void;
     abstract debug(data: object, msg?: string): void;
     abstract info(data: object, msg?: string): void;
@@ -82,14 +129,11 @@ abstract class Logger {
     abstract error(data: object, msg?: string): void;
     abstract fatal(data: object, msg?: string): void;
 
-    /** Create a child logger with additional context. */
     abstract child(context: object): Logger;
 }
 ```
 
-Under the hood, wraps Pino. When inside a request context, automatically merges `kLogging` data into every log entry.
-
-## 4. Injection
+## 5. Injection
 
 ### inject(Logger) — root logger
 
@@ -110,11 +154,11 @@ class AppService {
 declare function injectLogger(context: string | object | AnyConstructor<any>): Logger;
 ```
 
-- `injectLogger(WebApplication)` → child logger with `{ name: 'WebApplication' }`
+- `injectLogger(PaymentService)` → child logger with `{ name: 'PaymentService' }`
 - `injectLogger('payment')` → child logger with `{ name: 'payment' }`
 - `injectLogger({ service: 'payment', version: '1.0' })` → child logger with those fields
 
-`injectLogger` is an inject point — usable in constructor defaults, `@OnConstruct`, etc.
+`injectLogger` is an inject point.
 
 ```ts
 @Component()
@@ -123,56 +167,30 @@ class PaymentService {
 
     async process(orderId: string) {
         this.logger.info({ orderId }, 'processing payment');
-        // logs: { name: 'PaymentService', orderId: '123', msg: 'processing payment', ... }
     }
 }
 ```
 
-## 5. Request-aware logging
+## 6. LoggingInterceptor (abstract, from `@kavri/log`)
 
-When inside a `RequestContext` (`@kavri/web`), loggers automatically include data from `kLogging`. This allows interceptors to enrich the logging context.
-
-### kLogging key (from `@kavri/web`)
+`@kavri/log` provides an abstract base for logging interceptors. Consumers (like `@kavri/web`) implement it.
 
 ```ts
-// In @kavri/web
-const kLogging = RequestContext.key<Record<string, unknown>>('logging');
-```
+abstract class LoggingInterceptor {
+    /** Called before the request is processed. Returns context to pass to onComplete/onError. */
+    abstract onRequest(): Record<string, unknown>;
 
-Any interceptor can append data:
+    /** Called after successful completion. */
+    abstract onComplete(context: Record<string, unknown>, result: unknown): void;
 
-```ts
-@Component()
-@Priority(Interceptor.BOOTSTRAP)
-class RequestIdInterceptor extends Interceptor {
-    async intercept(next: () => unknown) {
-        const requestId = crypto.randomUUID();
-        kLogging.getOrInsertComputed(() => ({}));
-        kLogging.getOrThrow()['requestId'] = requestId;
-
-        const req = kRequest.getOrThrow();
-        kLogging.getOrThrow()['method'] = req.method;
-        kLogging.getOrThrow()['url'] = req.url;
-
-        return next();
-    }
+    /** Called on error. */
+    abstract onError(context: Record<string, unknown>, error: unknown): void;
 }
 ```
 
-When the logger writes an entry, it checks `kLogging.get()` and merges the data:
+### WebLoggingInterceptor (from `@kavri/web`)
 
-```ts
-// Logger internally:
-log(level, data, msg) {
-    const extra = RequestContext.isActive() ? kLogging.get() : undefined;
-    if (extra) {
-        data = { ...extra, ...data };
-    }
-    pino[level](data, msg);
-}
-```
-
-### Built-in web logging interceptor (from `@kavri/web`)
+Implements `LoggingInterceptor` for HTTP requests. Touched by `WebApplication`.
 
 ```ts
 @Component()
@@ -184,7 +202,7 @@ class WebLoggingInterceptor extends Interceptor {
         const req = kRequest.getOrThrow();
         const requestId = req.headers['x-request-id'] ?? crypto.randomUUID();
 
-        // Initialize logging context
+        // Set logging context for downstream loggers
         kLogging.set({
             requestId,
             method: req.method,
@@ -205,13 +223,24 @@ class WebLoggingInterceptor extends Interceptor {
 }
 ```
 
-Because `kLogging` is set before `next()`, every downstream logger call automatically includes `requestId`, `method`, `url`.
+When the logger writes an entry, it checks `kLogging` from `RequestContext` and merges the data automatically. This happens inside the `Logger` implementation — no coupling between `@kavri/log` and `@kavri/web`.
 
-## 6. ESLint
+```ts
+// Logger internally (provider responsibility):
+log(level, data, msg) {
+    const extra = RequestContext.isActive() ? kLogging.get() : undefined;
+    if (extra) {
+        data = { ...extra, ...data };
+    }
+    underlying[level](data, msg);
+}
+```
 
-Add `injectLogger` to `@kavri/eslint-plugin` affected functions list.
+## 7. ESLint
 
-## 7. Example
+`injectLogger` is in `@kavri/eslint-plugin` affected functions list.
+
+## 8. Example
 
 ```ts
 import { Component, inject } from '@kavri/core';
@@ -226,8 +255,8 @@ class OrderService {
 
     async createOrder(userId: string) {
         this.logger.info({ userId }, 'creating order');
-        // If inside a request: logs include { requestId, method, url, name: 'OrderService', userId }
-        // If outside (CLI, worker): logs include { name: 'OrderService', userId }
+        // Inside request: { requestId, method, url, name: 'OrderService', userId }
+        // Outside (CLI): { name: 'OrderService', userId }
     }
 }
 ```
@@ -236,13 +265,13 @@ class OrderService {
 # config/config.yaml
 kavri:
   log:
+    provider: pino
     format: json
     level: info
+    output: stdout
     outputs:
-      - level: info
-        destination: stdout
-      - level: error
-        destination: ./logs/error.log
+      error: ./logs/error.log
+      fatal: ./logs/fatal.log
     rotation:
       maxSize: 100m
       maxFiles: 5
