@@ -403,12 +403,62 @@ class ErrorInterceptor extends Interceptor {
 ## 12. Application Startup
 
 ```ts
-declare class WebApplication {
-    constructor(entrypoint: AnyConstructor<any>);
+@Component()
+class WebApplication {
+    constructor(
+        // Inject all interceptors sorted by priority — all must have @Priority
+        private readonly interceptors = injectAll(Interceptor, 'priority'),
+        private readonly config = injectConfig(HttpConfig),
+    ) {
+        // Validate: every Interceptor subclass MUST have @Priority
+        for (const interceptor of this.interceptors) {
+            const priority = Metadata.of(Priority, interceptor.constructor);
+            if (priority.length === 0) {
+                throw new Error(
+                    `Interceptor ${interceptor.constructor.name} is missing @Priority(). `
+                    + `All interceptors must declare their priority.`
+                );
+            }
+        }
+    }
 
-    start(): Promise<void>;
-    toHandler(): (req: IncomingMessage, res: ServerResponse) => void;
-    stop(): Promise<void>;
+    /** Create and resolve the application. */
+    static async create(entrypoint: AnyConstructor<any>): Promise<WebApplication> {
+        const container = new Container();
+        const [, app] = await container.resolve([entrypoint, WebApplication]);
+        return app;
+    }
+
+    /** Start HTTP server. */
+    async start(): Promise<void> {
+        const server = http.createServer(this.toHandler());
+        server.listen(this.config.port, this.config.host);
+    }
+
+    /** Return raw Node.js HTTP handler. */
+    toHandler(): (req: IncomingMessage, res: ServerResponse) => void {
+        return (req, res) => {
+            RequestContext.run(async () => {
+                Request.set(req);
+                Response.set(res);
+
+                const chain = this.buildChain(this.interceptors, 0);
+                await chain();
+            }).catch(err => {
+                if (!res.headersSent) {
+                    res.writeHead(500);
+                    res.end('Internal Server Error');
+                }
+            });
+        };
+    }
+
+    private buildChain(interceptors: readonly Interceptor[], index: number): () => unknown {
+        if (index >= interceptors.length) {
+            return () => { throw new HttpException(404, 'Not Found'); };
+        }
+        return () => interceptors[index].intercept(this.buildChain(interceptors, index + 1));
+    }
 }
 ```
 
@@ -421,69 +471,12 @@ declare class WebApplication {
 @Use(InfraModule)
 class MyApplication {}
 
-const app = new WebApplication(MyApplication);
+const app = await WebApplication.create(MyApplication);
 await app.start();
-```
 
-### Core process pseudocode
-
-```ts
-class WebApplication {
-    private container: Container;
-    private interceptors: Interceptor[];
-
-    constructor(private readonly entrypoint: AnyConstructor<any>) {}
-
-    async start() {
-        this.container = new Container();
-        await this.container.resolve(this.entrypoint);
-
-        // Collect all interceptors, sorted by @Priority (smaller first)
-        this.interceptors = injectAll(Interceptor, 'priority');
-
-        // Validate: every Interceptor subclass MUST have @Priority
-        for (const interceptor of this.interceptors) {
-            const priority = Metadata.of(Priority, interceptor.constructor);
-            if (priority.length === 0) {
-                throw new Error(
-                    `Interceptor ${interceptor.constructor.name} is missing @Priority(). `
-                    + `All interceptors must declare their priority.`
-                );
-            }
-        }
-
-        const config = injectConfig(HttpConfig);
-        const server = http.createServer(this.toHandler());
-        server.listen(config.port, config.host);
-    }
-
-    toHandler(): (req: IncomingMessage, res: ServerResponse) => void {
-        return (req, res) => {
-            RequestContext.run(async () => {
-                Request.set(req);
-                Response.set(res);
-
-                // The entire pipeline — including response writing — is interceptors
-                const chain = this.buildChain(this.interceptors, 0);
-                await chain();
-            }).catch(err => {
-                // Last-resort: interceptor chain itself threw (should not happen
-                // if ResponseInterceptor and ExceptionInterceptor are present)
-                if (!res.headersSent) {
-                    res.writeHead(500);
-                    res.end('Internal Server Error');
-                }
-            });
-        };
-    }
-
-    private buildChain(interceptors: Interceptor[], index: number): () => unknown {
-        if (index >= interceptors.length) {
-            return () => { throw new HttpException(404, 'Not Found'); };
-        }
-        return () => interceptors[index].intercept(this.buildChain(interceptors, index + 1));
-    }
-}
+// Or: manual handler
+// const handler = app.toHandler();
+// http.createServer(handler).listen(3000);
 ```
 
 ## 13. Built-in Interceptors
@@ -891,6 +884,6 @@ class AuthInterceptor extends Interceptor {
 @Touch(AuthInterceptor)
 class MyApp {}
 
-const app = new WebApplication(MyApp);
+const app = await WebApplication.create(MyApp);
 await app.start();
 ```

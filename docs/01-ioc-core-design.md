@@ -171,6 +171,9 @@ All configuration is done via decorators (`@Provide`, `@Touch`, `@Use`). The con
 ```ts
 declare class Container {
   resolve<T>(injectable: Injectable<T>): Promise<T>;
+  resolve<T extends readonly Injectable<any>[]>(injectables: [...T]): Promise<{
+    [K in keyof T]: T[K] extends Injectable<infer U> ? U : never;
+  }>;
   destroy(): Promise<void>;
 }
 ```
