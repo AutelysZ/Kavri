@@ -61,13 +61,13 @@ Static API backed by `AsyncLocalStorage`. Access anywhere via `RequestContext.ge
 
 Controllers are the sole mechanism for implementing HTTP endpoints. Every controller implements a route definition from `@kavri/schema`.
 
-### createController + @ControllerImpl
+### createController + @Controller
 
 ```ts
-import { createController, ControllerImpl } from '@kavri/web';
+import { createController, Controller } from '@kavri/web';
 import { UserRoute } from './user-route';
 
-@ControllerImpl()
+@Controller()
 class UserController extends createController(UserRoute) {
     constructor(private readonly repo = inject(UserRepository)) { super(); }
 
@@ -87,7 +87,7 @@ class UserController extends createController(UserRoute) {
 ```
 
 - `createController(route)` returns an abstract class with abstract methods matching the route definition. Types are inferred from the route's request/response schemas.
-- `@ControllerImpl()` composes `@Component()` and registers all routing metadata from the route definition. No manual `@Controller(path)` or `@Get()/@Post()` needed.
+- `@Controller()` composes `@Component()` and registers all routing metadata from the route definition. No manual `@Controller(path)` or `@Get()/@Post()` needed.
 - Handlers receive parsed input. Return typed response or a special response object (`Redirect`, `FileResponse`, etc.).
 - Access per-request data via `RequestContext.get()`.
 
@@ -251,7 +251,7 @@ abstract class Repository<T> {
 Usage — `@Transactional()` on a controller method:
 
 ```ts
-@ControllerImpl()
+@Controller()
 class OrderController extends createController(OrderRoute) {
     constructor(private readonly orderRepo = inject(OrderRepository)) { super(); }
 
@@ -356,7 +356,7 @@ import {
     Schema, IsString, IsInteger, IsEmail, defineRoute, get, post, del,
 } from '@kavri/schema';
 import {
-    ControllerImpl, createController,
+    Controller, createController,
     Interceptor, RequestContext, HttpException, WebApplication,
 } from '@kavri/web';
 import { Component, Touch, inject } from '@kavri/core';
@@ -389,7 +389,7 @@ const UserRoute = defineRoute('UserRoute', '/user', {
 
 // ---- Controller ----
 
-@ControllerImpl()
+@Controller()
 class UserController extends createController(UserRoute) {
     constructor(private readonly repo = inject(UserRepository)) { super(); }
 
