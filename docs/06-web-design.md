@@ -171,17 +171,18 @@ class UserController extends createController(UserRoute) {
 abstract class Interceptor {
     abstract intercept(next: () => unknown): Awaitable<unknown>;
 
-    /** Priority anchors. Use with @Priority() to order interceptors. */
-    static readonly RESPONSE  = 0;      // write result to HTTP response
-    static readonly BOOTSTRAP = 1000;   // logging, metrics, request ID
-    static readonly EXCEPTION = 2000;   // error handling, error formatting
-    static readonly ROUTE     = 3000;   // route matching, static files
-    static readonly CORS      = 4000;   // CORS preflight handling
-    static readonly GUARD     = 5000;   // auth, rate limiting, RBAC
-    static readonly PARSE     = 6000;   // decode raw body (JSON, multipart, binary)
-    static readonly RESOLVE   = 7000;   // merge path params + query + body + files → Params
-    static readonly VALIDATE  = 8000;   // validate Params against request schema
-    static readonly HANDLER   = 9000;   // handler execution, transactions
+    /** Priority anchors. Use with @Priority() to order interceptors.
+     *  All Interceptor subclasses MUST have @Priority(). Enforced at startup. */
+    static readonly RESPONSE  = 1000;   // write result to HTTP response
+    static readonly BOOTSTRAP = 2000;   // logging, metrics, request ID
+    static readonly EXCEPTION = 3000;   // error handling, error formatting
+    static readonly ROUTE     = 4000;   // route matching, static files
+    static readonly CORS      = 5000;   // CORS preflight handling
+    static readonly GUARD     = 6000;   // auth, rate limiting, RBAC
+    static readonly PARSE     = 7000;   // decode raw body (JSON, multipart, binary)
+    static readonly RESOLVE   = 8000;   // merge path params + query + body + files → Params
+    static readonly VALIDATE  = 9000;   // validate Params against request schema
+    static readonly HANDLER   = 10000;  // handler execution, transactions
 }
 ```
 
@@ -439,6 +440,17 @@ class WebApplication {
 
         // Collect all interceptors, sorted by @Priority (smaller first)
         this.interceptors = injectAll(Interceptor, 'priority');
+
+        // Validate: every Interceptor subclass MUST have @Priority
+        for (const interceptor of this.interceptors) {
+            const priority = Metadata.of(Priority, interceptor.constructor);
+            if (priority.length === 0) {
+                throw new Error(
+                    `Interceptor ${interceptor.constructor.name} is missing @Priority(). `
+                    + `All interceptors must declare their priority.`
+                );
+            }
+        }
 
         const config = injectConfig(HttpConfig);
         const server = http.createServer(this.toHandler());
@@ -764,37 +776,37 @@ class HandlerInterceptor extends Interceptor {
 Request
   │
   ▼
-ResponseInterceptor (0)         ← writes result to HTTP response
+ResponseInterceptor (1000)       ← writes result to HTTP response
   │
   ▼
-[LoggingInterceptor (1000)]     ← user-provided
+[LoggingInterceptor (2000)]      ← user-provided
   │
   ▼
-ExceptionInterceptor (2000)     ← catches errors → RawResponse
+ExceptionInterceptor (3000)      ← catches errors → RawResponse
   │
   ▼
-RouteInterceptor (3000)         ← sets Endpoint, Controller, PathParams
+RouteInterceptor (4000)          ← sets Endpoint, Controller, PathParams
   │
   ▼
-[CorsInterceptor (4000)]        ← user-provided
+[CorsInterceptor (5000)]         ← user-provided
   │
   ▼
-[AuthInterceptor (5000)]        ← user-provided
+[AuthInterceptor (6000)]         ← user-provided
   │
   ▼
-ParseInterceptor (6000)         ← sets Query, Body, Files
+ParseInterceptor (7000)          ← sets Query, Body, Files
   │
   ▼
-ResolveInterceptor (7000)       ← merges → sets Params
+ResolveInterceptor (8000)        ← merges → sets Params
   │
   ▼
-ValidateInterceptor (8000)      ← validates Params, throws 400
+ValidateInterceptor (9000)       ← validates Params, throws 400
   │
   ▼
-[TransactionInterceptor (8999)] ← user-provided
+[TransactionInterceptor (9999)]  ← user-provided
   │
   ▼
-HandlerInterceptor (9000)       ← calls controller method, returns result
+HandlerInterceptor (10000)       ← calls controller method, returns result
   │
   ▼
 (result bubbles back up through the chain to ResponseInterceptor)
