@@ -342,8 +342,24 @@ type ResponseOutput<T> = AnyConstructor<T> | 'void' | 'stream';
 
 interface EndpointOptions {
     path?: string;
+
+    // --- OpenAPI metadata ---
+    /** Operation summary (short). Maps to OpenAPI operationId/summary. */
+    title?: string;
+    /** Operation description (detailed). Maps to OpenAPI description. */
+    description?: string;
+    /** Tags for grouping in OpenAPI docs. */
+    tags?: string[];
+    /** Mark as deprecated in OpenAPI output. */
+    deprecated?: boolean;
+    /** External documentation URL. */
+    externalDocs?: { url: string; description?: string };
+
+    // --- Semantics ---
     /** HTTP method semantics. */
     idempotency?: 'safe' | 'idempotent' | 'volatile';
+
+    // --- Request body encoding ---
     /** Request body encoding. Default: 'data'. */
     requestType?: 'data' | 'multipart' | 'binary';
     /** Required when requestType = 'multipart'. */
