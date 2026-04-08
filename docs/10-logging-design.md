@@ -12,12 +12,12 @@ Package: `@kavri/log` — depends on `@kavri/core` and `@kavri/config`. Does NOT
 ## 2. Configuration
 
 ```ts
-enum LogFormat {
+enum Format {
     JSON = 'json',
     Pretty = 'pretty',
 }
 
-enum LogLevel {
+enum Level {
     Trace = 'trace',
     Debug = 'debug',
     Info = 'info',
@@ -27,30 +27,31 @@ enum LogLevel {
     Silent = 'silent',
 }
 
-@Configuration('kavri.log')
-class LogConfiguration {
+@Configuration('kavri.logging')
+class LoggingOptions {
     /** Logging provider name. Default: 'kavri' (built-in). */
     @IsString({ default: 'kavri' })
     provider!: string;
 
     /** Log format. */
-    @IsEnum(LogFormat, { default: LogFormat.JSON })
-    format!: LogFormat;
+    @IsEnum(Format, { default: Format.JSON })
+    format!: Format;
 
     /** Minimum log level. */
-    @IsEnum(LogLevel, { default: LogLevel.Info })
-    level!: LogLevel;
+    @IsEnum(Level, { default: Level.Info })
+    level!: Level;
 
-    /** Default output destination. 'stdout', 'stderr', or file path. */
-    @IsString({ default: 'stdout' })
-    output!: string;
+    /** Default output destinations. 'stdout', 'stderr', or file paths. */
+    @IsArray(IsString(), { default: ['stdout'] })
+    output!: string[];
 
     /**
-     * Per-level output overrides. Key = level name, value = destination.
+     * Per-level output overrides. Key = level name, value = destinations.
      * Levels not listed use `output`.
+     * Example: { error: ['stderr', './logs/error.log'] }
      */
-    @IsRecord(IsString(), { optional: true })
-    outputs?: Record<string, string>;
+    @IsRecord(IsArray(IsString()), { optional: true })
+    outputs?: Record<string, string[]>;
 
     /** Paths to redact from log output. Supports wildcards. */
     @IsArray(IsString(), { optional: true })
@@ -76,12 +77,12 @@ interface Logger {
 
 ## 4. LoggingProvider
 
-Abstract provider. Subclasses must be `@Component('name')`. Selected by `LogConfiguration.provider`.
+Abstract provider. Subclasses must be `@Component('name')`. Selected by `LoggingOptions.provider`.
 
 ```ts
 abstract class LoggingProvider {
     /** Create the root logger from configuration. May be async (e.g., open file handles). */
-    abstract createLogger(config: LogConfiguration): Awaitable<Logger>;
+    abstract createLogger(config: LoggingOptions): Awaitable<Logger>;
 }
 ```
 
@@ -90,7 +91,7 @@ abstract class LoggingProvider {
 ```ts
 @Component('kavri')
 class KavriLoggingProvider extends LoggingProvider {
-    async createLogger(config: LogConfiguration): Promise<Logger> {
+    async createLogger(config: LoggingOptions): Promise<Logger> {
         // Built-in structured logger:
         // - JSON or pretty format
         // - Writes to stdout/stderr/file based on config.output and config.outputs
@@ -112,8 +113,8 @@ class LoggerFactory {
     private rootLogger!: Logger;
 
     constructor(
-        private readonly config = injectConfig(LogConfiguration),
-        private readonly provider = inject(LoggingProvider, injectConfig(LogConfiguration).provider),
+        private readonly config = injectConfig(LoggingOptions),
+        private readonly provider = inject(LoggingProvider, injectConfig(LoggingOptions).provider),
     ) {}
 
     @OnConstruct()
@@ -138,18 +139,20 @@ class LoggerFactory {
 ### injectLogger(name?) — the only injection API
 
 ```ts
-declare function injectLogger(name?: string): Logger;
+declare function injectLogger(context?: string | object | AnyConstructor<any>): Logger;
 ```
 
 - `injectLogger()` → root logger
-- `injectLogger('PaymentService')` → child logger with name `'PaymentService'`
+- `injectLogger('payment')` → child logger with name `'payment'`
+- `injectLogger(PaymentService)` → child logger with name `'PaymentService'` (from class name)
+- `injectLogger({ service: 'payment', version: '1.0' })` → child logger with those fields
 
 `injectLogger` is an inject point.
 
 ```ts
 @Component()
 class PaymentService {
-    constructor(private readonly logger = injectLogger('PaymentService')) {}
+    constructor(private readonly logger = injectLogger(PaymentService)) {}
 
     async process(orderId: string) {
         this.logger.info('processing payment for order %s', orderId);
@@ -241,14 +244,19 @@ class OrderService {
 ```yaml
 # config/config.yaml
 kavri:
-  log:
+  logging:
     provider: kavri
     format: json
     level: info
-    output: stdout
+    output:
+      - stdout
     outputs:
-      error: ./logs/error.log
-      fatal: ./logs/fatal.log
+      error:
+        - stderr
+        - ./logs/error.log
+      fatal:
+        - stderr
+        - ./logs/fatal.log
     redact:
       - password
       - "*.secret"
