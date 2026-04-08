@@ -347,9 +347,9 @@ interface EndpointOptions {
     /** Request body encoding. Default: 'data'. */
     requestType?: 'data' | 'multipart' | 'binary';
     /** Required when requestType = 'multipart'. */
-    multipart?: { maxFileSize: number; maxBodySize: number };
+    multipart?: { maxFileSize: number; maxBodySize: number; accept?: string[] };
     /** Required when requestType = 'binary'. */
-    binary?: { maxBodySize: number };
+    binary?: { maxBodySize: number; filename?: string; accept?: string[] };
 }
 
 interface Endpoint<TReq = any, TRes = any> {
@@ -382,13 +382,22 @@ interface MultipartFile {
 
 /**
  * Marks a field as a file upload. Use in multipart request schemas only.
- * Auto-sets schema to MultipartFile (or MultipartFile[] if isArray=true).
- * Do NOT wrap with @IsArray(IsFile()) — use @IsFile(true) instead.
+ * Auto-sets schema to MultipartFile (or MultipartFile[] if array=true).
+ * Do NOT wrap with @IsArray(IsFile()) — use @IsFile({ array: true }) instead.
  * Do NOT combine with other schema decorators.
  */
-declare function IsFile(isArray?: boolean, options?: ValidateOptions): SchemaFieldDecorator;
-// @IsFile()     → field type: MultipartFile
-// @IsFile(true) → field type: MultipartFile[]
+interface IsFileOptions extends ValidateOptions {
+    /** If true, field type is MultipartFile[]. Default: false (single file). */
+    array?: boolean;
+    /** Accepted MIME types. E.g., ['image/*', 'application/pdf']. */
+    accept?: string[];
+    /** Max file size in bytes. */
+    maxSize?: number;
+}
+declare function IsFile(options?: IsFileOptions): SchemaFieldDecorator;
+// @IsFile()                                → MultipartFile
+// @IsFile({ array: true })                 → MultipartFile[]
+// @IsFile({ accept: ['image/*'], maxSize: 5_000_000 })
 
 /**
  * Marks a field as the raw binary request body stream.
@@ -414,7 +423,7 @@ class AvatarUpload {
 @Schema()
 class BulkUpload {
     @IsString() batchId!: string;
-    @IsFile(true) files!: MultipartFile[];
+    @IsFile({ array: true }) files!: MultipartFile[];
 }
 
 // Binary body
@@ -493,7 +502,7 @@ class AvatarUpload {
 @Schema()
 class BulkUpload {
     @IsString() batchId!: string;
-    @IsFile(true) files!: MultipartFile[];
+    @IsFile({ array: true }) files!: MultipartFile[];
 }
 
 const FileRoute = defineRoute('FileRoute', '/file', {
