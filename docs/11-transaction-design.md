@@ -298,101 +298,272 @@ class TransactionManager {
 }
 ```
 
-## 7. Example Driver
+## 7. Drizzle Driver (`@kavri/drizzle`)
 
 ```ts
-@Component('my')
-class MyDriver extends DataSourceDriver<string, { query(sql: string): any }> {
-    private dataSources: Record<string, string> = {}; // from config
+interface DrizzleConnectionOptions {
+    url: string;
+}
 
-    protected doConnect(name: Qualifier, options: string) {
-        return { query(sql: string) { return 'my:' + sql; } };
-    }
+@Configuration('kavri.drizzle')
+class DrizzleConfig {
+    /** Named data sources. Key = name, value = connection URL. */
+    @IsRecord(IsString())
+    dataSources!: Record<string, string>;
+}
 
-    protected doBegin(pool: { query(sql: string): any }, options: TransactionOptions) {
-        pool.query('BEGIN');
-        return pool;
-    }
-
-    child(connection: { query(sql: string): any }, options: TransactionOptions) {
-        connection.query('SAVEPOINT');
-        return connection;
-    }
-
-    commit(connection: { query(sql: string): any }) { connection.query('COMMIT'); }
-    rollback(connection: { query(sql: string): any }, error: any) { connection.query('ROLLBACK'); }
-    close(connection: { query(sql: string): any }) {}
+@Component('drizzle')
+class DrizzleDataSourceDriver extends DataSourceDriver<DrizzleConnectionOptions, DrizzleTransaction, DrizzleDatabase> {
 
     @OnConstruct()
-    async init() {
-        for (const [k, v] of Object.entries(this.dataSources)) {
-            await this.connect(k, v);
+    async init(config = injectConfig(DrizzleConfig)) {
+        for (const [name, url] of Object.entries(config.dataSources)) {
+            await this.connect(name, { url });
         }
+    }
+
+    protected doConnect(name: Qualifier, options: DrizzleConnectionOptions) {
+        return drizzle(options.url);
+    }
+
+    protected async doBegin(pool: DrizzleDatabase, options: TransactionOptions) {
+        // Convert Drizzle's callback-based tx API to imperative begin/commit/rollback
+        const started = Promise.withResolvers<DrizzleTransaction>();
+        const control = Promise.withResolvers<void>();
+
+        const txPromise = pool.transaction(
+            { isolationLevel: options.isolation },
+            async (tx) => {
+                started.resolve(tx);
+                return control.promise;
+            },
+        );
+        txPromise.catch(started.reject);
+
+        const tx = await started.promise;
+        (tx as any).__control = control;
+        (tx as any).__promise = txPromise;
+        return tx;
+    }
+
+    async child(connection: DrizzleTransaction, options: TransactionOptions) {
+        // Nested transaction / savepoint — same pattern on the tx object
+        const started = Promise.withResolvers<DrizzleTransaction>();
+        const control = Promise.withResolvers<void>();
+
+        const spPromise = (connection as any).transaction(async (sp: any) => {
+            started.resolve(sp);
+            return control.promise;
+        });
+        spPromise.catch(started.reject);
+
+        const sp = await started.promise;
+        (sp as any).__control = control;
+        (sp as any).__promise = spPromise;
+        return sp;
+    }
+
+    async commit(connection: DrizzleTransaction) {
+        (connection as any).__control.resolve();
+        await (connection as any).__promise;
+    }
+
+    async rollback(connection: DrizzleTransaction, error: any) {
+        (connection as any).__control.reject(error);
+        await (connection as any).__promise.catch(() => {});
+    }
+
+    async close(pool: DrizzleDatabase) {
+        // close the underlying connection
     }
 }
 ```
 
-## 8. Example Repository
+### Drizzle Repository (`@kavri/drizzle`)
 
 ```ts
-@Component()
-class MyRepository {
+abstract class DrizzleRepository<TRecord> {
     constructor(
-        private readonly table: string,
-        private readonly tm = inject(TransactionManager),
-        private readonly dataSource?: string,
+        protected readonly table: any,
+        protected readonly tm = inject(TransactionManager),
+        protected readonly dataSource: Qualifier = 'default',
     ) {}
 
     protected get conn() {
-        return this.tm.getConnection<{ query(sql: string): any }>({
-            driver: 'my',
+        return this.tm.getConnection<DrizzleDatabase | DrizzleTransaction>({
+            driver: 'drizzle',
             target: this,
             dataSource: this.dataSource,
         });
     }
 
-    findOne(id: string) {
-        return this.conn.query(`select * from ${this.table} where id = ${id}`);
+    async findOne(id: any): Promise<TRecord | undefined> {
+        const rows = await this.conn.select().from(this.table).where(eq(this.table.id, id)).limit(1);
+        return rows[0];
+    }
+
+    async findAll(): Promise<TRecord[]> {
+        return this.conn.select().from(this.table);
+    }
+
+    async create(data: Partial<TRecord>): Promise<TRecord> {
+        const rows = await this.conn.insert(this.table).values(data).returning();
+        return rows[0];
+    }
+
+    async delete(id: any): Promise<void> {
+        await this.conn.delete(this.table).where(eq(this.table.id, id));
     }
 }
 ```
 
-## 9. Example Application
+## 8. Sequelize Driver (`@kavri/sequelize`)
 
 ```ts
-@Component()
-class UserRepository extends MyRepository {
-    constructor() {
-        super('user');
+interface SequelizeConnectionOptions {
+    url: string;
+}
+
+@Configuration('kavri.sequelize')
+class SequelizeConfig {
+    @IsRecord(IsString())
+    dataSources!: Record<string, string>;
+}
+
+@Component('sequelize')
+class SequelizeDataSourceDriver extends DataSourceDriver<SequelizeConnectionOptions, SequelizeTransaction, Sequelize> {
+
+    @OnConstruct()
+    async init(config = injectConfig(SequelizeConfig)) {
+        for (const [name, url] of Object.entries(config.dataSources)) {
+            await this.connect(name, { url });
+        }
     }
 
-    async createUser(name: string) {
-        return this.conn.query(`insert into user (name) values (${name})`);
+    protected async doConnect(name: Qualifier, options: SequelizeConnectionOptions) {
+        const seq = new Sequelize(options.url);
+        await seq.authenticate();
+        return seq;
+    }
+
+    protected async doBegin(pool: Sequelize, options: TransactionOptions) {
+        return pool.transaction({ isolationLevel: options.isolation });
+    }
+
+    async child(connection: SequelizeTransaction, options: TransactionOptions) {
+        // Sequelize supports nested transactions (savepoints) natively
+        return (connection as any).sequelize.transaction({ transaction: connection });
+    }
+
+    async commit(connection: SequelizeTransaction) { await connection.commit(); }
+    async rollback(connection: SequelizeTransaction, error: any) { await connection.rollback(); }
+    async close(pool: Sequelize) { await pool.close(); }
+}
+```
+
+### Sequelize Repository (`@kavri/sequelize`)
+
+```ts
+abstract class SequelizeRepository<TRecord> {
+    constructor(
+        protected readonly model: any,  // Sequelize Model class
+        protected readonly tm = inject(TransactionManager),
+        protected readonly dataSource: Qualifier = 'default',
+    ) {}
+
+    protected get conn() {
+        return this.tm.getConnection<Sequelize | SequelizeTransaction>({
+            driver: 'sequelize',
+            target: this,
+            dataSource: this.dataSource,
+        });
+    }
+
+    async findOne(id: any): Promise<TRecord | undefined> {
+        return this.model.findByPk(id, { transaction: this.conn });
+    }
+
+    async findAll(): Promise<TRecord[]> {
+        return this.model.findAll({ transaction: this.conn });
+    }
+
+    async create(data: Partial<TRecord>): Promise<TRecord> {
+        return this.model.create(data, { transaction: this.conn });
+    }
+
+    async delete(id: any): Promise<void> {
+        await this.model.destroy({ where: { id }, transaction: this.conn });
     }
 }
+```
+
+## 9. Application Example
+
+```ts
+// --- Repositories ---
+
+@Component()
+class UserRepository extends DrizzleRepository<User> {
+    constructor() {
+        super(userTable);
+    }
+
+    async findByEmail(email: string) {
+        return this.conn.select().from(userTable).where(eq(userTable.email, email));
+    }
+}
+
+@Component()
+class OrderRepository extends DrizzleRepository<Order> {
+    constructor() {
+        super(orderTable);
+    }
+}
+
+// --- Service ---
 
 @Component()
 class UserService {
     constructor(
         private readonly userRepo = inject(UserRepository),
+        private readonly orderRepo = inject(OrderRepository),
         private readonly tm = inject(TransactionManager),
     ) {}
 
     @Transactional()
-    async createUserWithOrder(name: string) {
-        await this.userRepo.createUser(name);
-        // other repo calls — all share the same transaction
+    async createUserWithOrder(name: string, item: string) {
+        const user = await this.userRepo.create({ name });
+        await this.orderRepo.create({ userId: user.id, item });
+        return user;
     }
 
-    // Manual transaction (callback style, ALS-tracked)
+    // Manual transaction
     async batchImport(users: string[]) {
         await this.tm.begin({ isolation: Isolation.Serializable }, async (tx) => {
             for (const name of users) {
-                await this.userRepo.createUser(name);
+                await this.userRepo.create({ name });
             }
         });
     }
+
+    // Cross-database transaction (explicit data source)
+    @Transactional({ dataSource: 'analytics', driver: 'drizzle' })
+    async logAnalytics(event: any) {
+        // runs on the 'analytics' data source
+    }
 }
+```
+
+```yaml
+# config/config.yaml
+kavri:
+  drizzle:
+    dataSources:
+      default: postgres://localhost/myapp
+      analytics: postgres://localhost/analytics
+  sequelize:
+    dataSources:
+      legacy: mysql://localhost/legacy
 ```
 
 ## 10. Error Types
