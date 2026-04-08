@@ -140,6 +140,35 @@ class TenantDataSourceResolver extends DataSourceResolver {
         return { dataSource: `tenant_${tenantId}`, driver: 'drizzle' };
     }
 }
+
+// Interceptor: extract tenant from request, ensure dynamic data source is connected.
+const kTenantId = RequestContext.key<string>('tenantId');
+
+@Component()
+@Priority(Interceptor.GUARD + 1)
+class TenantInterceptor extends Interceptor {
+    constructor(
+        private readonly drivers = injectMap(DataSourceDriver),
+    ) {}
+
+    async intercept(next: () => unknown) {
+        const req = kRequest.getOrThrow();
+        const tenantId = req.headers['x-tenant-id'] as string;
+        if (!tenantId) return next();
+
+        kTenantId.set(tenantId);
+
+        const dsName = `tenant_${tenantId}`;
+        const driver = this.drivers.get('drizzle')!;
+        if (!driver.has(dsName)) {
+            // Fetch tenant connection info (e.g., from a central registry)
+            const tenantDbUrl = await fetchTenantDbUrl(tenantId);
+            await driver.connect(dsName, tenantDbUrl);
+        }
+
+        return next();
+    }
+}
 ```
 
 ## 5. Transaction (handle)
