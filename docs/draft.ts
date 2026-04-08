@@ -4,8 +4,8 @@ export {}
 // Section 1: Core Types
 // ============================================================
 
-type Qualifier = string | symbol;
-type Awaitable<T> = T | Promise<T>;
+export type Qualifier = string | symbol;
+export type Awaitable<T> = T | Promise<T>;
 export type CollectionOrder = 'topology' | 'priority' | 'alphabet';
 
 export type AnyConstructor<T> = abstract new (...args: any[]) => T;
@@ -52,7 +52,7 @@ interface ComponentMetadata {
 }
 
 /** Marks a class as a container-managed component. All components are singletons. */
-declare function Component(name?: Qualifier): ClassDecorator<ComponentMetadata>;
+export declare function Component(name?: Qualifier): ClassDecorator<ComponentMetadata>;
 
 // ============================================================
 // Section 3: Conditional Decorator
@@ -88,8 +88,9 @@ interface PriorityMetadata {
  * Marks a component's ordering priority for injectAll(..., 'priority').
  * Smaller value = higher priority (comes first).
  * Components without @Priority default to Infinity (sorted last).
+ * when injectAll(..., 'priority'), if a component has no priority, put first.
  */
-declare function Priority(value: number): ClassDecorator<PriorityMetadata>;
+export declare function Priority(value: number): ClassDecorator<PriorityMetadata>;
 
 // ============================================================
 // Section 4: Lifecycle Decorators
@@ -100,7 +101,7 @@ declare function Priority(value: number): ClassDecorator<PriorityMetadata>;
  * Multiple @OnConstruct on one class: called in declaration order, serially.
  * Return value is ignored.
  */
-declare function OnConstruct(): MethodDecorator<{}>;
+export declare function OnConstruct(): MethodDecorator<{}>;
 
 /**
  * Called during container destroy, in reverse dependency order.
@@ -178,10 +179,10 @@ declare class Ref<T> {
  *   6. onConstruct / onDestroy callback parameters (ProvideOptions)
  *   7. injectConfig() — also an inject point for @Configuration classes
  */
-declare function inject<T>(injectable: Injectable<T>): T
-declare function inject<T>(injectable: Injectable<T>, name: Qualifier): T
-declare function inject<T>(injectable: Injectable<T>, optional: true): T | undefined
-declare function inject<T>(injectable: Injectable<T>, name: Qualifier, optional: true): T | undefined
+export declare function inject<T>(injectable: Injectable<T>): T
+export declare function inject<T>(injectable: Injectable<T>, name: Qualifier): T
+export declare function inject<T>(injectable: Injectable<T>, optional: true): T | undefined
+export declare function inject<T>(injectable: Injectable<T>, name: Qualifier, optional: true): T | undefined
 
 declare function injectRef<T>(injectable: Injectable<T>): Ref<T>
 declare function injectRef<T>(injectable: Injectable<T>, optional: true): Ref<T> | undefined

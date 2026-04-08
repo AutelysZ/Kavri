@@ -3,7 +3,7 @@
 Transaction management in `@kavri/web`. AOP mechanism in `@kavri/container` (see [01-container-design.md](./01-container-design.md#10-aop)).
 ORM drivers: `@kavri/drizzle`, `@kavri/sequelize`.
 
-## 1. Transaction Types (`@kavri/web`)
+## 1. Transaction Types
 
 ```ts
 enum Isolation {
@@ -22,14 +22,17 @@ enum Propagation {
     Never = 'never',
 }
 
-interface TransactionOptions {
+interface DataSourceResolveOptions {
+    driver?: Qualifier;
+    dataSource?: Qualifier;
+    /** The instance or class requesting the connection. Used by resolvers for routing. */
+    target?: AnyConstructor<any> | object;
+}
+
+interface TransactionOptions extends DataSourceResolveOptions {
     isolation?: Isolation;
     propagation?: Propagation;
     timeout?: number;
-    /** Named data source. Resolved by DataSourceResolver if omitted. */
-    dataSource?: Qualifier;
-    /** Named driver. Resolved by DataSourceResolver if omitted. */
-    driver?: Qualifier;
 }
 ```
 
@@ -40,394 +43,303 @@ declare function Transactional(options?: TransactionOptions): AspectMethodDecora
 
 @Component()
 class TransactionalAspect extends MethodAspect<TransactionOptions> {
-    constructor(private readonly txManager = inject(TransactionManager)) {}
+    constructor(private readonly tm = inject(TransactionManager)) {}
 
-    around(metadata: TransactionOptions, instance: any, method: Function, args: any[]) {
-        return this.txManager.begin(metadata, () => method.apply(instance, args));
+    async around(metadata: TransactionOptions, instance: any, method: Function, args: any[]) {
+        const tx = await this.tm.begin(metadata);
+        try {
+            const result = await method.apply(instance, args);
+            await tx.commit();
+            return result;
+        } catch (err) {
+            await tx.rollback(err);
+            throw err;
+        }
     }
 }
 ```
 
-## 3. Data Source Abstraction
+## 3. DataSourceDriver
 
-### DataSourceDriver (interface, lives in each ORM package)
+Abstract class. Manages multiple/dynamic data sources internally. Does NOT manage connection pools — the driver acquires/releases connections in `doBegin`/`commit`/`rollback`.
 
-Each driver is `@Component('driverName')`. Found via `injectMap(DataSourceDriver)`.
+Subclasses must be `@Component('driverName')`. Found via `injectMap(DataSourceDriver)`.
 
 ```ts
-abstract class DataSourceDriver<TConnection = any> {
-    /** Ensure a data source exists. Create if needed (dynamic/multi-tenant). */
-    ensure(dataSource: Qualifier, connectionOptions: any): Awaitable<void>;
+abstract class DataSourceDriver<TOptions, TConnection, TPool extends TConnection = TConnection> {
+    /** Register a named data source. Called during init or dynamically. */
+    connect(name: Qualifier, options: TOptions): Promise<void>;
+    protected abstract doConnect(name: Qualifier, options: TOptions): Awaitable<TPool>;
 
-    /** Get a non-transactional connection. */
-    get(dataSource: Qualifier): TConnection;
+    /** Check if a data source is registered. */
+    has(name: Qualifier): boolean;
 
-    /** Begin a top-level transaction. */
-    begin(dataSource: Qualifier, options: TransactionOptions): Awaitable<TConnection>;
+    /** Get pool connection (non-transactional). */
+    get(name: Qualifier): TPool;
+
+    /** Begin a top-level transaction. Delegates to doBegin after resolving pool. */
+    begin(name: Qualifier, options: TransactionOptions): Awaitable<TConnection>;
+    protected abstract doBegin(pool: TPool, options: TransactionOptions): Awaitable<TConnection>;
 
     /** Create a nested transaction (savepoint). */
-    child(connection: TConnection, options: TransactionOptions): Awaitable<TConnection>;
+    abstract child(connection: TConnection, options: TransactionOptions): Awaitable<TConnection>;
 
-    /** Commit. */
-    commit(connection: TConnection): Awaitable<void>;
+    /** Commit a transaction. */
+    abstract commit(connection: TConnection): Awaitable<void>;
 
-    /** Rollback. */
-    rollback(connection: TConnection, error: any): Awaitable<void>;
+    /** Rollback a transaction. */
+    abstract rollback(connection: TConnection, error: any): Awaitable<void>;
+
+    /** Close a pool connection. */
+    abstract close(pool: TPool): Awaitable<void>;
+
+    /** Close all data sources. Called on container destroy. */
+    shutdown(): Promise<void>;
 }
 ```
 
-### DataSourceResolver
+`connect`/`has`/`get`/`begin`/`shutdown` are implemented by the base class (manages the internal name→pool map). Subclasses implement `doConnect`/`doBegin`/`child`/`commit`/`rollback`/`close`.
 
-Resolves data source, driver name, and connection options at runtime (e.g., multi-tenant).
+## 4. DataSourceResolver
+
+Resolves `driver` and `dataSource` from `DataSourceResolveOptions`. Multiple resolvers can coexist — the first one that returns a result wins. Sorted by `@Priority`.
 
 ```ts
 interface DataSourceResolution {
     dataSource: Qualifier;
     driver: Qualifier;
-    connectionOptions?: any;
 }
 
 abstract class DataSourceResolver {
-    abstract resolve(): Awaitable<DataSourceResolution>;
+    /**
+     * Return resolution or undefined to pass to the next resolver.
+     * Must be sync — repositories call getConnection() synchronously.
+     */
+    abstract resolve(options: DataSourceResolveOptions): DataSourceResolution | undefined;
 }
 ```
 
-When `TransactionOptions.dataSource` and `TransactionOptions.driver` are omitted, `TransactionManager` consults `DataSourceResolver`.
-
-### DataSourceManager
-
-Coordinates drivers. Manages the ALS-based transaction/connection stack.
+### DefaultDataSourceResolver (built-in, lowest priority)
 
 ```ts
-// ALS keys
-const kTransactionStack = RequestContext.key<TransactionFrame[]>('transactionStack');
-
-interface TransactionFrame {
-    dataSource: Qualifier;
-    driver: Qualifier;
-    connection: any;
-    options: TransactionOptions;
-}
-
 @Component()
-class DataSourceManager {
-    constructor(
-        private readonly drivers = injectMap(DataSourceDriver),
-        private readonly resolver = inject(DataSourceResolver, true),
-    ) {}
-
-    /** Get driver by name. */
-    getDriver(driver: Qualifier): DataSourceDriver {
-        const d = this.drivers.get(driver);
-        if (!d) throw new Error(`No driver: ${String(driver)}`);
-        return d;
-    }
-
-    /** Resolve data source + driver. Uses explicit values or falls back to resolver. */
-    async resolveSource(options: TransactionOptions): Promise<DataSourceResolution> {
-        if (options.dataSource && options.driver) {
-            return { dataSource: options.dataSource, driver: options.driver };
-        }
-        if (!this.resolver) throw new Error('No DataSourceResolver and no explicit dataSource/driver');
-        const resolved = await this.resolver.resolve();
-        return {
-            dataSource: options.dataSource ?? resolved.dataSource,
-            driver: options.driver ?? resolved.driver,
-            connectionOptions: resolved.connectionOptions,
-        };
-    }
-
-    /** Ensure data source exists (for dynamic cases). */
-    async ensureSource(resolution: DataSourceResolution): Promise<void> {
-        if (resolution.connectionOptions) {
-            const driver = this.getDriver(resolution.driver);
-            await driver.ensure(resolution.dataSource, resolution.connectionOptions);
-        }
-    }
-
+@Priority(10000)
+class DefaultDataSourceResolver extends DataSourceResolver {
     /**
-     * Get the current connection for a data source.
-     * Checks transaction stack first, falls back to non-transactional.
+     * Default resolution logic (ignores target):
+     * - If dataSource not specified, use 'default'
+     * - If driver not specified, find the unique driver that has the dataSource.
+     *   If multiple drivers have it, throw. If none, return undefined.
      */
-    getConnection<T>(dataSource: Qualifier, driver: Qualifier): T {
-        const stack = kTransactionStack.get();
-        if (stack) {
-            // Find the topmost frame for this data source
-            for (let i = stack.length - 1; i >= 0; i--) {
-                if (stack[i].dataSource === dataSource) {
-                    return stack[i].connection as T;
-                }
-            }
-        }
-        return this.getDriver(driver).get(dataSource) as T;
-    }
+    resolve(options: DataSourceResolveOptions): DataSourceResolution | undefined;
+}
+```
 
-    /** Push a transaction frame onto the stack. */
-    pushFrame(frame: TransactionFrame): void {
-        const stack = kTransactionStack.getOrInsertComputed(() => []);
-        stack.push(frame);
-    }
+For multi-tenant scenarios, implement a custom resolver at higher priority that reads tenant info from `RequestContext`:
 
-    /** Pop the topmost frame. */
-    popFrame(): void {
-        const stack = kTransactionStack.get();
-        if (stack) stack.pop();
+```ts
+@Component()
+@Priority(1000)
+class TenantDataSourceResolver extends DataSourceResolver {
+    resolve(options: DataSourceResolveOptions): DataSourceResolution | undefined {
+        const tenantId = kTenantId.get();
+        if (!tenantId) return undefined;
+        return { dataSource: `tenant_${tenantId}`, driver: 'drizzle' };
     }
 }
 ```
 
-## 4. TransactionManager
+## 5. Transaction (handle)
 
-Manages transaction lifecycle using ALS-based transaction stack.
+Returned by `TransactionManager.begin()`. Not callback-style — imperative begin/commit/rollback.
+
+```ts
+class Transaction {
+    /** Begin a nested transaction (respects propagation). */
+    begin(options?: TransactionOptions): Promise<Transaction>;
+    /** Commit. */
+    commit(): Promise<void>;
+    /** Rollback. */
+    rollback(error?: any): Promise<void>;
+}
+```
+
+## 6. TransactionManager
+
+Merges the old `DataSourceManager` role. Manages the ALS-based transaction stack, resolves data sources, and provides connections.
 
 ```ts
 @Component()
 class TransactionManager {
-    constructor(private readonly dsm = inject(DataSourceManager)) {}
+    constructor(
+        private readonly drivers = injectMap(DataSourceDriver),
+        private readonly resolvers = injectAll(DataSourceResolver, 'priority'),
+    ) {}
 
-    async begin<T>(options: TransactionOptions, fn: () => Promise<T>): Promise<T> {
+    /**
+     * Begin a transaction. Pushes onto the ALS transaction stack.
+     * Returns a Transaction handle for commit/rollback.
+     */
+    begin(options?: TransactionOptions): Promise<Transaction>;
+
+    /**
+     * Get the current connection for a data source.
+     * 1. Resolve target source via resolvers.
+     * 2. Check if target source is in the transaction stack → use tx connection.
+     * 3. Otherwise, get pool connection from driver.
+     *
+     * Must be sync — called from Repository.getConnection().
+     */
+    getConnection<T>(options?: DataSourceResolveOptions): T;
+
+    /** Resolve data source + driver via resolver chain. */
+    private resolveSource(options: DataSourceResolveOptions): DataSourceResolution;
+}
+```
+
+### Pseudocode
+
+```ts
+class TransactionManager {
+    begin(options: TransactionOptions = {}): Promise<Transaction> {
+        const resolution = this.resolveSource(options);
+        const driver = this.drivers.get(resolution.driver);
         const propagation = options.propagation ?? Propagation.Required;
-        const resolution = await this.dsm.resolveSource(options);
-        await this.dsm.ensureSource(resolution);
-
-        const driver = this.dsm.getDriver(resolution.driver);
-        const stack = kTransactionStack.get();
-        const currentFrame = stack?.findLast(f => f.dataSource === resolution.dataSource);
+        const current = this.findCurrentTransaction(resolution.dataSource);
 
         switch (propagation) {
             case Propagation.Required:
-                if (currentFrame) return fn();
-                return this.executeNew(driver, resolution, options, fn);
+                if (current) return current; // reuse
+                return this.beginNew(driver, resolution, options);
 
             case Propagation.RequiresNew:
-                if (currentFrame) return this.executeNested(driver, currentFrame, resolution, options, fn);
-                return this.executeNew(driver, resolution, options, fn);
+                return this.beginNew(driver, resolution, options);
+                // Note: if current exists, new tx is independent
 
             case Propagation.Supports:
-                return fn();
+                if (current) return current;
+                return Transaction.NOOP; // no-op transaction
 
             case Propagation.Mandatory:
-                if (!currentFrame) throw new TransactionError('No existing transaction');
-                return fn();
+                if (!current) throw new TransactionError('No existing transaction');
+                return current;
 
             case Propagation.NotSupported:
-                // Temporarily remove all frames for this data source
-                return this.executeSuspended(resolution.dataSource, fn);
+                return Transaction.NOOP;
 
             case Propagation.Never:
-                if (currentFrame) throw new TransactionError('Transaction not allowed');
-                return fn();
+                if (current) throw new TransactionError('Transaction not allowed');
+                return Transaction.NOOP;
         }
     }
 
-    private async executeNew<T>(
-        driver: DataSourceDriver,
-        resolution: DataSourceResolution,
-        options: TransactionOptions,
-        fn: () => Promise<T>,
-    ): Promise<T> {
+    private async beginNew(driver, resolution, options): Promise<Transaction> {
         const conn = await driver.begin(resolution.dataSource, options);
-        const frame: TransactionFrame = {
-            dataSource: resolution.dataSource,
-            driver: resolution.driver,
-            connection: conn,
-            options,
-        };
-        this.dsm.pushFrame(frame);
-        try {
-            const result = await this.withTimeout(options.timeout, fn);
-            await driver.commit(conn);
-            return result;
-        } catch (err) {
-            await driver.rollback(conn, err);
-            throw err;
-        } finally {
-            this.dsm.popFrame();
-        }
+        const frame = { dataSource: resolution.dataSource, driver: resolution.driver, connection: conn };
+        pushFrame(frame); // push onto ALS stack
+        return new Transaction(driver, frame, () => popFrame(frame));
     }
 
-    private async executeNested<T>(
-        driver: DataSourceDriver,
-        parent: TransactionFrame,
-        resolution: DataSourceResolution,
-        options: TransactionOptions,
-        fn: () => Promise<T>,
-    ): Promise<T> {
-        const childConn = await driver.child(parent.connection, options);
-        const frame: TransactionFrame = {
-            dataSource: resolution.dataSource,
-            driver: resolution.driver,
-            connection: childConn,
-            options,
-        };
-        this.dsm.pushFrame(frame);
-        try {
-            const result = await this.withTimeout(options.timeout, fn);
-            await driver.commit(childConn);
-            return result;
-        } catch (err) {
-            await driver.rollback(childConn, err);
-            throw err;
-        } finally {
-            this.dsm.popFrame();
-        }
+    getConnection<T>(options: DataSourceResolveOptions = {}): T {
+        const resolution = this.resolveSource(options);
+        const frame = this.findCurrentTransaction(resolution.dataSource);
+        if (frame) return frame.connection as T;
+        const driver = this.drivers.get(resolution.driver)!;
+        return driver.get(resolution.dataSource) as T;
     }
 
-    private async executeSuspended<T>(dataSource: Qualifier, fn: () => Promise<T>): Promise<T> {
-        const stack = kTransactionStack.get() ?? [];
-        const suspended = stack.filter(f => f.dataSource === dataSource);
-        const remaining = stack.filter(f => f.dataSource !== dataSource);
-        kTransactionStack.set(remaining);
-        try {
-            return await fn();
-        } finally {
-            kTransactionStack.set([...remaining, ...suspended]);
+    private resolveSource(options: DataSourceResolveOptions): DataSourceResolution {
+        if (options.dataSource && options.driver) {
+            return { dataSource: options.dataSource, driver: options.driver };
         }
+        for (const resolver of this.resolvers) {
+            const result = resolver.resolve(options);
+            if (result) return result;
+        }
+        throw new TransactionError('Cannot resolve data source');
     }
 
-    private async withTimeout<T>(timeout: number | undefined, fn: () => Promise<T>): Promise<T> {
-        if (!timeout) return fn();
-        return Promise.race([
-            fn(),
-            new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new TransactionError('Transaction timeout')), timeout)
-            ),
-        ]);
+    private findCurrentTransaction(dataSource: Qualifier): TransactionFrame | undefined {
+        const stack = kTransactionStack.get();
+        if (!stack) return undefined;
+        for (let i = stack.length - 1; i >= 0; i--) {
+            if (stack[i].dataSource === dataSource) return stack[i];
+        }
+        return undefined;
     }
 }
 ```
 
-## 5. Drizzle Driver (`@kavri/drizzle`)
+## 7. Example Driver
 
 ```ts
-@Configuration('kavri.drizzle')
-class DrizzleOptions {
-    @IsString() url!: string;
-    @IsString({ default: 'default' }) dataSource!: string;
-}
+@Component('my')
+class MyDriver extends DataSourceDriver<string, { query(sql: string): any }> {
+    private dataSources: Record<string, string> = {}; // from config
 
-@Component('drizzle')
-class DrizzleDataSourceDriver extends DataSourceDriver {
-    private databases = new Map<Qualifier, DrizzleDatabase>();
+    protected doConnect(name: Qualifier, options: string) {
+        return { query(sql: string) { return 'my:' + sql; } };
+    }
+
+    protected doBegin(pool: { query(sql: string): any }, options: TransactionOptions) {
+        pool.query('BEGIN');
+        return pool;
+    }
+
+    child(connection: { query(sql: string): any }, options: TransactionOptions) {
+        connection.query('SAVEPOINT');
+        return connection;
+    }
+
+    commit(connection: { query(sql: string): any }) { connection.query('COMMIT'); }
+    rollback(connection: { query(sql: string): any }, error: any) { connection.query('ROLLBACK'); }
+    close(connection: { query(sql: string): any }) {}
 
     @OnConstruct()
-    async init(config = injectConfig(DrizzleOptions)) {
-        const db = drizzle(config.url);
-        this.databases.set(config.dataSource, db);
-    }
-
-    ensure(dataSource: Qualifier, connectionOptions: any) {
-        if (!this.databases.has(dataSource)) {
-            this.databases.set(dataSource, drizzle(connectionOptions.url));
+    async init() {
+        for (const [k, v] of Object.entries(this.dataSources)) {
+            await this.connect(k, v);
         }
     }
-
-    get(dataSource: Qualifier) {
-        const db = this.databases.get(dataSource);
-        if (!db) throw new Error(`Data source not found: ${String(dataSource)}`);
-        return db;
-    }
-
-    async begin(dataSource: Qualifier, options: TransactionOptions) {
-        const db = this.get(dataSource);
-        const started = Promise.withResolvers<any>();
-        const control = Promise.withResolvers<void>();
-
-        const txPromise = db.transaction(
-            { isolationLevel: options.isolation },
-            async (tx) => {
-                started.resolve(tx);
-                return control.promise;
-            },
-        );
-        txPromise.catch(started.reject);
-
-        const tx = await started.promise;
-        tx.__control = control;
-        tx.__promise = txPromise;
-        return tx;
-    }
-
-    async child(connection: any, options: TransactionOptions) {
-        // Drizzle savepoint — same pattern on the tx object
-        const started = Promise.withResolvers<any>();
-        const control = Promise.withResolvers<void>();
-
-        const spPromise = connection.transaction(async (sp: any) => {
-            started.resolve(sp);
-            return control.promise;
-        });
-        spPromise.catch(started.reject);
-
-        const sp = await started.promise;
-        sp.__control = control;
-        sp.__promise = spPromise;
-        return sp;
-    }
-
-    async commit(connection: any) {
-        connection.__control.resolve();
-        await connection.__promise;
-    }
-
-    async rollback(connection: any, error: any) {
-        connection.__control.reject(error);
-        await connection.__promise.catch(() => {});
-    }
 }
 ```
 
-## 6. Drizzle Repository (`@kavri/drizzle`)
-
-Repository knows only the data source name. The driver is resolved automatically.
-
-```ts
-abstract class DrizzleRepository<TRecord> {
-    constructor(
-        protected readonly dsm = inject(DataSourceManager),
-        protected readonly table: any,
-        protected readonly dataSource: Qualifier = 'default',
-        protected readonly driverName: Qualifier = 'drizzle',
-    ) {}
-
-    protected getConnection() {
-        return this.dsm.getConnection(this.dataSource, this.driverName);
-    }
-
-    async findOne(id: any): Promise<TRecord | undefined> {
-        const conn = this.getConnection();
-        const rows = await conn.select().from(this.table).where(eq(this.table.id, id)).limit(1);
-        return rows[0];
-    }
-
-    async findAll(): Promise<TRecord[]> {
-        return this.getConnection().select().from(this.table);
-    }
-
-    async create(data: Partial<TRecord>): Promise<TRecord> {
-        const rows = await this.getConnection().insert(this.table).values(data).returning();
-        return rows[0];
-    }
-
-    async delete(id: any): Promise<void> {
-        await this.getConnection().delete(this.table).where(eq(this.table.id, id));
-    }
-}
-```
-
-### Application usage
+## 8. Example Repository
 
 ```ts
 @Component()
-class UserRepository extends DrizzleRepository<User> {
-    constructor() {
-        super(inject(DataSourceManager), userTable);
+class MyRepository {
+    constructor(
+        private readonly table: string,
+        private readonly tm = inject(TransactionManager),
+        private readonly dataSource?: string,
+    ) {}
+
+    protected get conn() {
+        return this.tm.getConnection<{ query(sql: string): any }>({
+            driver: 'my',
+            target: this,
+            dataSource: this.dataSource,
+        });
     }
 
-    async findByEmail(email: string) {
-        return this.getConnection()
-            .select().from(userTable)
-            .where(eq(userTable.email, email));
+    findOne(id: string) {
+        return this.conn.query(`select * from ${this.table} where id = ${id}`);
+    }
+}
+```
+
+## 9. Example Application
+
+```ts
+@Component()
+class UserRepository extends MyRepository {
+    constructor() {
+        super('user');
+    }
+
+    async createUser(name: string) {
+        return this.conn.query(`insert into user (name) values (${name})`);
     }
 }
 
@@ -435,92 +347,65 @@ class UserRepository extends DrizzleRepository<User> {
 class UserService {
     constructor(
         private readonly userRepo = inject(UserRepository),
-        private readonly orderRepo = inject(OrderRepository),
+        private readonly tm = inject(TransactionManager),
     ) {}
 
     @Transactional()
     async createUserWithOrder(name: string) {
-        const user = await this.userRepo.create({ name });
-        await this.orderRepo.create({ userId: user.id });
-        return user;
+        await this.userRepo.createUser(name);
+        // other repo calls — all share the same transaction
     }
 
-    @Transactional({ propagation: Propagation.RequiresNew, dataSource: 'analytics', driver: 'drizzle' })
-    async logAnalytics(event: any) {
-        // runs in a separate transaction on the 'analytics' data source
-    }
-}
-```
-
-## 7. Sequelize Driver (`@kavri/sequelize`)
-
-```ts
-@Component('sequelize')
-class SequelizeDataSourceDriver extends DataSourceDriver {
-    private instances = new Map<Qualifier, Sequelize>();
-
-    @OnConstruct()
-    async init(config = injectConfig(SequelizeOptions)) {
-        const seq = new Sequelize(config.url);
-        await seq.authenticate();
-        this.instances.set(config.dataSource, seq);
-    }
-
-    ensure(dataSource: Qualifier, connectionOptions: any) {
-        if (!this.instances.has(dataSource)) {
-            this.instances.set(dataSource, new Sequelize(connectionOptions.url));
+    // Manual transaction (imperative, no callback)
+    async batchImport(users: string[]) {
+        const tx = await this.tm.begin({ isolation: Isolation.Serializable });
+        try {
+            for (const name of users) {
+                await this.userRepo.createUser(name);
+            }
+            await tx.commit();
+        } catch (err) {
+            await tx.rollback(err);
+            throw err;
         }
     }
-
-    get(dataSource: Qualifier) { return this.instances.get(dataSource)!; }
-
-    async begin(dataSource: Qualifier, options: TransactionOptions) {
-        return this.get(dataSource).transaction({ isolationLevel: options.isolation });
-    }
-
-    async child(connection: any, options: TransactionOptions) {
-        return this.get(connection.__dataSource).transaction({ transaction: connection });
-    }
-
-    async commit(connection: any) { await connection.commit(); }
-    async rollback(connection: any, error: any) { await connection.rollback(); }
 }
 ```
 
-## 8. Error Types
+## 10. Error Types
 
 ```ts
 declare class TransactionError extends Error {}
 ```
 
-## 9. ALS Flow Summary
-
-The entire transaction system is built on `AsyncLocalStorage` via `RequestContext`:
+## 11. ALS Flow
 
 ```
 kTransactionStack: Key<TransactionFrame[]>
 
-TransactionManager.begin()
+TransactionManager.begin(options)
   │
-  ├─ resolveSource() → { dataSource, driver, connectionOptions }
-  ├─ ensureSource() → driver.ensure() if dynamic
-  ├─ driver.begin() → connection
-  ├─ pushFrame({ dataSource, driver, connection, options })
+  ├─ resolveSource(options) → { dataSource, driver }
+  │   └─ walks resolver chain (sorted by @Priority)
   │
-  │  fn() runs — any code can call:
-  │    DataSourceManager.getConnection(dataSource, driver)
-  │      → checks kTransactionStack for matching frame
-  │      → returns transaction connection if found
-  │      → falls back to driver.get() if not
+  ├─ findCurrentTransaction(dataSource) → existing frame?
+  │   └─ Propagation rules decide: reuse / new / error / noop
   │
-  │  Nested @Transactional:
-  │    TransactionManager.begin() again
-  │      → finds existing frame → Propagation rules decide
-  │      → RequiresNew → driver.child() → pushFrame()
-  │      → Required → reuse existing, just call fn()
-  │
-  ├─ driver.commit() or driver.rollback()
-  └─ popFrame()
+  ├─ driver.begin(dataSource, options) → connection
+  ├─ pushFrame({ dataSource, driver, connection })
+  └─ return Transaction handle
+     │
+     │  fn() runs — any getConnection() call:
+     │    TransactionManager.getConnection(opts)
+     │      → resolveSource → findCurrentTransaction
+     │      → returns tx connection if found, else pool connection
+     │
+     │  Nested @Transactional / tm.begin():
+     │    → Propagation.Required → reuse existing Transaction
+     │    → Propagation.RequiresNew → driver.begin() → new frame
+     │
+     ├─ tx.commit() → driver.commit(conn) → popFrame()
+     └─ tx.rollback(err) → driver.rollback(conn, err) → popFrame()
 ```
 
-Works both inside web requests (`RequestContext.run()` already active) and outside (CLI, workers — `RequestContext.run()` is called implicitly by `TransactionManager`).
+Resolver must be **sync** — `getConnection()` is called synchronously from repositories. For multi-tenant, an interceptor sets up the context (e.g., `kTenantId`) before the handler runs; the resolver reads it synchronously.
