@@ -27,7 +27,8 @@ Kavri is a TypeScript IoC framework focused on explicit dependency wiring with o
 @kavri/client  → createClient, injectClient, typed HTTP clients from service definitions
 @kavri/eslint-plugin → ESLint rules for inject-point enforcement
 @kavri/aws-secretmanager-resolver → AWS Secrets Manager Resolver for @kavri/config
-@kavri/drizzle → Drizzle ORM integration, TransactionInterceptor, Repository base
+@kavri/drizzle → DrizzleDataSourceDriver, DrizzleRepository
+@kavri/sequelize → SequelizeDataSourceDriver, SequelizeRepository
 ```
 
 ## Document map
@@ -42,7 +43,8 @@ Kavri is a TypeScript IoC framework focused on explicit dependency wiring with o
 | [`06-web-design.md`](./06-web-design.md) | Controller, createController, interceptors, WebApplication |
 | [`08-eslint-plugin-design.md`](./08-eslint-plugin-design.md) | ESLint rules for inject-point enforcement |
 | [`09-schema-design.md`](./09-schema-design.md) | @Schema, field decorators, defineRoute, parse, toJsonSchema |
-| [`10-logging-design.md`](./10-logging-design.md) | Logger, injectLogger, LogConfiguration |
+| [`10-logging-design.md`](./10-logging-design.md) | Logger, injectLogger, LoggingOptions |
+| [`11-transaction-design.md`](./11-transaction-design.md) | @Transactional, TransactionManager, DataSourceDriver, AOP |
 | [`draft.ts`](./draft.ts) | Complete API declarations with usage examples |
 
 ## Current focus

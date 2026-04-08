@@ -305,56 +305,9 @@ class StaticFileInterceptor extends Interceptor {
 }
 ```
 
-## 9. Database Transactions (Drizzle + AsyncLocalStorage)
+## 9. Transactions
 
-```ts
-import { AsyncLocalStorage } from 'node:async_hooks';
-
-const txStorage = new AsyncLocalStorage<DrizzleTransaction>();
-
-function Transactional(): MethodDecorator<{}> {
-    return createMethodDecorator(Transactional, {});
-}
-
-@Component()
-@Priority(Interceptor.HANDLER - 1)
-class TransactionInterceptor extends Interceptor {
-    constructor(private readonly db = inject(DrizzleDatabase)) { super(); }
-
-    async intercept(next: () => unknown) {
-        const ctrl = kController.get();
-        const endpoint = kEndpoint.get();
-        const isTx = ctrl && endpoint && Metadata.of(Transactional, ctrl.constructor, endpoint.path).length > 0;
-        if (isTx) {
-            return this.db.transaction((tx) => txStorage.run(tx, next));
-        }
-        return next();
-    }
-}
-
-@Component()
-abstract class Repository<T> {
-    constructor(private readonly db = inject(DrizzleDatabase)) {}
-
-    protected get connection() {
-        return txStorage.getStore() ?? this.db;
-    }
-}
-```
-
-Usage — `@Transactional()` on a controller method:
-
-```ts
-@Controller()
-class OrderController extends createController(OrderRoute) {
-    constructor(private readonly orderRepo = inject(OrderRepository)) { super(); }
-
-    @Transactional()
-    override async createOrder(input: CreateOrderBody): Promise<OrderResponse> {
-        return this.orderRepo.create(input);
-    }
-}
-```
+See [11-transaction-design.md](./11-transaction-design.md). `@Transactional()`, `TransactionManager`, `DataSourceDriver`, `DataSourceManager` — all in `@kavri/web`. ORM drivers in `@kavri/drizzle` and `@kavri/sequelize`.
 
 ## 10. Configuration
 
@@ -478,7 +431,7 @@ class WebApplication {
 ```ts
 @Component()
 @Touch(UserController, OrderController)
-@Touch(LoggingInterceptor, TransactionInterceptor, BasicAuthInterceptor)
+@Touch(LoggingInterceptor, BasicAuthInterceptor)
 @Use(InfraModule)
 class MyApplication {}
 
@@ -802,9 +755,6 @@ ResolveInterceptor (8000)        ← merges → sets Params
   │
   ▼
 ValidateInterceptor (9000)       ← validates Params, throws 400
-  │
-  ▼
-[TransactionInterceptor (9999)]  ← user-provided
   │
   ▼
 HandlerInterceptor (10000)       ← calls controller method, returns result
