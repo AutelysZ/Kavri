@@ -52,14 +52,93 @@ class TransactionalAspect extends MethodAspect<TransactionOptions> {
 }
 ```
 
-## 3. DataSourceDriver
+## 3. DataSourceOptions (standardized config)
 
-Abstract class. Manages multiple/dynamic data sources internally. Does NOT manage connection pools — the driver acquires/releases connections in `doBegin`/`commit`/`rollback`.
+Unified data source configuration. Drivers that follow this structure don't need their own config class.
+
+```ts
+@Schema()
+class InstanceOptions {
+    @IsString({ optional: true }) host?: string;
+    @IsInteger({ optional: true }) port?: number;
+    @IsString({ optional: true }) username?: string;
+    @IsString({ optional: true }) password?: string;
+    @IsString({ optional: true }) database?: string;
+    @IsString({ optional: true }) schema?: string;
+    @IsAny({ optional: true }) dialectOptions?: any;
+}
+
+@Schema()
+class ClusterOptions extends InstanceOptions {
+    @IsString({ optional: true }) name?: string;
+    @IsString() dialect!: string;         // 'postgres', 'mysql', 'sqlite', etc.
+    @IsString({ optional: true }) driver?: string;  // driver name, e.g., 'drizzle', 'sequelize'
+    @IsArray(Ref(() => InstanceOptions), { optional: true }) readReplicas?: InstanceOptions[];
+    @IsInteger({ optional: true }) maxConnections?: number;
+    @IsInteger({ optional: true }) minConnections?: number;
+    @IsInteger({ optional: true }) connectionTimeout?: number;
+    @IsInteger({ optional: true }) idleTimeout?: number;
+    @IsInteger({ optional: true }) maxLifetime?: number;
+}
+
+@Schema()
+class NamedClusterOptions extends ClusterOptions {
+    @IsString() name!: string;
+}
+
+@Configuration('kavri.datasource')
+class DataSourceOptions extends ClusterOptions {
+    /** Additional named data sources. */
+    @IsArray(Ref(() => NamedClusterOptions), { optional: true })
+    multiSources?: NamedClusterOptions[];
+}
+```
+
+Config example:
+
+```yaml
+kavri:
+  datasource:
+    dialect: postgres
+    driver: drizzle
+    host: localhost
+    port: 5432
+    username: admin
+    password: secret
+    database: myapp
+    maxConnections: 10
+    multiSources:
+      - name: analytics
+        dialect: postgres
+        driver: drizzle
+        host: analytics-db
+        database: analytics
+      - name: legacy
+        dialect: mysql
+        driver: sequelize
+        host: legacy-db
+        database: legacy
+```
+
+## 4. DataSourceDriver
+
+Abstract class. Manages multiple/dynamic data sources. Does NOT manage connection pools — the driver acquires/releases connections in `doBegin`/`commit`/`rollback`.
 
 Subclasses must be `@Component('driverName')`. Found via `injectMap(DataSourceDriver)`.
 
+The base class optionally injects `DataSourceOptions` and provides `getSources()` to filter data sources matching the current driver name.
+
 ```ts
 abstract class DataSourceDriver<TOptions, TConnection, TPool extends TConnection = TConnection> {
+    constructor(private readonly dsOptions = inject(DataSourceOptions, true)) {}
+
+    /**
+     * Get data sources from DataSourceOptions that match this driver.
+     * Filters by ClusterOptions.driver === this component's name.
+     * Includes the root source (if driver matches) and multiSources entries.
+     */
+    protected getSources(): NamedClusterOptions[];
+
     /** Register a named data source. Idempotent — only connects once per name. */
     connect(name: Qualifier, options: TOptions): Promise<void>;
     protected abstract doConnect(name: Qualifier, options: TOptions): Awaitable<TPool>;
@@ -91,9 +170,9 @@ abstract class DataSourceDriver<TOptions, TConnection, TPool extends TConnection
 }
 ```
 
-`connect`/`has`/`get`/`begin`/`shutdown` are implemented by the base class (manages the internal name→pool map). Subclasses implement `doConnect`/`doBegin`/`child`/`commit`/`rollback`/`close`.
+`connect`/`has`/`get`/`begin`/`shutdown`/`getSources` are implemented by the base class. Subclasses implement `doConnect`/`doBegin`/`child`/`commit`/`rollback`/`close`.
 
-## 4. DataSourceResolver
+## 5. DataSourceResolver
 
 Resolves `driver` and `dataSource` from `DataSourceResolveOptions`. Multiple resolvers can coexist — the first one that returns a result wins. Sorted by `@Priority`.
 
@@ -167,7 +246,7 @@ class TenantInterceptor extends Interceptor {
 }
 ```
 
-## 5. Transaction (handle)
+## 6. Transaction (handle)
 
 Passed to `TransactionManager.begin()` callback. Commit/rollback happen automatically — commit on callback success, rollback on throw. Manual commit/rollback also available. Nested transactions via `tx.begin()`.
 
@@ -182,7 +261,7 @@ class Transaction {
 }
 ```
 
-## 6. TransactionManager
+## 7. TransactionManager
 
 Merges the old `DataSourceManager` role. Manages the ALS-based transaction stack, resolves data sources, and provides connections.
 
@@ -298,32 +377,22 @@ class TransactionManager {
 }
 ```
 
-## 7. Drizzle Driver (`@kavri/drizzle`)
+## 8. Drizzle Driver (`@kavri/drizzle`)
 
 ```ts
-interface DrizzleConnectionOptions {
-    url: string;
-}
-
-@Configuration('kavri.drizzle')
-class DrizzleConfig {
-    /** Named data sources. Key = name, value = connection URL. */
-    @IsRecord(IsString())
-    dataSources!: Record<string, string>;
-}
-
 @Component('drizzle')
-class DrizzleDataSourceDriver extends DataSourceDriver<DrizzleConnectionOptions, DrizzleTransaction, DrizzleDatabase> {
+class DrizzleDataSourceDriver extends DataSourceDriver<NamedClusterOptions, DrizzleTransaction, DrizzleDatabase> {
 
     @OnConstruct()
-    async init(config = injectConfig(DrizzleConfig)) {
-        for (const [name, url] of Object.entries(config.dataSources)) {
-            await this.connect(name, { url });
+    async init() {
+        for (const source of this.getSources()) {
+            await this.connect(source.name, source);
         }
     }
 
-    protected doConnect(name: Qualifier, options: DrizzleConnectionOptions) {
-        return drizzle(options.url);
+    protected doConnect(name: Qualifier, options: NamedClusterOptions) {
+        const url = `${options.dialect}://${options.username}:${options.password}@${options.host}:${options.port}/${options.database}`;
+        return drizzle(url);
     }
 
     protected async doBegin(pool: DrizzleDatabase, options: TransactionOptions) {
@@ -417,31 +486,34 @@ abstract class DrizzleRepository<TRecord> {
 }
 ```
 
-## 8. Sequelize Driver (`@kavri/sequelize`)
+## 9. Sequelize Driver (`@kavri/sequelize`)
 
 ```ts
-interface SequelizeConnectionOptions {
-    url: string;
-}
-
-@Configuration('kavri.sequelize')
-class SequelizeConfig {
-    @IsRecord(IsString())
-    dataSources!: Record<string, string>;
-}
-
 @Component('sequelize')
-class SequelizeDataSourceDriver extends DataSourceDriver<SequelizeConnectionOptions, SequelizeTransaction, Sequelize> {
+class SequelizeDataSourceDriver extends DataSourceDriver<NamedClusterOptions, SequelizeTransaction, Sequelize> {
 
     @OnConstruct()
-    async init(config = injectConfig(SequelizeConfig)) {
-        for (const [name, url] of Object.entries(config.dataSources)) {
-            await this.connect(name, { url });
+    async init() {
+        for (const source of this.getSources()) {
+            await this.connect(source.name, source);
         }
     }
 
-    protected async doConnect(name: Qualifier, options: SequelizeConnectionOptions) {
-        const seq = new Sequelize(options.url);
+    protected async doConnect(name: Qualifier, options: NamedClusterOptions) {
+        const seq = new Sequelize({
+            dialect: options.dialect,
+            host: options.host,
+            port: options.port,
+            username: options.username,
+            password: options.password,
+            database: options.database,
+            pool: {
+                max: options.maxConnections,
+                min: options.minConnections,
+                acquire: options.connectionTimeout,
+                idle: options.idleTimeout,
+            },
+        });
         await seq.authenticate();
         return seq;
     }
@@ -497,7 +569,7 @@ abstract class SequelizeRepository<TRecord> {
 }
 ```
 
-## 9. Application Example
+## 10. Application Example
 
 ```ts
 // --- Repositories ---
@@ -555,24 +627,39 @@ class UserService {
 ```
 
 ```yaml
-# config/config.yaml
+# config/config.yaml — uses standardized DataSourceOptions
 kavri:
-  drizzle:
-    dataSources:
-      default: postgres://localhost/myapp
-      analytics: postgres://localhost/analytics
-  sequelize:
-    dataSources:
-      legacy: mysql://localhost/legacy
+  datasource:
+    dialect: postgres
+    driver: drizzle
+    host: localhost
+    port: 5432
+    username: admin
+    password: secret
+    database: myapp
+    maxConnections: 10
+    multiSources:
+      - name: analytics
+        dialect: postgres
+        driver: drizzle
+        host: analytics-db
+        database: analytics
+      - name: legacy
+        dialect: mysql
+        driver: sequelize
+        host: legacy-db
+        username: root
+        password: secret
+        database: legacy
 ```
 
-## 10. Error Types
+## 11. Error Types
 
 ```ts
 declare class TransactionError extends Error {}
 ```
 
-## 11. ALS Flow
+## 12. ALS Flow
 
 ```
 kTransactionStack: Key<TransactionFrame[]>
