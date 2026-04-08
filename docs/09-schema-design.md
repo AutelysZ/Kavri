@@ -349,7 +349,7 @@ interface EndpointOptions {
     /** Required when requestType = 'multipart'. */
     multipart?: { maxFileSize: number; maxBodySize: number; accept?: string[] };
     /** Required when requestType = 'binary'. */
-    binary?: { maxBodySize: number; filename?: string; accept?: string[] };
+    binary?: { maxBodySize: number };
 }
 
 interface Endpoint<TReq = any, TRes = any> {
@@ -407,6 +407,17 @@ declare function IsFile(options?: IsFileOptions): SchemaFieldDecorator;
  */
 declare function IsBody(options?: ValidateOptions): SchemaFieldDecorator;
 
+/**
+ * Marks a field as a filename for binary uploads.
+ * Auto-sets schema to string. Validates against accept patterns if provided.
+ * Use in binary request schemas alongside @IsBody.
+ * Do NOT combine with other schema decorators.
+ */
+interface IsFilenameOptions extends ValidateOptions {
+    /** Accepted file extensions or MIME patterns. E.g., ['.png', '.jpg', 'image/*']. */
+    accept?: string[];
+}
+declare function IsFilename(options?: IsFilenameOptions, schema?: StringSchema): SchemaFieldDecorator;
 ```
 
 Usage:
@@ -426,10 +437,11 @@ class BulkUpload {
     @IsFile({ array: true }) files!: MultipartFile[];
 }
 
-// Binary body
+// Binary body with filename
 @Schema()
 class RawUploadParams {
-    @IsInteger() id!: number;      // from path/query
+    @IsInteger() id!: number;                                    // from path/query
+    @IsFilename({ accept: ['.png', '.jpg', 'image/*'] }) filename!: string;
     @IsBody() body!: ReadableStream;
 }
 
