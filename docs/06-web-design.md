@@ -116,7 +116,7 @@ const kFiles = RequestContext.key<Record<string, MultipartFile | MultipartFile[]
 /** Final merged params: path params + query + body + files, shaped to request schema. */
 const kParams = RequestContext.key<unknown>('params');
 
-// --- For logging (from @kavri/log integration) ---
+// --- For logging (from @kavri/logging integration) ---
 
 /** Request-scoped logging context. Interceptors append data here. */
 const kLogging = RequestContext.key<Record<string, unknown>>('logging');
