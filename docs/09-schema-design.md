@@ -392,6 +392,8 @@ These decorators are exclusive to route request schemas. They auto-set the field
 interface MultipartFile {
     /** Original uploaded filename. */
     readonly name: string;
+    /** File size in bytes. */
+    readonly size: number;
     /** Temp file path on disk. */
     readonly path: string;
 }
