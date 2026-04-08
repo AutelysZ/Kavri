@@ -55,7 +55,7 @@ class TransactionalAspect extends MethodAspect<TransactionOptions> {
 Each driver is `@Component('driverName')`. Found via `injectMap(DataSourceDriver)`.
 
 ```ts
-interface DataSourceDriver<TConnection = any> {
+abstract class DataSourceDriver<TConnection = any> {
     /** Ensure a data source exists. Create if needed (dynamic/multi-tenant). */
     ensure(dataSource: Qualifier, connectionOptions: any): Awaitable<void>;
 
@@ -307,7 +307,7 @@ class DrizzleOptions {
 }
 
 @Component('drizzle')
-class DrizzleDataSourceDriver implements DataSourceDriver {
+class DrizzleDataSourceDriver extends DataSourceDriver {
     private databases = new Map<Qualifier, DrizzleDatabase>();
 
     @OnConstruct()
@@ -456,7 +456,7 @@ class UserService {
 
 ```ts
 @Component('sequelize')
-class SequelizeDataSourceDriver implements DataSourceDriver {
+class SequelizeDataSourceDriver extends DataSourceDriver {
     private instances = new Map<Qualifier, Sequelize>();
 
     @OnConstruct()
