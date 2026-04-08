@@ -14,11 +14,19 @@ enum Isolation {
 }
 
 enum Propagation {
+    /** Use existing transaction, create new if none. Default. */
     Required = 'required',
+    /** Always create a new independent transaction. */
     RequiresNew = 'requires_new',
+    /** Create a savepoint within the existing transaction. Create new if none. */
+    Nested = 'nested',
+    /** Use existing transaction if any, otherwise non-transactional. */
     Supports = 'supports',
+    /** Must have existing transaction, throw if none. */
     Mandatory = 'mandatory',
+    /** Run non-transactional, suspend existing if any. */
     NotSupported = 'not_supported',
+    /** Throw if existing transaction. */
     Never = 'never',
 }
 
@@ -47,7 +55,7 @@ class TransactionalAspect extends MethodAspect<TransactionOptions> {
 
     around(metadata: TransactionOptions, instance: any, method: Function, args: any[]) {
         const options = metadata.target ? metadata : { ...metadata, target: instance };
-        return this.tm.begin(options, (tx) => method.apply(instance, args));
+        return this.tm.begin(options, () => method.apply(instance, args));
     }
 }
 ```
@@ -59,6 +67,8 @@ Unified data source configuration. Drivers that follow this structure don't need
 ```ts
 @Schema()
 class InstanceOptions {
+    /** Connection URL. If set, takes precedence over individual host/port/... fields. */
+    @IsString({ optional: true }) url?: string;
     @IsString({ optional: true }) host?: string;
     @IsInteger({ optional: true }) port?: number;
     @IsString({ optional: true }) username?: string;
@@ -71,8 +81,8 @@ class InstanceOptions {
 @Schema()
 class ClusterOptions extends InstanceOptions {
     @IsString({ optional: true }) name?: string;
-    @IsString() dialect!: string;         // 'postgres', 'mysql', 'sqlite', etc.
-    @IsString() driver!: string;  // driver name, e.g., 'drizzle', 'sequelize'
+    @IsString() dialect!: string;
+    @IsString() driver!: string;
     @IsArray(Ref(() => InstanceOptions), { optional: true }) readReplicas?: InstanceOptions[];
     @IsInteger({ optional: true }) maxConnections?: number;
     @IsInteger({ optional: true }) minConnections?: number;
@@ -88,11 +98,12 @@ class NamedClusterOptions extends ClusterOptions {
 
 @Configuration('kavri.datasource')
 class DataSourceOptions extends ClusterOptions {
-    /** Additional named data sources. */
     @IsArray(Ref(() => NamedClusterOptions), { optional: true })
     multiSources?: NamedClusterOptions[];
 }
 ```
+
+`getSources()` returns `NamedClusterOptions[]`. If the root entry's `name` is missing, it defaults to `'default'`.
 
 Config example:
 
@@ -101,76 +112,64 @@ kavri:
   datasource:
     dialect: postgres
     driver: drizzle
-    host: localhost
-    port: 5432
-    username: admin
-    password: secret
-    database: myapp
+    url: postgres://admin:secret@localhost:5432/myapp
     maxConnections: 10
     multiSources:
       - name: analytics
         dialect: postgres
         driver: drizzle
-        host: analytics-db
-        database: analytics
+        url: postgres://admin:secret@analytics-db:5432/analytics
       - name: legacy
         dialect: mysql
         driver: sequelize
-        host: legacy-db
-        database: legacy
+        url: mysql://root:secret@legacy-db:3306/legacy
 ```
 
 ## 4. DataSourceDriver
 
-Abstract class. Manages multiple/dynamic data sources. Does NOT manage connection pools — the driver acquires/releases connections in `doBegin`/`commit`/`rollback`.
+Simplified: `<TOptions, TConnection>` only. The driver smooths out the difference between pools and transaction connections internally.
 
 Subclasses must be `@Component('driverName')`. Found via `injectMap(DataSourceDriver)`.
 
-The base class optionally injects `DataSourceOptions` and provides `getSources()` to filter data sources matching the current driver name.
-
 ```ts
-abstract class DataSourceDriver<TOptions, TConnection, TPool extends TConnection = TConnection> {
+abstract class DataSourceDriver<TOptions, TConnection> {
     constructor(private readonly dsOptions = inject(DataSourceOptions, true)) {}
 
     /**
-     * Get data sources from DataSourceOptions that match this driver.
+     * Get data sources from DataSourceOptions matching this driver.
      * Filters by ClusterOptions.driver === this component's name.
-     * Includes the root source (if driver matches) and multiSources entries.
+     * Root entry name defaults to 'default' if missing.
      */
     protected getSources(): NamedClusterOptions[];
 
     /** Register a named data source. Idempotent — only connects once per name. */
     connect(name: Qualifier, options: TOptions): Promise<void>;
-    protected abstract doConnect(name: Qualifier, options: TOptions): Awaitable<TPool>;
+    protected abstract doConnect(name: Qualifier, options: TOptions): Awaitable<void>;
 
     /** Check if a data source is registered. */
     has(name: Qualifier): boolean;
 
-    /** Get pool connection (non-transactional). */
-    get(name: Qualifier): TPool;
+    /** Get a connection (pool or direct). Used when not in a transaction. */
+    abstract get(name: Qualifier): TConnection;
 
-    /** Begin a top-level transaction. Delegates to doBegin after resolving pool. */
-    begin(name: Qualifier, options: TransactionOptions): Awaitable<TConnection>;
-    protected abstract doBegin(pool: TPool, options: TransactionOptions): Awaitable<TConnection>;
+    /** Begin a top-level transaction. */
+    abstract begin(name: Qualifier, options: TransactionOptions): Awaitable<TConnection>;
 
-    /** Create a nested transaction (savepoint). */
+    /** Create a savepoint within an existing transaction. */
     abstract child(connection: TConnection, options: TransactionOptions): Awaitable<TConnection>;
 
-    /** Commit a transaction. */
+    /** Commit. Can be called multiple times (idempotent after first). */
     abstract commit(connection: TConnection): Awaitable<void>;
 
-    /** Rollback a transaction. */
+    /** Rollback. Can be called multiple times (idempotent after first). */
     abstract rollback(connection: TConnection, error: any): Awaitable<void>;
-
-    /** Close a pool connection. */
-    abstract close(pool: TPool): Awaitable<void>;
 
     /** Close all data sources. Called on container destroy. */
     shutdown(): Promise<void>;
 }
 ```
 
-`connect`/`has`/`get`/`begin`/`shutdown`/`getSources` are implemented by the base class. Subclasses implement `doConnect`/`doBegin`/`child`/`commit`/`rollback`/`close`.
+`connect`/`has`/`shutdown`/`getSources` are implemented by the base class. Subclasses implement `doConnect`/`get`/`begin`/`child`/`commit`/`rollback`.
 
 ## 5. DataSourceResolver
 
@@ -183,10 +182,6 @@ interface DataSourceResolution {
 }
 
 abstract class DataSourceResolver {
-    /**
-     * Return resolution or undefined to pass to the next resolver.
-     * Must be sync — repositories call getConnection() synchronously.
-     */
     abstract resolve(options: DataSourceResolveOptions): DataSourceResolution | undefined;
 }
 ```
@@ -197,19 +192,30 @@ abstract class DataSourceResolver {
 @Component()
 @Priority(10000)
 class DefaultDataSourceResolver extends DataSourceResolver {
+    constructor(private readonly drivers = injectMap(DataSourceDriver)) {}
+
     /**
-     * Default resolution logic (ignores target):
      * - If dataSource not specified, use 'default'
      * - If driver not specified, find the unique driver that has the dataSource.
      *   If multiple drivers have it, throw. If none, return undefined.
      */
-    resolve(options: DataSourceResolveOptions): DataSourceResolution | undefined;
+    resolve(options: DataSourceResolveOptions): DataSourceResolution | undefined {
+        const dataSource = options.dataSource ?? 'default';
+        if (options.driver) return { dataSource, driver: options.driver };
+
+        const matching = [...this.drivers.entries()].filter(([_, d]) => d.has(dataSource));
+        if (matching.length === 1) return { dataSource, driver: matching[0][0] };
+        if (matching.length > 1) throw new TransactionError(`Multiple drivers for '${String(dataSource)}'`);
+        return undefined;
+    }
 }
 ```
 
-For multi-tenant scenarios, implement a custom resolver at higher priority that reads tenant info from `RequestContext`:
+### Multi-tenant example
 
 ```ts
+const kTenantId = RequestContext.key<string>('tenantId');
+
 @Component()
 @Priority(1000)
 class TenantDataSourceResolver extends DataSourceResolver {
@@ -219,9 +225,6 @@ class TenantDataSourceResolver extends DataSourceResolver {
         return { dataSource: `tenant_${tenantId}`, driver: 'drizzle' };
     }
 }
-
-// Interceptor: extract tenant from request, ensure dynamic data source is connected.
-const kTenantId = RequestContext.key<string>('tenantId');
 
 @Component()
 @Priority(Interceptor.GUARD + 1)
@@ -238,8 +241,13 @@ class TenantInterceptor extends Interceptor {
         kTenantId.set(tenantId);
 
         // connect() is idempotent — only connects once per name
-        const tenantDbUrl = await fetchTenantDbUrl(tenantId);
-        await this.driver.connect(`tenant_${tenantId}`, tenantDbUrl);
+        const tenantConfig = await fetchTenantConfig(tenantId);
+        await this.driver.connect(`tenant_${tenantId}`, {
+            name: `tenant_${tenantId}`,
+            dialect: 'postgres',
+            driver: 'drizzle',
+            url: tenantConfig.databaseUrl,
+        });
 
         return next();
     }
@@ -248,24 +256,36 @@ class TenantInterceptor extends Interceptor {
 
 ## 6. Transaction (handle)
 
-Passed to `TransactionManager.begin()` callback. Commit/rollback happen automatically — commit on callback success, rollback on throw. Manual commit/rollback also available. Nested transactions via `tx.begin()`.
+Passed to `TransactionManager.begin()` callback. Auto-commits on callback success, auto-rollbacks on throw.
+
+Manual `commit()`/`rollback()` can be called inside the callback. They are idempotent — safe to call multiple times. The auto-commit/rollback after the callback checks if already committed/rolled back and skips if so.
 
 ```ts
 class Transaction {
-    /** Begin a nested transaction. Callback receives child Transaction. */
-    begin<T>(options: TransactionOptions, fn: (tx: Transaction) => Promise<T>): Promise<T>;
-    /** Manual commit (optional — auto-commits if callback succeeds). */
+    /** Manual commit. Idempotent. */
     commit(): Promise<void>;
-    /** Manual rollback (optional — auto-rollbacks if callback throws). */
+    /** Manual rollback. Idempotent. */
     rollback(error?: any): Promise<void>;
 }
 ```
 
+`TransactionManager` is the single entry point for beginning transactions. No `Transaction.begin()`.
+
 ## 7. TransactionManager
 
-Merges the old `DataSourceManager` role. Manages the ALS-based transaction stack, resolves data sources, and provides connections.
+Manages ALS-based transaction stack. If called outside a `RequestContext`, auto-wraps in `RequestContext.run()`.
 
 ```ts
+const kTransactionStack = RequestContext.key<TransactionFrame[]>('transactionStack');
+
+interface TransactionFrame {
+    dataSource: Qualifier;
+    driver: Qualifier;
+    connection: any;
+    committed: boolean;
+    rolledBack: boolean;
+}
+
 @Component()
 class TransactionManager {
     constructor(
@@ -274,23 +294,20 @@ class TransactionManager {
     ) {}
 
     /**
-     * Begin a transaction. Pushes onto the ALS transaction stack.
-     * Callback receives Transaction handle. Auto-commits on success, auto-rollbacks on throw.
+     * Begin a transaction. Auto-wraps in RequestContext.run() if not active.
+     * Auto-commits on fn success. Auto-rollbacks on fn throw.
      */
     begin<T>(options: TransactionOptions, fn: (tx: Transaction) => Promise<T>): Promise<T>;
 
     /**
      * Get the current connection for a data source.
-     * 1. Resolve target source via resolvers.
-     * 2. Check if target source is in the transaction stack → use tx connection.
-     * 3. Otherwise, get pool connection from driver.
-     *
-     * Must be sync — called from Repository.getConnection().
+     * Returns tx connection if in a transaction, otherwise pool connection.
+     * Must be sync.
      */
     getConnection<T>(options?: DataSourceResolveOptions): T;
 
-    /** Resolve data source + driver via resolver chain. */
     private resolveSource(options: DataSourceResolveOptions): DataSourceResolution;
+    private findCurrentTransaction(dataSource: Qualifier): TransactionFrame | undefined;
 }
 ```
 
@@ -299,26 +316,34 @@ class TransactionManager {
 ```ts
 class TransactionManager {
     async begin<T>(options: TransactionOptions, fn: (tx: Transaction) => Promise<T>): Promise<T> {
+        // Auto-wrap in RequestContext if not active
+        if (!RequestContext.isActive()) {
+            return RequestContext.run(() => this.begin(options, fn));
+        }
+
         const resolution = this.resolveSource(options);
-        const driver = this.drivers.get(resolution.driver);
+        const driver = this.drivers.get(resolution.driver)!;
         const propagation = options.propagation ?? Propagation.Required;
         const current = this.findCurrentTransaction(resolution.dataSource);
 
         switch (propagation) {
             case Propagation.Required:
-                if (current) return fn(current.tx); // reuse
+                if (current) return fn(new Transaction(current));
                 return this.executeNew(driver, resolution, options, fn);
 
             case Propagation.RequiresNew:
                 return this.executeNew(driver, resolution, options, fn);
 
+            case Propagation.Nested:
+                if (current) return this.executeChild(driver, current, resolution, options, fn);
+                return this.executeNew(driver, resolution, options, fn);
+
             case Propagation.Supports:
-                if (current) return fn(current.tx);
-                return fn(Transaction.NOOP);
+                return fn(current ? new Transaction(current) : Transaction.NOOP);
 
             case Propagation.Mandatory:
                 if (!current) throw new TransactionError('No existing transaction');
-                return fn(current.tx);
+                return fn(new Transaction(current));
 
             case Propagation.NotSupported:
                 return fn(Transaction.NOOP);
@@ -331,19 +356,57 @@ class TransactionManager {
 
     private async executeNew<T>(driver, resolution, options, fn): Promise<T> {
         const conn = await driver.begin(resolution.dataSource, options);
-        const frame = { dataSource: resolution.dataSource, driver: resolution.driver, connection: conn, tx: null! };
-        const tx = new Transaction(this, driver, frame);
-        frame.tx = tx;
-        pushFrame(frame);
+        const frame: TransactionFrame = {
+            dataSource: resolution.dataSource,
+            driver: resolution.driver,
+            connection: conn,
+            committed: false,
+            rolledBack: false,
+        };
+        this.pushFrame(frame);
         try {
-            const result = await fn(tx);
-            await driver.commit(conn);
+            const result = await fn(new Transaction(frame));
+            if (!frame.committed && !frame.rolledBack) {
+                await driver.commit(conn);
+                frame.committed = true;
+            }
             return result;
         } catch (err) {
-            await driver.rollback(conn, err);
+            if (!frame.rolledBack) {
+                await driver.rollback(conn, err);
+                frame.rolledBack = true;
+            }
             throw err;
         } finally {
-            popFrame(frame);
+            this.popFrame(frame);
+        }
+    }
+
+    private async executeChild<T>(driver, parent, resolution, options, fn): Promise<T> {
+        const childConn = await driver.child(parent.connection, options);
+        const frame: TransactionFrame = {
+            dataSource: resolution.dataSource,
+            driver: resolution.driver,
+            connection: childConn,
+            committed: false,
+            rolledBack: false,
+        };
+        this.pushFrame(frame);
+        try {
+            const result = await fn(new Transaction(frame));
+            if (!frame.committed && !frame.rolledBack) {
+                await driver.commit(childConn);
+                frame.committed = true;
+            }
+            return result;
+        } catch (err) {
+            if (!frame.rolledBack) {
+                await driver.rollback(childConn, err);
+                frame.rolledBack = true;
+            }
+            throw err;
+        } finally {
+            this.popFrame(frame);
         }
     }
 
@@ -351,8 +414,7 @@ class TransactionManager {
         const resolution = this.resolveSource(options);
         const frame = this.findCurrentTransaction(resolution.dataSource);
         if (frame) return frame.connection as T;
-        const driver = this.drivers.get(resolution.driver)!;
-        return driver.get(resolution.dataSource) as T;
+        return this.drivers.get(resolution.driver)!.get(resolution.dataSource) as T;
     }
 
     private resolveSource(options: DataSourceResolveOptions): DataSourceResolution {
@@ -374,14 +436,32 @@ class TransactionManager {
         }
         return undefined;
     }
+
+    private pushFrame(frame: TransactionFrame) {
+        kTransactionStack.getOrInsertComputed(() => []).push(frame);
+    }
+
+    private popFrame(frame: TransactionFrame) {
+        const stack = kTransactionStack.get();
+        if (stack) {
+            const idx = stack.indexOf(frame);
+            if (idx >= 0) stack.splice(idx, 1);
+        }
+    }
 }
 ```
 
 ## 8. Drizzle Driver (`@kavri/drizzle`)
 
+Drizzle uses `db` (pool) and `tx` (transaction) interchangeably for queries — same interface. The driver smooths them into a single `TConnection` type.
+
 ```ts
+// Drizzle's db and tx share this interface
+type DrizzleConnection = DrizzleDatabase | DrizzleTransaction;
+
 @Component('drizzle')
-class DrizzleDataSourceDriver extends DataSourceDriver<NamedClusterOptions, DrizzleTransaction, DrizzleDatabase> {
+class DrizzleDataSourceDriver extends DataSourceDriver<NamedClusterOptions, DrizzleConnection> {
+    private pools = new Map<Qualifier, DrizzleDatabase>();
 
     @OnConstruct()
     async init() {
@@ -391,21 +471,24 @@ class DrizzleDataSourceDriver extends DataSourceDriver<NamedClusterOptions, Driz
     }
 
     protected doConnect(name: Qualifier, options: NamedClusterOptions) {
-        const url = `${options.dialect}://${options.username}:${options.password}@${options.host}:${options.port}/${options.database}`;
-        return drizzle(url);
+        const url = options.url ?? `${options.dialect}://${options.username}:${options.password}@${options.host}:${options.port}/${options.database}`;
+        this.pools.set(name, drizzle(url));
     }
 
-    protected async doBegin(pool: DrizzleDatabase, options: TransactionOptions) {
-        // Convert Drizzle's callback-based tx API to imperative begin/commit/rollback
+    get(name: Qualifier): DrizzleConnection {
+        const db = this.pools.get(name);
+        if (!db) throw new Error(`Data source not found: ${String(name)}`);
+        return db;
+    }
+
+    async begin(name: Qualifier, options: TransactionOptions): Promise<DrizzleConnection> {
+        const pool = this.pools.get(name)!;
         const started = Promise.withResolvers<DrizzleTransaction>();
         const control = Promise.withResolvers<void>();
 
         const txPromise = pool.transaction(
             { isolationLevel: options.isolation },
-            async (tx) => {
-                started.resolve(tx);
-                return control.promise;
-            },
+            async (tx) => { started.resolve(tx); return control.promise; },
         );
         txPromise.catch(started.reject);
 
@@ -415,14 +498,12 @@ class DrizzleDataSourceDriver extends DataSourceDriver<NamedClusterOptions, Driz
         return tx;
     }
 
-    async child(connection: DrizzleTransaction, options: TransactionOptions) {
-        // Nested transaction / savepoint — same pattern on the tx object
+    async child(connection: DrizzleConnection, options: TransactionOptions): Promise<DrizzleConnection> {
         const started = Promise.withResolvers<DrizzleTransaction>();
         const control = Promise.withResolvers<void>();
 
         const spPromise = (connection as any).transaction(async (sp: any) => {
-            started.resolve(sp);
-            return control.promise;
+            started.resolve(sp); return control.promise;
         });
         spPromise.catch(started.reject);
 
@@ -432,18 +513,20 @@ class DrizzleDataSourceDriver extends DataSourceDriver<NamedClusterOptions, Driz
         return sp;
     }
 
-    async commit(connection: DrizzleTransaction) {
-        (connection as any).__control.resolve();
-        await (connection as any).__promise;
+    async commit(connection: DrizzleConnection) {
+        const ctrl = (connection as any).__control;
+        if (ctrl) { ctrl.resolve(); await (connection as any).__promise; }
     }
 
-    async rollback(connection: DrizzleTransaction, error: any) {
-        (connection as any).__control.reject(error);
-        await (connection as any).__promise.catch(() => {});
+    async rollback(connection: DrizzleConnection, error: any) {
+        const ctrl = (connection as any).__control;
+        if (ctrl) { ctrl.reject(error); await (connection as any).__promise.catch(() => {}); }
     }
 
-    async close(pool: DrizzleDatabase) {
-        // close the underlying connection
+    async shutdown() {
+        for (const pool of this.pools.values()) {
+            // close pool
+        }
     }
 }
 ```
@@ -458,11 +541,9 @@ abstract class DrizzleRepository<TRecord> {
         protected readonly dataSource: Qualifier = 'default',
     ) {}
 
-    protected get conn() {
-        return this.tm.getConnection<DrizzleDatabase | DrizzleTransaction>({
-            driver: 'drizzle',
-            target: this,
-            dataSource: this.dataSource,
+    protected get conn(): DrizzleConnection {
+        return this.tm.getConnection<DrizzleConnection>({
+            driver: 'drizzle', target: this, dataSource: this.dataSource,
         });
     }
 
@@ -471,9 +552,7 @@ abstract class DrizzleRepository<TRecord> {
         return rows[0];
     }
 
-    async findAll(): Promise<TRecord[]> {
-        return this.conn.select().from(this.table);
-    }
+    async findAll(): Promise<TRecord[]> { return this.conn.select().from(this.table); }
 
     async create(data: Partial<TRecord>): Promise<TRecord> {
         const rows = await this.conn.insert(this.table).values(data).returning();
@@ -488,9 +567,14 @@ abstract class DrizzleRepository<TRecord> {
 
 ## 9. Sequelize Driver (`@kavri/sequelize`)
 
+Sequelize uses a `Sequelize` instance for pool and `Transaction` as an option. The driver returns `Transaction | undefined` as the connection — `undefined` means non-transactional.
+
 ```ts
+type SequelizeConnection = SequelizeTransaction | undefined;
+
 @Component('sequelize')
-class SequelizeDataSourceDriver extends DataSourceDriver<NamedClusterOptions, SequelizeTransaction, Sequelize> {
+class SequelizeDataSourceDriver extends DataSourceDriver<NamedClusterOptions, SequelizeConnection> {
+    private instances = new Map<Qualifier, Sequelize>();
 
     @OnConstruct()
     async init() {
@@ -500,13 +584,8 @@ class SequelizeDataSourceDriver extends DataSourceDriver<NamedClusterOptions, Se
     }
 
     protected async doConnect(name: Qualifier, options: NamedClusterOptions) {
-        const seq = new Sequelize({
-            dialect: options.dialect,
-            host: options.host,
-            port: options.port,
-            username: options.username,
-            password: options.password,
-            database: options.database,
+        const url = options.url ?? `${options.dialect}://${options.username}:${options.password}@${options.host}:${options.port}/${options.database}`;
+        const seq = new Sequelize(url, {
             pool: {
                 max: options.maxConnections,
                 min: options.minConnections,
@@ -515,56 +594,77 @@ class SequelizeDataSourceDriver extends DataSourceDriver<NamedClusterOptions, Se
             },
         });
         await seq.authenticate();
-        return seq;
+        this.instances.set(name, seq);
     }
 
-    protected async doBegin(pool: Sequelize, options: TransactionOptions) {
-        return pool.transaction({ isolationLevel: options.isolation });
+    /** Returns undefined — Sequelize doesn't use connections directly for queries. */
+    get(name: Qualifier): SequelizeConnection {
+        return undefined;
     }
 
-    async child(connection: SequelizeTransaction, options: TransactionOptions) {
-        // Sequelize supports nested transactions (savepoints) natively
+    async begin(name: Qualifier, options: TransactionOptions): Promise<SequelizeConnection> {
+        const seq = this.instances.get(name)!;
+        return seq.transaction({ isolationLevel: options.isolation });
+    }
+
+    async child(connection: SequelizeConnection, options: TransactionOptions): Promise<SequelizeConnection> {
+        // Sequelize savepoints via nested transaction
         return (connection as any).sequelize.transaction({ transaction: connection });
     }
 
-    async commit(connection: SequelizeTransaction) { await connection.commit(); }
-    async rollback(connection: SequelizeTransaction, error: any) { await connection.rollback(); }
-    async close(pool: Sequelize) { await pool.close(); }
+    async commit(connection: SequelizeConnection) {
+        if (connection) await connection.commit();
+    }
+
+    async rollback(connection: SequelizeConnection, error: any) {
+        if (connection) await connection.rollback();
+    }
+
+    /** Get the Sequelize instance for a data source (needed by models). */
+    getInstance(name: Qualifier): Sequelize {
+        return this.instances.get(name)!;
+    }
+
+    async shutdown() {
+        for (const seq of this.instances.values()) {
+            await seq.close();
+        }
+    }
 }
 ```
 
 ### Sequelize Repository (`@kavri/sequelize`)
 
+The connection is `Transaction | undefined` — passed as `{ transaction }` option to model queries.
+
 ```ts
 abstract class SequelizeRepository<TRecord> {
     constructor(
-        protected readonly model: any,  // Sequelize Model class
+        protected readonly model: any,
         protected readonly tm = inject(TransactionManager),
         protected readonly dataSource: Qualifier = 'default',
     ) {}
 
-    protected get conn() {
-        return this.tm.getConnection<Sequelize | SequelizeTransaction>({
-            driver: 'sequelize',
-            target: this,
-            dataSource: this.dataSource,
+    protected get transaction(): SequelizeTransaction | undefined {
+        return this.tm.getConnection<SequelizeConnection>({
+            driver: 'sequelize', target: this, dataSource: this.dataSource,
         });
     }
 
     async findOne(id: any): Promise<TRecord | undefined> {
-        return this.model.findByPk(id, { transaction: this.conn });
+        return this.model.findByPk(id, { transaction: this.transaction });
     }
 
     async findAll(): Promise<TRecord[]> {
-        return this.model.findAll({ transaction: this.conn });
+        return this.model.findAll({ transaction: this.transaction });
     }
 
     async create(data: Partial<TRecord>): Promise<TRecord> {
-        return this.model.create(data, { transaction: this.conn });
+        return this.model.create(data, { transaction: this.transaction });
     }
 
     async delete(id: any): Promise<void> {
-        await this.model.destroy({ where: { id }, transaction: this.conn });
+        await this.model.destroy({ where: { id }, transaction: this.transaction });
     }
 }
 ```
@@ -572,13 +672,9 @@ abstract class SequelizeRepository<TRecord> {
 ## 10. Application Example
 
 ```ts
-// --- Repositories ---
-
 @Component()
 class UserRepository extends DrizzleRepository<User> {
-    constructor() {
-        super(userTable);
-    }
+    constructor() { super(userTable); }
 
     async findByEmail(email: string) {
         return this.conn.select().from(userTable).where(eq(userTable.email, email));
@@ -586,71 +682,57 @@ class UserRepository extends DrizzleRepository<User> {
 }
 
 @Component()
-class OrderRepository extends DrizzleRepository<Order> {
-    constructor() {
-        super(orderTable);
-    }
-}
-
-// --- Service ---
-
-@Component()
 class UserService {
     constructor(
         private readonly userRepo = inject(UserRepository),
-        private readonly orderRepo = inject(OrderRepository),
         private readonly tm = inject(TransactionManager),
     ) {}
 
     @Transactional()
-    async createUserWithOrder(name: string, item: string) {
-        const user = await this.userRepo.create({ name });
-        await this.orderRepo.create({ userId: user.id, item });
-        return user;
+    async createUserWithOrder(name: string) {
+        await this.userRepo.create({ name });
     }
 
     // Manual transaction
     async batchImport(users: string[]) {
-        await this.tm.begin({ isolation: Isolation.Serializable }, async (tx) => {
+        await this.tm.begin({ isolation: Isolation.Serializable }, async () => {
             for (const name of users) {
                 await this.userRepo.create({ name });
             }
         });
     }
 
-    // Cross-database transaction (explicit data source)
-    @Transactional({ dataSource: 'analytics', driver: 'drizzle' })
-    async logAnalytics(event: any) {
-        // runs on the 'analytics' data source
+    // Nested savepoint
+    async importWithRetry(name: string) {
+        await this.tm.begin({}, async () => {
+            try {
+                await this.tm.begin({ propagation: Propagation.Nested }, async () => {
+                    await this.userRepo.create({ name });
+                });
+            } catch {
+                // savepoint rolled back, outer tx continues
+                await this.userRepo.create({ name: name + '_fallback' });
+            }
+        });
     }
 }
 ```
 
 ```yaml
-# config/config.yaml — uses standardized DataSourceOptions
 kavri:
   datasource:
     dialect: postgres
     driver: drizzle
-    host: localhost
-    port: 5432
-    username: admin
-    password: secret
-    database: myapp
-    maxConnections: 10
+    url: postgres://admin:secret@localhost:5432/myapp
     multiSources:
       - name: analytics
         dialect: postgres
         driver: drizzle
-        host: analytics-db
-        database: analytics
+        url: postgres://admin:secret@analytics-db:5432/analytics
       - name: legacy
         dialect: mysql
         driver: sequelize
-        host: legacy-db
-        username: root
-        password: secret
-        database: legacy
+        url: mysql://root:secret@legacy-db:3306/legacy
 ```
 
 ## 11. Error Types
@@ -666,27 +748,27 @@ kTransactionStack: Key<TransactionFrame[]>
 
 TransactionManager.begin(options, fn)
   │
+  ├─ if !RequestContext.isActive() → RequestContext.run(() => begin(options, fn))
+  │
   ├─ resolveSource(options) → { dataSource, driver }
-  │   └─ walks resolver chain (sorted by @Priority)
-  │
   ├─ findCurrentTransaction(dataSource) → existing frame?
-  │   └─ Propagation rules decide: reuse / new / error / noop
+  │   └─ Propagation rules:
+  │       Required → reuse / executeNew
+  │       RequiresNew → executeNew (independent)
+  │       Nested → executeChild (savepoint) / executeNew
+  │       Supports → reuse / NOOP
+  │       Mandatory → reuse / throw
+  │       NotSupported → NOOP
+  │       Never → throw / NOOP
   │
-  ├─ driver.begin(dataSource, options) → connection
-  ├─ pushFrame({ dataSource, driver, connection, tx })
-  ├─ fn(tx) runs inside ALS context
-  │   │
-  │   │  any getConnection() call:
-  │   │    TransactionManager.getConnection(opts)
-  │   │      → resolveSource → findCurrentTransaction
-  │   │      → returns tx connection if found, else pool connection
-  │   │
-  │   │  Nested @Transactional / tm.begin(opts, nestedFn):
-  │   │    → Propagation.Required → reuse, call nestedFn(existing tx)
-  │   │    → Propagation.RequiresNew → driver.begin() → new frame → nestedFn(new tx)
-  │   │
-  ├─ fn succeeds → driver.commit(conn) → popFrame()
-  └─ fn throws → driver.rollback(conn, err) → popFrame() → rethrow
+  ├─ executeNew: driver.begin() → push frame → fn(tx) → commit/rollback → pop
+  ├─ executeChild: driver.child() → push frame → fn(tx) → commit/rollback → pop
+  │
+  │  Inside fn — any getConnection() call:
+  │    resolveSource → findCurrentTransaction → return tx connection or pool
+  │
+  │  Auto-commit/rollback checks frame.committed/rolledBack flags
+  │  (safe with manual commit/rollback — idempotent)
+  │
+  └─ Result bubbles up
 ```
-
-Resolver must be **sync** — `getConnection()` is called synchronously from repositories. For multi-tenant, an interceptor sets up the context (e.g., `kTenantId`) before the handler runs; the resolver reads it synchronously.
