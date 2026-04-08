@@ -72,7 +72,7 @@ class InstanceOptions {
 class ClusterOptions extends InstanceOptions {
     @IsString({ optional: true }) name?: string;
     @IsString() dialect!: string;         // 'postgres', 'mysql', 'sqlite', etc.
-    @IsString({ optional: true }) driver?: string;  // driver name, e.g., 'drizzle', 'sequelize'
+    @IsString() driver!: string;  // driver name, e.g., 'drizzle', 'sequelize'
     @IsArray(Ref(() => InstanceOptions), { optional: true }) readReplicas?: InstanceOptions[];
     @IsInteger({ optional: true }) maxConnections?: number;
     @IsInteger({ optional: true }) minConnections?: number;
