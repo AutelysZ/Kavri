@@ -25,8 +25,8 @@ enum Propagation {
 interface DataSourceResolveOptions {
     driver?: Qualifier;
     dataSource?: Qualifier;
-    /** The instance or class requesting the connection. Used by resolvers for routing. */
-    target?: AnyConstructor<any> | object;
+    /** The instance, class, or any value requesting the connection. Used by resolvers for routing. */
+    target?: any;
 }
 
 interface TransactionOptions extends DataSourceResolveOptions {
@@ -46,7 +46,8 @@ class TransactionalAspect extends MethodAspect<TransactionOptions> {
     constructor(private readonly tm = inject(TransactionManager)) {}
 
     async around(metadata: TransactionOptions, instance: any, method: Function, args: any[]) {
-        const tx = await this.tm.begin(metadata);
+        const options = metadata.target ? metadata : { ...metadata, target: instance };
+        const tx = await this.tm.begin(options);
         try {
             const result = await method.apply(instance, args);
             await tx.commit();
