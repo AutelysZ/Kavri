@@ -142,15 +142,24 @@ abstract class DataSourceDriver<TOptions, TConnection> {
      */
     protected getSources(): NamedClusterOptions[];
 
-    /** Register a named data source. Idempotent — only connects once per name. */
+    /**
+     * Register a named data source. Idempotent — only connects once per name.
+     * Base class tracks connected names internally and stores the connection
+     * returned by doConnect().
+     */
     connect(name: Qualifier, options: TOptions): Promise<void>;
-    protected abstract doConnect(name: Qualifier, options: TOptions): Awaitable<void>;
 
-    /** Check if a data source is registered. */
+    /**
+     * Create and return a connection/pool for this data source.
+     * Called by connect(). Return value is stored by the base class.
+     */
+    protected abstract doConnect(name: Qualifier, options: TOptions): Awaitable<TConnection>;
+
+    /** Check if a data source is registered. Implemented by base class. */
     has(name: Qualifier): boolean;
 
-    /** Get a connection (pool or direct). Used when not in a transaction. */
-    abstract get(name: Qualifier): TConnection;
+    /** Get pool/default connection (non-transactional). Implemented by base class. */
+    get(name: Qualifier): TConnection;
 
     /** Begin a top-level transaction. */
     abstract begin(name: Qualifier, options: TransactionOptions): Awaitable<TConnection>;
@@ -169,7 +178,26 @@ abstract class DataSourceDriver<TOptions, TConnection> {
 }
 ```
 
-`connect`/`has`/`shutdown`/`getSources` are implemented by the base class. Subclasses implement `doConnect`/`get`/`begin`/`child`/`commit`/`rollback`.
+`connect`/`has`/`get`/`shutdown`/`getSources` are implemented by the base class (using an internal `Map<Qualifier, TConnection>`). Subclasses implement `doConnect`/`begin`/`child`/`commit`/`rollback`.
+
+Base class internals:
+```ts
+// Pseudocode — base class implementation
+private readonly _pools = new Map<Qualifier, TConnection>();
+
+async connect(name, options) {
+    if (this._pools.has(name)) return; // idempotent
+    const conn = await this.doConnect(name, options);
+    this._pools.set(name, conn);
+}
+
+has(name) { return this._pools.has(name); }
+get(name) {
+    const conn = this._pools.get(name);
+    if (!conn) throw new Error(`Data source not found: ${String(name)}`);
+    return conn;
+}
+```
 
 ## 5. DataSourceResolver
 
@@ -372,7 +400,7 @@ class TransactionManager {
             }
             return result;
         } catch (err) {
-            if (!frame.rolledBack) {
+            if (!frame.committed && !frame.rolledBack) {
                 await driver.rollback(conn, err);
                 frame.rolledBack = true;
             }
@@ -400,7 +428,7 @@ class TransactionManager {
             }
             return result;
         } catch (err) {
-            if (!frame.rolledBack) {
+            if (!frame.committed && !frame.rolledBack) {
                 await driver.rollback(childConn, err);
                 frame.rolledBack = true;
             }
@@ -461,7 +489,6 @@ type DrizzleConnection = DrizzleDatabase | DrizzleTransaction;
 
 @Component('drizzle')
 class DrizzleDataSourceDriver extends DataSourceDriver<NamedClusterOptions, DrizzleConnection> {
-    private pools = new Map<Qualifier, DrizzleDatabase>();
 
     @OnConstruct()
     async init() {
@@ -470,15 +497,9 @@ class DrizzleDataSourceDriver extends DataSourceDriver<NamedClusterOptions, Driz
         }
     }
 
-    protected doConnect(name: Qualifier, options: NamedClusterOptions) {
+    protected doConnect(name: Qualifier, options: NamedClusterOptions): DrizzleConnection {
         const url = options.url ?? `${options.dialect}://${options.username}:${options.password}@${options.host}:${options.port}/${options.database}`;
-        this.pools.set(name, drizzle(url));
-    }
-
-    get(name: Qualifier): DrizzleConnection {
-        const db = this.pools.get(name);
-        if (!db) throw new Error(`Data source not found: ${String(name)}`);
-        return db;
+        return drizzle(url);
     }
 
     async begin(name: Qualifier, options: TransactionOptions): Promise<DrizzleConnection> {
@@ -523,11 +544,8 @@ class DrizzleDataSourceDriver extends DataSourceDriver<NamedClusterOptions, Driz
         if (ctrl) { ctrl.reject(error); await (connection as any).__promise.catch(() => {}); }
     }
 
-    async shutdown() {
-        for (const pool of this.pools.values()) {
-            // close pool
-        }
-    }
+    // shutdown() is handled by the base class — iterates _pools and could call
+    // a close method. For Drizzle, pool cleanup depends on the underlying driver.
 }
 ```
 
@@ -574,7 +592,6 @@ type SequelizeConnection = SequelizeTransaction | undefined;
 
 @Component('sequelize')
 class SequelizeDataSourceDriver extends DataSourceDriver<NamedClusterOptions, SequelizeConnection> {
-    private instances = new Map<Qualifier, Sequelize>();
 
     @OnConstruct()
     async init() {
@@ -583,7 +600,7 @@ class SequelizeDataSourceDriver extends DataSourceDriver<NamedClusterOptions, Se
         }
     }
 
-    protected async doConnect(name: Qualifier, options: NamedClusterOptions) {
+    protected async doConnect(name: Qualifier, options: NamedClusterOptions): Promise<SequelizeConnection> {
         const url = options.url ?? `${options.dialect}://${options.username}:${options.password}@${options.host}:${options.port}/${options.database}`;
         const seq = new Sequelize(url, {
             pool: {
@@ -594,16 +611,14 @@ class SequelizeDataSourceDriver extends DataSourceDriver<NamedClusterOptions, Se
             },
         });
         await seq.authenticate();
-        this.instances.set(name, seq);
-    }
-
-    /** Returns undefined — Sequelize doesn't use connections directly for queries. */
-    get(name: Qualifier): SequelizeConnection {
-        return undefined;
+        // Store Sequelize instance — base class stores this as the "pool connection".
+        // get() returns this. For Sequelize, the transaction (or undefined) is the
+        // meaningful connection — repos use .transaction getter instead of get().
+        return seq as any;
     }
 
     async begin(name: Qualifier, options: TransactionOptions): Promise<SequelizeConnection> {
-        const seq = this.instances.get(name)!;
+        const seq = this.get(name) as any as Sequelize;
         return seq.transaction({ isolationLevel: options.isolation });
     }
 
@@ -620,15 +635,9 @@ class SequelizeDataSourceDriver extends DataSourceDriver<NamedClusterOptions, Se
         if (connection) await connection.rollback();
     }
 
-    /** Get the Sequelize instance for a data source (needed by models). */
+    /** Get the Sequelize instance (stored by base class via doConnect). */
     getInstance(name: Qualifier): Sequelize {
-        return this.instances.get(name)!;
-    }
-
-    async shutdown() {
-        for (const seq of this.instances.values()) {
-            await seq.close();
-        }
+        return this.get(name) as any as Sequelize;
     }
 }
 ```
@@ -735,13 +744,31 @@ kavri:
         url: mysql://root:secret@legacy-db:3306/legacy
 ```
 
-## 11. Error Types
+## 11. Limitations
+
+**Concurrent transactions in the same ALS context.** `kTransactionStack` is shared across all async operations within a single `RequestContext`. If two `begin()` calls run concurrently (e.g., via `Promise.all`), the second may see the first's frame and reuse it under `Propagation.Required` — even though they are independent.
+
+```ts
+// ⚠️ WRONG — concurrent transactions share the stack
+await Promise.all([
+    tm.begin(opts, () => repoA.create(...)),
+    tm.begin(opts, () => repoB.create(...)),
+]);
+
+// ✅ Correct — sequential
+await tm.begin(opts, () => repoA.create(...));
+await tm.begin(opts, () => repoB.create(...));
+```
+
+This is the same limitation as Java's `ThreadLocal` with thread pools. Don't start parallel transactions in the same context.
+
+## 12. Error Types
 
 ```ts
 declare class TransactionError extends Error {}
 ```
 
-## 12. ALS Flow
+## 13. ALS Flow
 
 ```
 kTransactionStack: Key<TransactionFrame[]>
