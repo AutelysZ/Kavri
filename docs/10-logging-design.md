@@ -70,10 +70,8 @@ interface LoggingContext {
     level: Level;
     message: string;
     args: any[];
-    /** Logger name (set by child). */
-    name?: string;
-    /** Extra fields (set by child with object context). */
-    fields?: Record<string, unknown>;
+    /** Extra fields. Includes 'name' if set via child(). */
+    fields: Record<string, unknown>;
     /** Timestamp. Set by LoggerWrapper before interceptors. */
     timestamp: number;
 }
@@ -182,8 +180,7 @@ class LoggerWrapper implements Logger {
     constructor(
         private readonly raw: RawLogger,
         private readonly interceptors: readonly LoggingInterceptor[],
-        private readonly name?: string,
-        private readonly fields?: Record<string, unknown>,
+        private readonly fields: Record<string, unknown> = {},
     ) {}
 
     info(msg: string, ...args: unknown[]) {
@@ -192,12 +189,10 @@ class LoggerWrapper implements Logger {
     // trace, debug, warn, error, fatal — same pattern
 
     child(context: string | object): Logger {
-        if (typeof context === 'string') {
-            return new LoggerWrapper(this.raw, this.interceptors, context, this.fields);
-        }
-        return new LoggerWrapper(this.raw, this.interceptors, this.name, {
+        const extra = typeof context === 'string' ? { name: context } : context;
+        return new LoggerWrapper(this.raw, this.interceptors, {
             ...this.fields,
-            ...context,
+            ...extra,
         });
     }
 
@@ -206,15 +201,13 @@ class LoggerWrapper implements Logger {
             level,
             message,
             args,
-            name: this.name,
-            fields: this.fields,
+            fields: { ...this.fields },
             timestamp: Date.now(),
         };
 
-        // Run through interceptors
         for (const interceptor of this.interceptors) {
             ctx = interceptor.intercept(ctx);
-            if (!ctx) return; // suppressed
+            if (!ctx) return;
         }
 
         this.raw.log(ctx);
