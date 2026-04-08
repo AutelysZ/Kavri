@@ -161,11 +161,14 @@ abstract class DataSourceDriver<TOptions, TConnection> {
     /** Get pool/default connection (non-transactional). Implemented by base class. */
     get(name: Qualifier): TConnection;
 
-    /** Begin a top-level transaction. */
-    abstract begin(name: Qualifier, options: TransactionOptions): Awaitable<TConnection>;
+    /** Begin a top-level transaction. Resolves pool via get(), delegates to doBegin(). */
+    begin(name: Qualifier, options: TransactionOptions): Awaitable<TConnection>;
 
-    /** Create a savepoint within an existing transaction. */
-    abstract child(connection: TConnection, options: TransactionOptions): Awaitable<TConnection>;
+    /** Create a savepoint / nested transaction. Delegates to doBegin(). */
+    child(connection: TConnection, options: TransactionOptions): Awaitable<TConnection>;
+
+    /** Subclasses implement this. Called by both begin() (with pool) and child() (with parent tx). */
+    protected abstract doBegin(connection: TConnection, options: TransactionOptions): Awaitable<TConnection>;
 
     /** Commit. Can be called multiple times (idempotent after first). */
     abstract commit(connection: TConnection): Awaitable<void>;
@@ -178,11 +181,10 @@ abstract class DataSourceDriver<TOptions, TConnection> {
 }
 ```
 
-`connect`/`has`/`get`/`shutdown`/`getSources` are implemented by the base class (using an internal `Map<Qualifier, TConnection>`). Subclasses implement `doConnect`/`begin`/`child`/`commit`/`rollback`.
+`connect`/`has`/`get`/`begin`/`child`/`shutdown`/`getSources` are implemented by the base class. Subclasses implement `doConnect`/`doBegin`/`commit`/`rollback`.
 
 Base class internals:
 ```ts
-// Pseudocode — base class implementation
 private readonly _pools = new Map<Qualifier, TConnection>();
 
 async connect(name, options) {
@@ -192,10 +194,19 @@ async connect(name, options) {
 }
 
 has(name) { return this._pools.has(name); }
+
 get(name) {
     const conn = this._pools.get(name);
     if (!conn) throw new Error(`Data source not found: ${String(name)}`);
     return conn;
+}
+
+begin(name, options) {
+    return this.doBegin(this.get(name), options);
+}
+
+child(connection, options) {
+    return this.doBegin(connection, options);
 }
 ```
 
@@ -502,14 +513,15 @@ class DrizzleDataSourceDriver extends DataSourceDriver<NamedClusterOptions, Driz
         return drizzle(url);
     }
 
-    async begin(name: Qualifier, options: TransactionOptions): Promise<DrizzleConnection> {
-        const pool = this.pools.get(name)!;
+    // doBegin is called by both begin() (with pool) and child() (with parent tx).
+    // Drizzle uses the same .transaction() API on both db and tx objects.
+    protected async doBegin(connection: DrizzleConnection, options: TransactionOptions): Promise<DrizzleConnection> {
         const started = Promise.withResolvers<DrizzleTransaction>();
         const control = Promise.withResolvers<void>();
 
-        const txPromise = pool.transaction(
+        const txPromise = (connection as any).transaction(
             { isolationLevel: options.isolation },
-            async (tx) => { started.resolve(tx); return control.promise; },
+            async (tx: any) => { started.resolve(tx); return control.promise; },
         );
         txPromise.catch(started.reject);
 
@@ -517,21 +529,6 @@ class DrizzleDataSourceDriver extends DataSourceDriver<NamedClusterOptions, Driz
         (tx as any).__control = control;
         (tx as any).__promise = txPromise;
         return tx;
-    }
-
-    async child(connection: DrizzleConnection, options: TransactionOptions): Promise<DrizzleConnection> {
-        const started = Promise.withResolvers<DrizzleTransaction>();
-        const control = Promise.withResolvers<void>();
-
-        const spPromise = (connection as any).transaction(async (sp: any) => {
-            started.resolve(sp); return control.promise;
-        });
-        spPromise.catch(started.reject);
-
-        const sp = await started.promise;
-        (sp as any).__control = control;
-        (sp as any).__promise = spPromise;
-        return sp;
     }
 
     async commit(connection: DrizzleConnection) {
@@ -617,14 +614,15 @@ class SequelizeDataSourceDriver extends DataSourceDriver<NamedClusterOptions, Se
         return seq as any;
     }
 
-    async begin(name: Qualifier, options: TransactionOptions): Promise<SequelizeConnection> {
-        const seq = this.get(name) as any as Sequelize;
-        return seq.transaction({ isolationLevel: options.isolation });
-    }
-
-    async child(connection: SequelizeConnection, options: TransactionOptions): Promise<SequelizeConnection> {
-        // Sequelize savepoints via nested transaction
-        return (connection as any).sequelize.transaction({ transaction: connection });
+    // doBegin: called with pool (Sequelize instance) for begin(),
+    // or with parent tx (SequelizeTransaction) for child().
+    // Sequelize handles both — pass { transaction: parent } for savepoints.
+    protected async doBegin(connection: SequelizeConnection, options: TransactionOptions): Promise<SequelizeConnection> {
+        const seq = (connection as any).sequelize ?? connection;
+        return seq.transaction({
+            isolationLevel: options.isolation,
+            transaction: connection instanceof Sequelize ? undefined : connection,
+        });
     }
 
     async commit(connection: SequelizeConnection) {
