@@ -253,8 +253,6 @@ declare function createAspectMethodDecorator<T>(
 abstract class MethodAspect<T> {
     abstract around(metadata: T, instance: any, method: Function, args: any[]): any;
 }
-
-declare function Aspect(decorator: MethodDecoratorFactory<any>): ClassDecorator<{ decorator: MethodDecoratorFactory<any> }>;
 ```
 
 ### DependencyManager

@@ -39,7 +39,6 @@ interface TransactionOptions {
 declare function Transactional(options?: TransactionOptions): AspectMethodDecorator<TransactionOptions>;
 
 @Component()
-@Aspect(Transactional)
 class TransactionalAspect extends MethodAspect<TransactionOptions> {
     constructor(private readonly txManager = inject(TransactionManager)) {}
 
