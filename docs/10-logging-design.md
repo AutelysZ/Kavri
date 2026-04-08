@@ -90,7 +90,7 @@ interface Logger {
     error(msg: string, ...args: unknown[]): void;
     fatal(msg: string, ...args: unknown[]): void;
 
-    child(context: string | object | AnyConstructor<any>): Logger;
+    child(context?: string | object | AnyConstructor<any>): Logger;
 }
 ```
 
@@ -188,7 +188,8 @@ class LoggerWrapper implements Logger {
     }
     // trace, debug, warn, error, fatal — same pattern
 
-    child(context: string | object | AnyConstructor<any>): Logger {
+    child(context?: string | object | AnyConstructor<any>): Logger {
+        if (!context) return this;
         const extra = typeof context === 'string' ? { name: context }
             : typeof context === 'function' ? { name: context.name }
             : context;
@@ -239,9 +240,6 @@ class LoggerFactory {
     }
 
     getLogger(context?: string | object | AnyConstructor<any>): Logger {
-        if (!context) return this.wrapper;
-        if (typeof context === 'string') return this.wrapper.child(context);
-        if (typeof context === 'function') return this.wrapper.child(context.name);
         return this.wrapper.child(context);
     }
 }
