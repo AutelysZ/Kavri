@@ -60,7 +60,7 @@ Subclasses must be `@Component('driverName')`. Found via `injectMap(DataSourceDr
 
 ```ts
 abstract class DataSourceDriver<TOptions, TConnection, TPool extends TConnection = TConnection> {
-    /** Register a named data source. Called during init or dynamically. */
+    /** Register a named data source. Idempotent — only connects once per name. */
     connect(name: Qualifier, options: TOptions): Promise<void>;
     protected abstract doConnect(name: Qualifier, options: TOptions): Awaitable<TPool>;
 
@@ -148,7 +148,7 @@ const kTenantId = RequestContext.key<string>('tenantId');
 @Priority(Interceptor.GUARD + 1)
 class TenantInterceptor extends Interceptor {
     constructor(
-        private readonly drivers = injectMap(DataSourceDriver),
+        private readonly driver = inject(DataSourceDriver, 'drizzle'),
     ) {}
 
     async intercept(next: () => unknown) {
@@ -158,13 +158,9 @@ class TenantInterceptor extends Interceptor {
 
         kTenantId.set(tenantId);
 
-        const dsName = `tenant_${tenantId}`;
-        const driver = this.drivers.get('drizzle')!;
-        if (!driver.has(dsName)) {
-            // Fetch tenant connection info (e.g., from a central registry)
-            const tenantDbUrl = await fetchTenantDbUrl(tenantId);
-            await driver.connect(dsName, tenantDbUrl);
-        }
+        // connect() is idempotent — only connects once per name
+        const tenantDbUrl = await fetchTenantDbUrl(tenantId);
+        await this.driver.connect(`tenant_${tenantId}`, tenantDbUrl);
 
         return next();
     }
