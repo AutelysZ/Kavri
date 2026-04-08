@@ -2,14 +2,13 @@
 
 Package: `@kavri/log` — depends on `@kavri/core` and `@kavri/config`. Does NOT depend on `@kavri/web`.
 
-Framework-independent. Uses `LoggingProvider` abstraction — implementations (Pino, Winston, etc.) are pluggable via `@Component('name')`.
+Self-contained implementation. No external logging framework dependency.
 
 ## 1. Principles
 
 - **Structured logging.** JSON by default. Pretty-print for development.
 - **Contextual loggers.** `injectLogger(context)` creates child loggers with pre-set fields.
-- **Provider-agnostic.** `LoggingProvider` abstraction — select implementation via config (`kavri.log.provider`).
-- **Configurable.** Format, level, output destinations, rotation, redaction — all via `@Configuration('kavri.log')`.
+- **Configurable.** Format, level, output destinations, redaction — all via `@Configuration('kavri.log')`.
 
 ## 2. Configuration
 
@@ -31,10 +30,6 @@ enum LogLevel {
 
 @Configuration('kavri.log')
 class LogConfiguration {
-    /** Logging provider name. Matches @Component('name') on a LoggingProvider subclass. */
-    @IsString({ default: 'pino' })
-    provider!: string;
-
     /** Log format. */
     @IsEnum(LogFormat, { default: LogFormat.JSON })
     format!: LogFormat;
@@ -43,7 +38,7 @@ class LogConfiguration {
     @IsEnum(LogLevel, { default: LogLevel.Info })
     level!: LogLevel;
 
-    /** Default output destination for all levels. */
+    /** Default output destination for all levels. 'stdout', 'stderr', or file path. */
     @IsString({ default: 'stdout' })
     output!: string;
 
@@ -55,63 +50,13 @@ class LogConfiguration {
     @IsRecord(IsString(), { optional: true })
     outputs?: Record<string, string>;
 
-    /** Log rotation rules. Applied to file destinations. */
-    @IsObject({
-        maxSize: IsString({ optional: true }),
-        maxFiles: IsInteger({ optional: true }),
-        interval: IsString({ optional: true }),
-    }, { optional: true })
-    rotation?: {
-        maxSize?: string;     // e.g., '10m', '100m', '1g'
-        maxFiles?: number;
-        interval?: string;    // e.g., '1d', '12h'
-    };
-
     /** Paths to redact from log output. Supports wildcards. */
     @IsArray(IsString(), { optional: true })
     redact?: string[];
 }
 ```
 
-## 3. LoggingProvider
-
-Abstract provider — implementations are pluggable via `@Component('name')`.
-
-```ts
-abstract class LoggingProvider {
-    /** Create a root logger from configuration. */
-    abstract createLogger(config: LogConfiguration): Logger;
-
-    /** Create a child logger with additional context fields. */
-    abstract createChild(parent: Logger, context: object): Logger;
-}
-```
-
-The framework selects a provider by name from config:
-
-```ts
-// Internally in @kavri/log:
-const provider = inject(LoggingProvider, injectConfig(LogConfiguration).provider);
-const rootLogger = provider.createLogger(config);
-```
-
-### Pino implementation (`@kavri/pino`)
-
-```ts
-@Component('pino')
-class PinoLoggingProvider extends LoggingProvider {
-    createLogger(config: LogConfiguration): Logger {
-        // Build pino instance from config (format, level, outputs, rotation, redact)
-    }
-    createChild(parent: Logger, context: object): Logger {
-        // return parent.child(context) via pino's child logger
-    }
-}
-```
-
-Other implementations: `@kavri/winston`, `@kavri/console`, etc.
-
-## 4. Logger
+## 3. Logger
 
 ```ts
 abstract class Logger {
@@ -133,7 +78,7 @@ abstract class Logger {
 }
 ```
 
-## 5. Injection
+## 4. Injection
 
 ### inject(Logger) — root logger
 
@@ -171,7 +116,7 @@ class PaymentService {
 }
 ```
 
-## 6. LoggingInterceptor (abstract, from `@kavri/log`)
+## 5. LoggingInterceptor (abstract, from `@kavri/log`)
 
 `@kavri/log` provides an abstract base for logging interceptors. Consumers (like `@kavri/web`) implement it.
 
@@ -223,24 +168,25 @@ class WebLoggingInterceptor extends Interceptor {
 }
 ```
 
-When the logger writes an entry, it checks `kLogging` from `RequestContext` and merges the data automatically. This happens inside the `Logger` implementation — no coupling between `@kavri/log` and `@kavri/web`.
+When the logger writes an entry, it checks `kLogging` from `RequestContext` and merges the data automatically. No coupling between `@kavri/log` and `@kavri/web` — `kLogging` is just a `RequestContext.key` that the logger reads if active.
 
 ```ts
-// Logger internally (provider responsibility):
+// Logger internally:
 log(level, data, msg) {
-    const extra = RequestContext.isActive() ? kLogging.get() : undefined;
-    if (extra) {
-        data = { ...extra, ...data };
+    if (RequestContext.isActive()) {
+        const extra = kLogging.get();
+        if (extra) data = { ...extra, ...data };
     }
-    underlying[level](data, msg);
+    // write to configured destination (stdout, file, etc.)
+    this.write(level, data, msg);
 }
 ```
 
-## 7. ESLint
+## 6. ESLint
 
 `injectLogger` is in `@kavri/eslint-plugin` affected functions list.
 
-## 8. Example
+## 7. Example
 
 ```ts
 import { Component, inject } from '@kavri/core';
@@ -265,16 +211,12 @@ class OrderService {
 # config/config.yaml
 kavri:
   log:
-    provider: pino
     format: json
     level: info
     output: stdout
     outputs:
       error: ./logs/error.log
       fatal: ./logs/fatal.log
-    rotation:
-      maxSize: 100m
-      maxFiles: 5
     redact:
       - password
       - "*.secret"
