@@ -823,7 +823,7 @@ import {
     Controller, createController,
     Interceptor, RequestContext, HttpException, WebApplication,
 } from '@kavri/web';
-import { Component, Touch, inject } from '@kavri/core';
+import { Component, Touch, inject } from '@kavri/container';
 
 // ---- Route definition (shared with frontend) ----
 

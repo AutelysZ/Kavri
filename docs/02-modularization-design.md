@@ -83,7 +83,7 @@ import {
   injectSet,
   injectMap,
   token,
-} from '@kavri/core';
+} from '@kavri/container';
 import { Configuration, injectConfig, OverrideConfiguration, ConfigFileOptions, VariantOptions } from '@kavri/config';
 import { IsString } from '@kavri/schema';
 

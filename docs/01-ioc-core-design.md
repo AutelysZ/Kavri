@@ -239,7 +239,7 @@ import {
   OnConstruct, OnDestroy,
   token, inject, injectAll, injectRef,
   Metadata,
-} from '@kavri/core';
+} from '@kavri/container';
 import { Configuration, injectConfig, OverrideConfiguration, ConfigFileOptions } from '@kavri/config';
 import { IsString, IsBoolean } from '@kavri/schema';
 

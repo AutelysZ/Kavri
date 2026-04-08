@@ -283,7 +283,7 @@ Internal singleton. Manages layered config data.
 import {
   Container, Component, Conditional, Touch, Use,
   inject, injectAll, token,
-} from '@kavri/core';
+} from '@kavri/container';
 import {
   Configuration, injectConfig, OverrideConfiguration,
   ConfigFileOptions, ProfileOptions, VariantOptions,

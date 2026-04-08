@@ -1,6 +1,6 @@
 # Logging Module Design
 
-Package: `@kavri/logging` — depends on `@kavri/core` and `@kavri/config`. Does NOT depend on `@kavri/web`.
+Package: `@kavri/logging` — depends on `@kavri/container` and `@kavri/config`. Does NOT depend on `@kavri/web`.
 
 ## 1. Principles
 
@@ -276,7 +276,7 @@ class PaymentService {
 ## 10. Example
 
 ```ts
-import { Component, inject } from '@kavri/core';
+import { Component, inject } from '@kavri/container';
 import { injectLogger } from '@kavri/logging';
 
 @Component()

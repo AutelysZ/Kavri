@@ -202,7 +202,7 @@ import {
   createMethodDecorator,
   inject,
   injectAll,
-} from '@kavri/core';
+} from '@kavri/container';
 
 // ---- Custom class decorator ----
 

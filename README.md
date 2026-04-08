@@ -17,7 +17,7 @@ Kavri uses default parameters as the injection mechanism. No reflection, no para
 ## Example
 
 ```ts
-import { Container, Component, Conditional, Provide, Touch, Use, inject, token } from '@kavri/core';
+import { Container, Component, Conditional, Provide, Touch, Use, inject, token } from '@kavri/container';
 import { Configuration, injectConfig, OverrideConfiguration, ConfigFileOptions } from '@kavri/config';
 import { IsString, IsInteger, IsBoolean } from '@kavri/schema';
 
