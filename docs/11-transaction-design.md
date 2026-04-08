@@ -1,62 +1,9 @@
-# Transaction & AOP Design
+# Transaction Design
 
-AOP mechanism in `@kavri/container`. Transaction management in `@kavri/web`.
+Transaction management in `@kavri/web`. AOP mechanism in `@kavri/container` (see [01-container-design.md](./01-container-design.md#10-aop)).
 ORM drivers: `@kavri/drizzle`, `@kavri/sequelize`.
 
-## 1. AOP Mechanism (`@kavri/container`)
-
-### AspectMethodDecorator
-
-Rewrites the method at decoration time. Auto-adds `@Use(aspectClass)` to the class.
-
-```ts
-type AspectMethodDecorator<T> = MethodDecorator<T>;
-
-declare function createAspectMethodDecorator<T>(
-    factory: MethodDecoratorFactory<T>,
-    metadata: T,
-    aspectClass: AnyConstructor<MethodAspect<T>>,
-): AspectMethodDecorator<T>;
-```
-
-### MethodAspect
-
-```ts
-abstract class MethodAspect<T> {
-    abstract around(metadata: T, instance: any, method: Function, args: any[]): any;
-}
-
-declare function Aspect(decorator: MethodDecoratorFactory<any>): ClassDecorator<{ decorator: MethodDecoratorFactory<any> }>;
-```
-
-### DependencyManager
-
-Hidden symbol property on instances. Stores @Use'd dependencies.
-
-```ts
-declare const DependencyManager: {
-    get<T>(instance: object, injectable: Injectable<T>): T;
-    set<T>(instance: object, injectable: Injectable<T>, value: T): void;
-};
-```
-
-### Method rewriting pseudocode
-
-```ts
-// @Transactional() decorates UserService.createUser:
-// 1. Saves original method
-const original = descriptor.value;
-// 2. Rewrites method
-descriptor.value = function (...args: any[]) {
-    const aspect = DependencyManager.get(this, TransactionalAspect);
-    return aspect.around(metadata, this, original, args);
-};
-// 3. Auto-adds @Use(TransactionalAspect) to the class
-//    The container detects this and ensures TransactionalAspect is
-//    instantiated before UserService, stored via DependencyManager.
-```
-
-## 2. Transaction Types (`@kavri/web`)
+## 1. Transaction Types (`@kavri/web`)
 
 ```ts
 enum Isolation {
@@ -86,7 +33,7 @@ interface TransactionOptions {
 }
 ```
 
-## 3. @Transactional
+## 2. @Transactional
 
 ```ts
 declare function Transactional(options?: TransactionOptions): AspectMethodDecorator<TransactionOptions>;
@@ -102,7 +49,7 @@ class TransactionalAspect extends MethodAspect<TransactionOptions> {
 }
 ```
 
-## 4. Data Source Abstraction
+## 3. Data Source Abstraction
 
 ### DataSourceDriver (interface, lives in each ORM package)
 
@@ -230,7 +177,7 @@ class DataSourceManager {
 }
 ```
 
-## 5. TransactionManager
+## 4. TransactionManager
 
 Manages transaction lifecycle using ALS-based transaction stack.
 
@@ -351,7 +298,7 @@ class TransactionManager {
 }
 ```
 
-## 6. Drizzle Driver (`@kavri/drizzle`)
+## 5. Drizzle Driver (`@kavri/drizzle`)
 
 ```ts
 @Configuration('kavri.drizzle')
@@ -431,7 +378,7 @@ class DrizzleDataSourceDriver implements DataSourceDriver {
 }
 ```
 
-## 7. Drizzle Repository (`@kavri/drizzle`)
+## 6. Drizzle Repository (`@kavri/drizzle`)
 
 Repository knows only the data source name. The driver is resolved automatically.
 
@@ -506,7 +453,7 @@ class UserService {
 }
 ```
 
-## 8. Sequelize Driver (`@kavri/sequelize`)
+## 7. Sequelize Driver (`@kavri/sequelize`)
 
 ```ts
 @Component('sequelize')
@@ -541,13 +488,13 @@ class SequelizeDataSourceDriver implements DataSourceDriver {
 }
 ```
 
-## 9. Error Types
+## 8. Error Types
 
 ```ts
 declare class TransactionError extends Error {}
 ```
 
-## 10. ALS Flow Summary
+## 9. ALS Flow Summary
 
 The entire transaction system is built on `AsyncLocalStorage` via `RequestContext`:
 

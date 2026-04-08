@@ -1,8 +1,8 @@
-# IoC Core Design
+# Container Design
 
 ## 1. Scope
 
-This document defines the implementation-ready IoC core API: explicit provider registration, injection via constructor default parameters, lifecycle hooks, and deterministic async resolution. All components are singletons.
+This document defines the `@kavri/container` API: explicit provider registration, injection via constructor default parameters, lifecycle hooks, AOP, and deterministic async resolution. All components are singletons.
 
 For the metadata system that underpins all decorators, see [05-metadata-design.md](./05-metadata-design.md).
 
@@ -231,7 +231,65 @@ All `inject()` calls are synchronous. Async providers are handled via throw-and-
 
 **Assumption:** all `inject()` calls happen before any side effects. Default parameters satisfy this naturally.
 
-## 10. Full example
+## 10. AOP — Aspect-Oriented Method Interception
+
+### AspectMethodDecorator
+
+Rewrites the method at decoration time. Auto-adds `@Use(aspectClass)` to the class.
+
+```ts
+type AspectMethodDecorator<T> = MethodDecorator<T>;
+
+declare function createAspectMethodDecorator<T>(
+    factory: MethodDecoratorFactory<T>,
+    metadata: T,
+    aspectClass: AnyConstructor<MethodAspect<T>>,
+): AspectMethodDecorator<T>;
+```
+
+### MethodAspect
+
+```ts
+abstract class MethodAspect<T> {
+    abstract around(metadata: T, instance: any, method: Function, args: any[]): any;
+}
+
+declare function Aspect(decorator: MethodDecoratorFactory<any>): ClassDecorator<{ decorator: MethodDecoratorFactory<any> }>;
+```
+
+### DependencyManager
+
+Hidden symbol property on instances. Stores @Use'd dependencies.
+
+```ts
+declare const DependencyManager: {
+    get<T>(instance: object, injectable: Injectable<T>): T;
+    set<T>(instance: object, injectable: Injectable<T>, value: T): void;
+};
+```
+
+### How it works
+
+1. `createAspectMethodDecorator(Transactional, options, TransactionalAspect)` rewrites the method:
+
+```ts
+// 1. Saves original method
+const original = descriptor.value;
+// 2. Rewrites method
+descriptor.value = function (...args: any[]) {
+    const aspect = DependencyManager.get(this, TransactionalAspect);
+    return aspect.around(metadata, this, original, args);
+};
+// 3. Auto-adds @Use(TransactionalAspect) to the class
+//    The container ensures TransactionalAspect is instantiated before
+//    the decorated class, stored via DependencyManager.
+```
+
+2. When the container resolves `UserService`, it detects aspect method decorators, reads the aspect class reference, and auto-@Use's it. The aspect instance is stored via `DependencyManager.set(userServiceInstance, TransactionalAspect, aspectInstance)`.
+
+3. At method call time, `DependencyManager.get()` retrieves the aspect, and `around()` runs.
+
+## 11. Full example
 
 ```ts
 import {

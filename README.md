@@ -85,7 +85,7 @@ await container.destroy();
 
 ## Documentation
 
-- [IoC Core](./docs/01-ioc-core-design.md) — components, providers, injection, container
+- [Container](./docs/01-container-design.md) — components, providers, injection, AOP, container
 - [Modules](./docs/02-modularization-design.md) — @Touch, @Use, @Provide, @OverrideConfiguration
 - [Configuration](./docs/03-configuration-design.md) — @Configuration, injectConfig, multi-source config
 - [Events](./docs/04-event-design.md) — @EventType, @OnEvent, EventBus
