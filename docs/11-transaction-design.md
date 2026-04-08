@@ -45,17 +45,9 @@ declare function Transactional(options?: TransactionOptions): AspectMethodDecora
 class TransactionalAspect extends MethodAspect<TransactionOptions> {
     constructor(private readonly tm = inject(TransactionManager)) {}
 
-    async around(metadata: TransactionOptions, instance: any, method: Function, args: any[]) {
+    around(metadata: TransactionOptions, instance: any, method: Function, args: any[]) {
         const options = metadata.target ? metadata : { ...metadata, target: instance };
-        const tx = await this.tm.begin(options);
-        try {
-            const result = await method.apply(instance, args);
-            await tx.commit();
-            return result;
-        } catch (err) {
-            await tx.rollback(err);
-            throw err;
-        }
+        return this.tm.begin(options, (tx) => method.apply(instance, args));
     }
 }
 ```
@@ -152,15 +144,15 @@ class TenantDataSourceResolver extends DataSourceResolver {
 
 ## 5. Transaction (handle)
 
-Returned by `TransactionManager.begin()`. Not callback-style — imperative begin/commit/rollback.
+Passed to `TransactionManager.begin()` callback. Commit/rollback happen automatically — commit on callback success, rollback on throw. Manual commit/rollback also available. Nested transactions via `tx.begin()`.
 
 ```ts
 class Transaction {
-    /** Begin a nested transaction (respects propagation). */
-    begin(options?: TransactionOptions): Promise<Transaction>;
-    /** Commit. */
+    /** Begin a nested transaction. Callback receives child Transaction. */
+    begin<T>(options: TransactionOptions, fn: (tx: Transaction) => Promise<T>): Promise<T>;
+    /** Manual commit (optional — auto-commits if callback succeeds). */
     commit(): Promise<void>;
-    /** Rollback. */
+    /** Manual rollback (optional — auto-rollbacks if callback throws). */
     rollback(error?: any): Promise<void>;
 }
 ```
@@ -179,9 +171,9 @@ class TransactionManager {
 
     /**
      * Begin a transaction. Pushes onto the ALS transaction stack.
-     * Returns a Transaction handle for commit/rollback.
+     * Callback receives Transaction handle. Auto-commits on success, auto-rollbacks on throw.
      */
-    begin(options?: TransactionOptions): Promise<Transaction>;
+    begin<T>(options: TransactionOptions, fn: (tx: Transaction) => Promise<T>): Promise<T>;
 
     /**
      * Get the current connection for a data source.
@@ -202,7 +194,7 @@ class TransactionManager {
 
 ```ts
 class TransactionManager {
-    begin(options: TransactionOptions = {}): Promise<Transaction> {
+    async begin<T>(options: TransactionOptions, fn: (tx: Transaction) => Promise<T>): Promise<T> {
         const resolution = this.resolveSource(options);
         const driver = this.drivers.get(resolution.driver);
         const propagation = options.propagation ?? Propagation.Required;
@@ -210,35 +202,45 @@ class TransactionManager {
 
         switch (propagation) {
             case Propagation.Required:
-                if (current) return current; // reuse
-                return this.beginNew(driver, resolution, options);
+                if (current) return fn(current.tx); // reuse
+                return this.executeNew(driver, resolution, options, fn);
 
             case Propagation.RequiresNew:
-                return this.beginNew(driver, resolution, options);
-                // Note: if current exists, new tx is independent
+                return this.executeNew(driver, resolution, options, fn);
 
             case Propagation.Supports:
-                if (current) return current;
-                return Transaction.NOOP; // no-op transaction
+                if (current) return fn(current.tx);
+                return fn(Transaction.NOOP);
 
             case Propagation.Mandatory:
                 if (!current) throw new TransactionError('No existing transaction');
-                return current;
+                return fn(current.tx);
 
             case Propagation.NotSupported:
-                return Transaction.NOOP;
+                return fn(Transaction.NOOP);
 
             case Propagation.Never:
                 if (current) throw new TransactionError('Transaction not allowed');
-                return Transaction.NOOP;
+                return fn(Transaction.NOOP);
         }
     }
 
-    private async beginNew(driver, resolution, options): Promise<Transaction> {
+    private async executeNew<T>(driver, resolution, options, fn): Promise<T> {
         const conn = await driver.begin(resolution.dataSource, options);
-        const frame = { dataSource: resolution.dataSource, driver: resolution.driver, connection: conn };
-        pushFrame(frame); // push onto ALS stack
-        return new Transaction(driver, frame, () => popFrame(frame));
+        const frame = { dataSource: resolution.dataSource, driver: resolution.driver, connection: conn, tx: null! };
+        const tx = new Transaction(this, driver, frame);
+        frame.tx = tx;
+        pushFrame(frame);
+        try {
+            const result = await fn(tx);
+            await driver.commit(conn);
+            return result;
+        } catch (err) {
+            await driver.rollback(conn, err);
+            throw err;
+        } finally {
+            popFrame(frame);
+        }
     }
 
     getConnection<T>(options: DataSourceResolveOptions = {}): T {
@@ -357,18 +359,13 @@ class UserService {
         // other repo calls — all share the same transaction
     }
 
-    // Manual transaction (imperative, no callback)
+    // Manual transaction (callback style, ALS-tracked)
     async batchImport(users: string[]) {
-        const tx = await this.tm.begin({ isolation: Isolation.Serializable });
-        try {
+        await this.tm.begin({ isolation: Isolation.Serializable }, async (tx) => {
             for (const name of users) {
                 await this.userRepo.createUser(name);
             }
-            await tx.commit();
-        } catch (err) {
-            await tx.rollback(err);
-            throw err;
-        }
+        });
     }
 }
 ```
@@ -384,7 +381,7 @@ declare class TransactionError extends Error {}
 ```
 kTransactionStack: Key<TransactionFrame[]>
 
-TransactionManager.begin(options)
+TransactionManager.begin(options, fn)
   │
   ├─ resolveSource(options) → { dataSource, driver }
   │   └─ walks resolver chain (sorted by @Priority)
@@ -393,20 +390,20 @@ TransactionManager.begin(options)
   │   └─ Propagation rules decide: reuse / new / error / noop
   │
   ├─ driver.begin(dataSource, options) → connection
-  ├─ pushFrame({ dataSource, driver, connection })
-  └─ return Transaction handle
-     │
-     │  fn() runs — any getConnection() call:
-     │    TransactionManager.getConnection(opts)
-     │      → resolveSource → findCurrentTransaction
-     │      → returns tx connection if found, else pool connection
-     │
-     │  Nested @Transactional / tm.begin():
-     │    → Propagation.Required → reuse existing Transaction
-     │    → Propagation.RequiresNew → driver.begin() → new frame
-     │
-     ├─ tx.commit() → driver.commit(conn) → popFrame()
-     └─ tx.rollback(err) → driver.rollback(conn, err) → popFrame()
+  ├─ pushFrame({ dataSource, driver, connection, tx })
+  ├─ fn(tx) runs inside ALS context
+  │   │
+  │   │  any getConnection() call:
+  │   │    TransactionManager.getConnection(opts)
+  │   │      → resolveSource → findCurrentTransaction
+  │   │      → returns tx connection if found, else pool connection
+  │   │
+  │   │  Nested @Transactional / tm.begin(opts, nestedFn):
+  │   │    → Propagation.Required → reuse, call nestedFn(existing tx)
+  │   │    → Propagation.RequiresNew → driver.begin() → new frame → nestedFn(new tx)
+  │   │
+  ├─ fn succeeds → driver.commit(conn) → popFrame()
+  └─ fn throws → driver.rollback(conn, err) → popFrame() → rethrow
 ```
 
 Resolver must be **sync** — `getConnection()` is called synchronously from repositories. For multi-tenant, an interceptor sets up the context (e.g., `kTenantId`) before the handler runs; the resolver reads it synchronously.
