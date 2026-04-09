@@ -190,10 +190,18 @@ Base class internals:
 ```ts
 private readonly _pools = new Map<Qualifier, TConnection>();
 
+private readonly _connecting = new Map<Qualifier, Promise<void>>();
+
 async connect(name, options) {
-    if (this._pools.has(name)) return; // idempotent
-    const conn = await this.doConnect(name, options);
-    this._pools.set(name, conn);
+    if (this._pools.has(name)) return;
+    if (this._connecting.has(name)) return this._connecting.get(name);
+    const promise = this.doConnect(name, options).then(conn => {
+        this._pools.set(name, conn);
+    }).finally(() => {
+        this._connecting.delete(name);
+    });
+    this._connecting.set(name, promise);
+    return promise;
 }
 
 has(name) { return this._pools.has(name); }
