@@ -3,10 +3,8 @@ node_modules/
 *.tgz
 *.log
 
-# Build outputs (per-package)
-packages/*/index.js
-packages/*/index.js.map
-packages/*/index.d.ts
+# Build outputs
+packages/*/dist/
 
 # Coverage
 coverage/

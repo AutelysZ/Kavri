@@ -21,9 +21,8 @@ export default tseslint.config(
   {
     ignores: [
       'node_modules/',
-      'packages/*/index.js',
-      'packages/*/index.d.ts',
-      'packages/*/rolldown.config.mjs',
+      'packages/*/dist/',
+      'packages/*/tsdown.config.ts',
       'docs/',
       '*.js',
       '*.mjs',

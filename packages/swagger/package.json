@@ -2,23 +2,21 @@
   "name": "@kavri/swagger",
   "version": "0.0.0",
   "type": "module",
-  "main": "index.js",
-  "types": "index.d.ts",
+  "main": "dist/index.mjs",
+  "types": "dist/index.d.mts",
   "exports": {
     ".": {
-      "types": "./index.d.ts",
-      "import": "./index.js"
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
     }
   },
   "files": [
-    "index.js",
-    "index.js.map",
-    "index.d.ts",
+    "dist",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "build": "rolldown -c && dts-bundle-generator -o index.d.ts src/index.ts --no-banner",
+    "build": "tsdown",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
