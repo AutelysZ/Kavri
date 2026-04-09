@@ -7,7 +7,6 @@ node_modules/
 packages/*/index.js
 packages/*/index.js.map
 packages/*/index.d.ts
-packages/*/index.d.ts.map
 
 # Coverage
 coverage/
