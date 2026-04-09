@@ -110,9 +110,10 @@ jobs:
           done
 
       - name: Publish to npm
-        run: pnpm -r publish --access public --no-git-checks --provenance
-        env:
-          NPM_CONFIG_PROVENANCE: true
+        run: |
+          for dir in packages/*/; do
+            (cd "$dir" && pnpm pack && npm publish *.tgz --access public --provenance && rm *.tgz)
+          done
 
       - name: Push commit and tag
         run: git push origin HEAD --tags
