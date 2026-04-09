@@ -167,13 +167,14 @@ abstract class Interceptor {
     static readonly RESPONSE  = 1000;   // write result to HTTP response
     static readonly BOOTSTRAP = 2000;   // logging, metrics, request ID
     static readonly EXCEPTION = 3000;   // error handling, error formatting
-    static readonly ROUTE     = 4000;   // route matching, static files
+    static readonly ROUTE     = 4000;   // route matching
     static readonly CORS      = 5000;   // CORS preflight handling
     static readonly GUARD     = 6000;   // auth, rate limiting, RBAC
     static readonly PARSE     = 7000;   // decode raw body (JSON, multipart, binary)
     static readonly RESOLVE   = 8000;   // merge path params + query + body + files → Params
     static readonly VALIDATE  = 9000;   // validate Params against request schema
-    static readonly HANDLER   = 10000;  // handler execution, transactions
+    static readonly ACTION    = 10000;  // controller action dispatch, WebSocket upgrade
+    static readonly FALLBACK  = 11000;  // static files, catch-all
 }
 ```
 
@@ -562,7 +563,7 @@ class StaticConfig {
 }
 
 @Component()
-@Priority(Interceptor.ROUTE - 1)
+@Priority(Interceptor.FALLBACK)
 @ConditionalOnConfiguration(StaticConfig)
 class StaticFileInterceptor extends Interceptor {
     private serve!: ReturnType<typeof serveStatic>;
@@ -670,7 +671,8 @@ class ErrorInterceptor extends Interceptor {
 @Touch(ResponseInterceptor, ExceptionInterceptor, RouteInterceptor,
        QueryParseInterceptor, JsonParseInterceptor, UrlencodedParseInterceptor,
        MultipartParseInterceptor, BinaryParseInterceptor,
-       ResolveInterceptor, ValidateInterceptor, HandlerInterceptor,
+       ResolveInterceptor, ValidateInterceptor,
+       ActionInterceptor, WebSocketUpgradeInterceptor,
        WebLoggingInterceptor)
 class WebApplication {
     constructor(
@@ -1081,21 +1083,20 @@ class ValidateInterceptor extends Interceptor {
 }
 ```
 
-### HandlerInterceptor (HANDLER = 9000)
+### ActionInterceptor (ACTION = 10000)
 
-Calls the matched controller method with the validated params. Validates the response if a response schema exists.
+Dispatches to the matched controller action. If no HTTP endpoint matched, passes through to `next()` (does **not** throw 404 — that's handled by the end of the chain).
 
 ```ts
 @Component()
-@Priority(Interceptor.HANDLER)
-class HandlerInterceptor extends Interceptor {
+@Priority(Interceptor.ACTION)
+class ActionInterceptor extends Interceptor {
     async intercept(next: () => unknown) {
         const endpoint = kEndpoint.get();
         const ctrl = kController.get();
 
-        if (!endpoint || !ctrl) {
-            throw new HttpException(404, 'Not Found');
-        }
+        // No HTTP endpoint matched — pass through (may be WS or static)
+        if (!endpoint || !ctrl) return next();
 
         // Find the method name on the controller that matches this endpoint
         const methodName = /* resolved from endpoint name */;
@@ -1121,6 +1122,39 @@ class HandlerInterceptor extends Interceptor {
         }
 
         return result;
+    }
+}
+```
+
+### WebSocketUpgradeInterceptor (ACTION = 10000)
+
+Handles WebSocket upgrade requests. If the matched endpoint is a WebSocket protocol, performs the upgrade. Otherwise passes through.
+
+```ts
+@Component()
+@Priority(Interceptor.ACTION)
+class WebSocketUpgradeInterceptor extends Interceptor {
+    async intercept(next: () => unknown) {
+        const endpoint = kEndpoint.get();
+
+        // Not a WebSocket endpoint — pass through
+        if (!endpoint?.websocket) return next();
+
+        const req = kRequest.getOrThrow();
+        const res = kResponse.getOrThrow();
+
+        // Upgrade the connection using the matched handler and codec
+        // Sets up per-connection AsyncContext, calls onOpen, wires message dispatch
+        await this.upgrade(req, res, endpoint);
+    }
+
+    private async upgrade(req: IncomingMessage, res: ServerResponse, endpoint: any) {
+        // Implementation delegates to the WebSocket handler framework:
+        // 1. Upgrade HTTP → WebSocket
+        // 2. Register connection in ConnectionHub
+        // 3. AsyncContext.run() for the connection scope
+        // 4. Call handler.onOpen(conn)
+        // 5. Wire inbound message → decode → validate → dispatch to handler method
     }
 }
 ```
@@ -1171,10 +1205,14 @@ ResolveInterceptor (8000)        ← merges → sets Params
 ValidateInterceptor (9000)       ← validates Params, throws 400
   │
   ▼
-HandlerInterceptor (10000)       ← calls controller method, returns result
+ActionInterceptor (10000)        ← dispatches to controller action (HTTP)
+WebSocketUpgradeInterceptor (10000) ← upgrades WebSocket connections
   │
   ▼
-(result bubbles back up through the chain to ResponseInterceptor)
+StaticFileInterceptor (11000)    ← serves static files (fallback)
+  │
+  ▼
+(end of chain → 404 Not Found)
 ```
 
 ## 15. Full Example
