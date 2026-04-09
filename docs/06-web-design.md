@@ -212,6 +212,254 @@ class BasicAuthInterceptor extends Interceptor {
 }
 ```
 
+### Built-in: CompressionInterceptor
+
+Compresses responses based on `Accept-Encoding`. Sits just inside ResponseInterceptor so the compressed body is what gets written.
+
+```ts
+@Configuration('kavri.web.compression')
+class CompressionConfig {
+    /** Enable compression. */
+    @IsBoolean({ default: true }) enabled!: boolean;
+    /** Minimum response size in bytes to compress. */
+    @IsInteger({ default: 1024 }) threshold!: number;
+    /** MIME types to compress. */
+    @IsArray(IsString(), { default: ['application/json', 'text/html', 'text/plain', 'text/css', 'application/javascript'] })
+    mimeTypes!: string[];
+}
+
+@Component()
+@Priority(Interceptor.RESPONSE + 1)
+@Conditional((config = injectConfig(CompressionConfig, true)) => config !== undefined && config.enabled)
+class CompressionInterceptor extends Interceptor {
+    constructor(private readonly config = injectConfig(CompressionConfig)) { super(); }
+
+    async intercept(next: () => unknown) {
+        const req = kRequest.getOrThrow();
+        const res = kResponse.getOrThrow();
+        const accept = req.headers['accept-encoding'] ?? '';
+
+        const result = await next();
+        if (res.headersSent) return result;
+
+        // Only compress JSON/text results above threshold
+        if (result === undefined || result instanceof StreamResponse || result instanceof FileResponse) {
+            return result;
+        }
+
+        const body = result instanceof RawResponse ? result.body : result;
+        const encoded = typeof body === 'string' ? body : JSON.stringify(body);
+        if (encoded.length < this.config.threshold) return result;
+
+        const encoding = accept.includes('br') ? 'br'
+            : accept.includes('gzip') ? 'gzip'
+            : accept.includes('deflate') ? 'deflate'
+            : null;
+
+        if (!encoding) return result;
+
+        // Compress and return as RawResponse with Content-Encoding header
+        const compressed = await compress(Buffer.from(encoded), encoding);
+        const headers = result instanceof RawResponse
+            ? { ...result.headers, 'Content-Encoding': encoding, 'Vary': 'Accept-Encoding' }
+            : { 'Content-Type': 'application/json', 'Content-Encoding': encoding, 'Vary': 'Accept-Encoding' };
+        const status = result instanceof RawResponse ? result.status : 200;
+
+        return new RawResponse(status, headers, compressed);
+    }
+}
+```
+
+### Built-in: CorsInterceptor
+
+```ts
+@Configuration('kavri.web.cors')
+class CorsConfig {
+    /** Allowed origins. '*' for all. */
+    @IsArray(IsString(), { default: ['*'] }) origins!: string[];
+    /** Allowed HTTP methods. */
+    @IsArray(IsString(), { default: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'] }) methods!: string[];
+    /** Allowed request headers. */
+    @IsArray(IsString(), { default: ['Content-Type', 'Authorization'] }) allowedHeaders!: string[];
+    /** Headers exposed to the client. */
+    @IsArray(IsString(), { optional: true }) exposedHeaders?: string[];
+    /** Allow credentials (cookies, auth headers). */
+    @IsBoolean({ default: false }) credentials!: boolean;
+    /** Preflight cache duration in seconds. */
+    @IsInteger({ default: 86400 }) maxAge!: number;
+}
+
+@Component()
+@Priority(Interceptor.CORS)
+@Conditional((config = injectConfig(CorsConfig, true)) => config !== undefined)
+class CorsInterceptor extends Interceptor {
+    constructor(private readonly config = injectConfig(CorsConfig)) { super(); }
+
+    async intercept(next: () => unknown) {
+        const req = kRequest.getOrThrow();
+        const res = kResponse.getOrThrow();
+        const origin = req.headers['origin'];
+
+        if (!origin) return next();
+
+        if (!this.isAllowed(origin)) {
+            throw new HttpException(403, 'Origin not allowed');
+        }
+
+        res.setHeader('Access-Control-Allow-Origin', this.config.origins.includes('*') ? '*' : origin);
+        if (this.config.credentials) res.setHeader('Access-Control-Allow-Credentials', 'true');
+        if (this.config.exposedHeaders?.length) {
+            res.setHeader('Access-Control-Expose-Headers', this.config.exposedHeaders.join(', '));
+        }
+
+        // Preflight
+        if (req.method === 'OPTIONS') {
+            res.setHeader('Access-Control-Allow-Methods', this.config.methods.join(', '));
+            res.setHeader('Access-Control-Allow-Headers', this.config.allowedHeaders.join(', '));
+            res.setHeader('Access-Control-Max-Age', String(this.config.maxAge));
+            return new RawResponse(204, {}, '');
+        }
+
+        return next();
+    }
+
+    private isAllowed(origin: string): boolean {
+        if (this.config.origins.includes('*')) return true;
+        return this.config.origins.includes(origin);
+    }
+}
+```
+
+### Built-in: RateLimitInterceptor
+
+Token-bucket rate limiter. Keyed by client IP by default. Configurable key extraction.
+
+```ts
+@Configuration('kavri.web.rateLimit')
+class RateLimitConfig {
+    /** Max requests per window. */
+    @IsInteger({ default: 100 }) max!: number;
+    /** Window size in milliseconds. */
+    @IsInteger({ default: 60_000 }) window!: number;
+    /** Response headers to include (X-RateLimit-*). */
+    @IsBoolean({ default: true }) headers!: boolean;
+}
+
+/**
+ * Abstract. Subclasses provide storage for rate limit counters.
+ * Built-in: MemoryRateLimitStore. Users can provide Redis-backed, etc.
+ */
+abstract class RateLimitStore {
+    /** Increment counter for key. Returns { count, resetAt }. */
+    abstract increment(key: string, windowMs: number): Awaitable<{ count: number; resetAt: number }>;
+}
+
+@Component()
+class MemoryRateLimitStore extends RateLimitStore {
+    private buckets = new Map<string, { count: number; resetAt: number }>();
+
+    increment(key: string, windowMs: number): { count: number; resetAt: number } {
+        const now = Date.now();
+        let bucket = this.buckets.get(key);
+        if (!bucket || now >= bucket.resetAt) {
+            bucket = { count: 0, resetAt: now + windowMs };
+            this.buckets.set(key, bucket);
+        }
+        bucket.count++;
+        return bucket;
+    }
+}
+
+@Component()
+@Priority(Interceptor.GUARD - 2)
+@Conditional((config = injectConfig(RateLimitConfig, true)) => config !== undefined)
+class RateLimitInterceptor extends Interceptor {
+    constructor(
+        private readonly config = injectConfig(RateLimitConfig),
+        private readonly store = inject(RateLimitStore),
+    ) { super(); }
+
+    async intercept(next: () => unknown) {
+        const req = kRequest.getOrThrow();
+        const res = kResponse.getOrThrow();
+        const key = req.socket.remoteAddress ?? 'unknown';
+
+        const { count, resetAt } = await this.store.increment(key, this.config.window);
+
+        if (this.config.headers) {
+            res.setHeader('X-RateLimit-Limit', String(this.config.max));
+            res.setHeader('X-RateLimit-Remaining', String(Math.max(0, this.config.max - count)));
+            res.setHeader('X-RateLimit-Reset', String(Math.ceil(resetAt / 1000)));
+        }
+
+        if (count > this.config.max) {
+            throw new HttpException(429, 'Too Many Requests', {
+                'Retry-After': String(Math.ceil((resetAt - Date.now()) / 1000)),
+            });
+        }
+
+        return next();
+    }
+}
+```
+
+### Built-in: CsrfInterceptor
+
+Double-submit cookie pattern. Stateless — no server-side token storage.
+
+```ts
+@Configuration('kavri.web.csrf')
+class CsrfConfig {
+    /** Cookie name for the CSRF token. */
+    @IsString({ default: '_csrf' }) cookie!: string;
+    /** Header name the client must echo the token in. */
+    @IsString({ default: 'x-csrf-token' }) header!: string;
+    /** HTTP methods that require CSRF validation. */
+    @IsArray(IsString(), { default: ['POST', 'PUT', 'DELETE', 'PATCH'] }) methods!: string[];
+    /** URL patterns to exclude from CSRF checks. */
+    @IsArray(IsString(), { optional: true }) exclude?: string[];
+}
+
+@Component()
+@Priority(Interceptor.GUARD - 1)
+@Conditional((config = injectConfig(CsrfConfig, true)) => config !== undefined)
+class CsrfInterceptor extends Interceptor {
+    constructor(private readonly config = injectConfig(CsrfConfig)) { super(); }
+
+    async intercept(next: () => unknown) {
+        const req = kRequest.getOrThrow();
+        const res = kResponse.getOrThrow();
+        const method = req.method ?? 'GET';
+
+        // Set CSRF cookie on every response if not present
+        const cookies = parseCookies(req.headers['cookie'] ?? '');
+        let token = cookies[this.config.cookie];
+        if (!token) {
+            token = crypto.randomUUID();
+            res.setHeader('Set-Cookie',
+                `${this.config.cookie}=${token}; Path=/; SameSite=Strict; HttpOnly`);
+        }
+
+        // Validate on state-changing methods
+        if (this.config.methods.includes(method)) {
+            if (this.isExcluded(req.url ?? '')) return next();
+
+            const headerToken = req.headers[this.config.header.toLowerCase()];
+            if (!headerToken || headerToken !== token) {
+                throw new HttpException(403, 'CSRF token mismatch');
+            }
+        }
+
+        return next();
+    }
+
+    private isExcluded(url: string): boolean {
+        if (!this.config.exclude) return false;
+        return this.config.exclude.some(pattern => url.startsWith(pattern));
+    }
+}
+```
+
 ## 6. Clients
 
 ### Route definitions (`@kavri/schema`)
@@ -279,13 +527,21 @@ class StaticFileInterceptor extends Interceptor {
 
 See [11-transaction-design.md](./11-transaction-design.md). `@Transactional()`, `TransactionManager`, `DataSourceDriver`, `DataSourceManager` — all in `@kavri/web`. ORM drivers in `@kavri/drizzle` and `@kavri/sequelize`.
 
-## 10. Configuration
+## 10. WebSocket
+
+See [13-websocket-design.md](./13-websocket-design.md). `defineWebSocket()`, `createWebSocketHandler()`, `@WebSocketHandler()`, `WebSocketConnection`.
+
+## 11. Configuration
 
 ```ts
 @Configuration('kavri.web')
 class WebConfig {
     @IsString({ default: '0.0.0.0' }) host!: string;
     @IsInteger({ default: 3000 }) port!: number;
+    /** Global max request body size in bytes. Default 1MB. Endpoint-level limits override this. */
+    @IsInteger({ default: 1_048_576 }) maxBodySize!: number;
+    /** Graceful shutdown timeout in milliseconds. Default 30s. */
+    @IsInteger({ default: 30_000 }) shutdownTimeout!: number;
 }
 
 @Configuration('database')
@@ -296,7 +552,7 @@ class DatabaseConfig {
 }
 ```
 
-## 11. Error Handling
+## 12. Error Handling
 
 Unhandled exceptions in handlers/interceptors are caught by the framework:
 
@@ -331,12 +587,14 @@ class ErrorInterceptor extends Interceptor {
 }
 ```
 
-## 12. Application Startup
+## 13. Application Startup
 
 ```ts
 @Component()
 @Touch(ResponseInterceptor, ExceptionInterceptor, RouteInterceptor,
-       ParseInterceptor, ResolveInterceptor, ValidateInterceptor, HandlerInterceptor,
+       QueryParseInterceptor, JsonParseInterceptor, UrlencodedParseInterceptor,
+       MultipartParseInterceptor, BinaryParseInterceptor,
+       ResolveInterceptor, ValidateInterceptor, HandlerInterceptor,
        WebLoggingInterceptor)
 class WebApplication {
     constructor(
@@ -356,6 +614,9 @@ class WebApplication {
         }
     }
 
+    private server?: http.Server;
+    private connections = new Set<net.Socket>();
+
     /** Create and resolve the application. */
     static async create(entrypoint: AnyConstructor<any>): Promise<WebApplication> {
         const container = new Container();
@@ -364,8 +625,38 @@ class WebApplication {
 
     /** Start HTTP server. */
     async start(): Promise<void> {
-        const server = http.createServer(this.toHandler());
-        server.listen(this.config.port, this.config.host);
+        this.server = http.createServer(this.toHandler());
+
+        // Track connections for graceful shutdown
+        this.server.on('connection', (socket) => {
+            this.connections.add(socket);
+            socket.on('close', () => this.connections.delete(socket));
+        });
+
+        this.server.listen(this.config.port, this.config.host);
+    }
+
+    /**
+     * Graceful shutdown.
+     * 1. Stop accepting new connections.
+     * 2. Wait for in-flight requests to complete (up to shutdownTimeout).
+     * 3. Force-close remaining connections after timeout.
+     * 4. Run @OnDestroy lifecycle hooks via container.
+     */
+    async stop(): Promise<void> {
+        if (!this.server) return;
+
+        await new Promise<void>((resolve) => {
+            this.server!.close(() => resolve());
+
+            // Force-close idle connections immediately,
+            // busy ones after timeout
+            setTimeout(() => {
+                for (const socket of this.connections) {
+                    socket.destroy();
+                }
+            }, this.config.shutdownTimeout);
+        });
     }
 
     /** Return raw Node.js HTTP handler. */
@@ -413,7 +704,7 @@ await app.start();
 // http.createServer(handler).listen(3000);
 ```
 
-## 13. Built-in Interceptors
+## 14. Built-in Interceptors
 
 All built-in interceptors are registered by the framework automatically. Users `@Touch` their own interceptors to insert into the chain.
 
@@ -519,6 +810,14 @@ class RouteInterceptor extends Interceptor {
             kController.set(match.ctrl);
             kPathParams.set(match.params);
         } else {
+            // Check if the path exists but method is wrong → 405
+            const allowedMethods = this.router.getAllowedMethods(req.url!);
+            if (allowedMethods.length > 0) {
+                throw new HttpException(405, 'Method Not Allowed', {
+                    'Allow': allowedMethods.join(', '),
+                });
+            }
+
             kEndpoint.set(null);
             kController.set(null);
             kPathParams.set({});
@@ -529,47 +828,103 @@ class RouteInterceptor extends Interceptor {
 }
 ```
 
-### ParseInterceptor (PARSE = 6000)
+### Parse Interceptors (PARSE = 7000)
 
-Parses the request URL query string and body based on the endpoint's `requestType`.
+Body parsing is split into specialized interceptors. Each handles one content type and skips if not applicable. All share the same priority — only one activates per request based on `Content-Type` and `requestType`.
 
 ```ts
+/** Parses query string on every request. Always active. */
 @Component()
 @Priority(Interceptor.PARSE)
-class ParseInterceptor extends Interceptor {
+class QueryParseInterceptor extends Interceptor {
     async intercept(next: () => unknown) {
-        const endpoint = kEndpoint.get();
-
-        // Query string from pre-parsed URL
         const url = kURL.getOrThrow();
         kQuery.set(Object.fromEntries(url.searchParams));
+        return next();
+    }
+}
 
-        if (!endpoint || endpoint.request === 'void') {
-            kBody.set(undefined);
-            kFiles.set({});
-            return next();
-        }
+/** Parses JSON request bodies. Activates when Content-Type is application/json. */
+@Component()
+@Priority(Interceptor.PARSE + 1)
+class JsonParseInterceptor extends Interceptor {
+    constructor(private readonly config = injectConfig(WebConfig)) { super(); }
 
-        const requestType = endpoint.options.requestType ?? 'data';
+    async intercept(next: () => unknown) {
+        const endpoint = kEndpoint.get();
+        if (!endpoint || endpoint.request === 'void') return next();
 
-        if (requestType === 'data') {
-            // Read body, parse as JSON
-            const raw = await readBody(req);
-            kBody.set(JSON.parse(raw));
-        } else if (requestType === 'multipart') {
-            // Parse multipart/form-data → fields + files
-            const { fields, files } = await parseMultipart(req, endpoint.options.multipart!);
-            kBody.set(fields);
-            kFiles.set(files);
-        } else if (requestType === 'binary') {
-            // Raw stream — body is the request stream itself
-            kBody.set(req);  // IncomingMessage is a ReadableStream
-        }
+        const req = kRequest.getOrThrow();
+        const contentType = req.headers['content-type'] ?? '';
 
+        if (!contentType.includes('application/json')) return next();
+
+        const maxBodySize = this.config.maxBodySize;
+        const raw = await readBody(req, maxBodySize);
+        kBody.set(JSON.parse(raw));
+        return next();
+    }
+}
+
+/** Parses URL-encoded form bodies. Activates when Content-Type is application/x-www-form-urlencoded. */
+@Component()
+@Priority(Interceptor.PARSE + 1)
+class UrlencodedParseInterceptor extends Interceptor {
+    constructor(private readonly config = injectConfig(WebConfig)) { super(); }
+
+    async intercept(next: () => unknown) {
+        const endpoint = kEndpoint.get();
+        if (!endpoint || endpoint.request === 'void') return next();
+
+        const req = kRequest.getOrThrow();
+        const contentType = req.headers['content-type'] ?? '';
+
+        if (!contentType.includes('application/x-www-form-urlencoded')) return next();
+
+        const maxBodySize = this.config.maxBodySize;
+        const raw = await readBody(req, maxBodySize);
+        kBody.set(Object.fromEntries(new URLSearchParams(raw)));
+        return next();
+    }
+}
+
+/** Parses multipart/form-data bodies. Activates when requestType is 'multipart'. */
+@Component()
+@Priority(Interceptor.PARSE + 1)
+class MultipartParseInterceptor extends Interceptor {
+    constructor(private readonly config = injectConfig(WebConfig)) { super(); }
+
+    async intercept(next: () => unknown) {
+        const endpoint = kEndpoint.get();
+        if (!endpoint || endpoint.request === 'void') return next();
+        if ((endpoint.options.requestType ?? 'data') !== 'multipart') return next();
+
+        const req = kRequest.getOrThrow();
+        const maxBodySize = endpoint.options.multipart?.maxBodySize ?? this.config.maxBodySize;
+
+        const { fields, files } = await parseMultipart(req, endpoint.options.multipart!, maxBodySize);
+        kBody.set(fields);
+        kFiles.set(files);
+        return next();
+    }
+}
+
+/** Passes the raw request stream as body. Activates when requestType is 'binary'. */
+@Component()
+@Priority(Interceptor.PARSE + 1)
+class BinaryParseInterceptor extends Interceptor {
+    async intercept(next: () => unknown) {
+        const endpoint = kEndpoint.get();
+        if (!endpoint || endpoint.request === 'void') return next();
+        if ((endpoint.options.requestType ?? 'data') !== 'binary') return next();
+
+        kBody.set(kRequest.getOrThrow());
         return next();
     }
 }
 ```
+
+Each interceptor is a `@Component()` — users can replace any parser by providing their own at the same priority with `@Conditional`.
 
 ### ResolveInterceptor (RESOLVE = 7000)
 
@@ -703,22 +1058,35 @@ Request
 ResponseInterceptor (1000)       ← writes result to HTTP response
   │
   ▼
+CompressionInterceptor (1001)    ← compresses response body
+  │
+  ▼
 [LoggingInterceptor (2000)]      ← user-provided
   │
   ▼
 ExceptionInterceptor (3000)      ← catches errors → RawResponse
   │
   ▼
-RouteInterceptor (4000)          ← sets Endpoint, Controller, PathParams
+RouteInterceptor (4000)          ← sets Endpoint, Controller, PathParams; 405 on method mismatch
   │
   ▼
-[CorsInterceptor (5000)]         ← user-provided
+CorsInterceptor (5000)           ← CORS preflight, origin checks
+  │
+  ▼
+RateLimitInterceptor (5998)      ← token-bucket rate limiting
+  │
+  ▼
+CsrfInterceptor (5999)          ← double-submit cookie CSRF
   │
   ▼
 [AuthInterceptor (6000)]         ← user-provided
   │
   ▼
-ParseInterceptor (7000)          ← sets Query, Body, Files
+QueryParseInterceptor (7000)     ← sets Query
+JsonParseInterceptor (7001)      ← sets Body (application/json)
+UrlencodedParseInterceptor (7001)← sets Body (application/x-www-form-urlencoded)
+MultipartParseInterceptor (7001) ← sets Body + Files (multipart/form-data)
+BinaryParseInterceptor (7001)    ← sets Body (raw stream)
   │
   ▼
 ResolveInterceptor (8000)        ← merges → sets Params
@@ -733,7 +1101,7 @@ HandlerInterceptor (10000)       ← calls controller method, returns result
 (result bubbles back up through the chain to ResponseInterceptor)
 ```
 
-## 13. Full Example
+## 15. Full Example
 
 ```ts
 import {

@@ -25,6 +25,7 @@ Kavri is a TypeScript IoC framework focused on explicit dependency wiring with o
 @kavri/logging  → Logger, RawLogger, injectLogger, LoggingProvider, LoggingInterceptor, LoggingOptions
 @kavri/web     → Controller, createController, Interceptor, WebApplication, kRequest, kResponse, ...
 @kavri/client  → createClient, injectClient, typed HTTP clients from service definitions
+@kavri/swagger → SwaggerInterceptor, OpenAPI JSON + Swagger UI serving
 @kavri/eslint-plugin → ESLint rules for inject-point enforcement
 @kavri/aws-secretmanager-resolver → AWS Secrets Manager Resolver for @kavri/config
 @kavri/drizzle → DrizzleDataSourceDriver, DrizzleRepository
@@ -45,6 +46,8 @@ Kavri is a TypeScript IoC framework focused on explicit dependency wiring with o
 | [`09-schema-design.md`](./09-schema-design.md) | @Schema, field decorators, defineRoute, parse, toJsonSchema |
 | [`10-logging-design.md`](./10-logging-design.md) | Logger, injectLogger, LoggingOptions |
 | [`11-transaction-design.md`](./11-transaction-design.md) | @Transactional, TransactionManager, DataSourceDriver, AOP |
+| [`12-swagger-design.md`](./12-swagger-design.md) | @kavri/swagger — OpenAPI JSON + Swagger UI |
+| [`13-websocket-design.md`](./13-websocket-design.md) | WebSocket — defineWebSocket, handlers, protocol-first design |
 | [`draft.ts`](./draft.ts) | Complete API declarations with usage examples |
 
 ## Current focus

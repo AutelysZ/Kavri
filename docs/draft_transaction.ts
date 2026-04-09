@@ -187,3 +187,16 @@ class NamedClusterOptions extends ClusterOptions {
 class DataSourceOptions extends ClusterOptions {
     multiSources?: NamedClusterOptions[];
 }
+
+// sequelize
+
+declare class Sequelize {}
+
+declare class SequelizeTransaction {}
+
+interface SequelizeConnection {
+    // always has value
+    sequelize: Sequelize;
+    // null means not a pool/sequelize instance
+    transaction: SequelizeTransaction | null;
+}
