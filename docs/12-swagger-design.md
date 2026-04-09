@@ -66,7 +66,7 @@ class SwaggerInterceptor extends Interceptor {
     }
 
     async intercept(next: () => unknown) {
-        const url = RequestContext.getOrThrow(kURL);
+        const url = RequestContext.getOrThrow(URL);
         const pathname = url.pathname;
 
         if (pathname === `${this.config.path}/json`) {

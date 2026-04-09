@@ -272,13 +272,13 @@ class DefaultDataSourceResolver extends DataSourceResolver {
 ### Multi-tenant example
 
 ```ts
-const kTenantId = new Key<string>('tenantId');
+const TENANT_ID = new Key<string>('tenantId');
 
 @Component()
 @Priority(1000)
 class TenantDataSourceResolver extends DataSourceResolver {
     resolve(options: DataSourceResolveOptions): DataSourceResolution | undefined {
-        const tenantId = RequestContext.get(kTenantId);
+        const tenantId = RequestContext.get(TENANT_ID);
         if (!tenantId) return undefined;
         return { dataSource: `tenant_${tenantId}`, driver: 'drizzle' };
     }
@@ -292,11 +292,11 @@ class TenantInterceptor extends Interceptor {
     ) {}
 
     async intercept(next: () => unknown) {
-        const req = RequestContext.getOrThrow(kRequest);
+        const req = RequestContext.getOrThrow(REQUEST);
         const tenantId = req.headers['x-tenant-id'] as string;
         if (!tenantId) return next();
 
-        RequestContext.set(kTenantId, tenantId);
+        RequestContext.set(TENANT_ID, tenantId);
 
         // connect() is idempotent — only connects once per name
         const tenantConfig = await fetchTenantConfig(tenantId);
@@ -356,7 +356,7 @@ Manages ALS-based transaction stack. If called outside a `TransactionContext` sc
 
 ```ts
 export const TransactionContext = new AsyncContext();
-const kTransactionStack = new Key<TransactionFrame[]>('transactionStack');
+const TRANSACTION_STACK = new Key<TransactionFrame[]>('transactionStack');
 
 interface TransactionFrame {
     dataSource: Qualifier;
@@ -490,19 +490,19 @@ class TransactionManager {
     }
 
     private async executeSuspended<T>(dataSource: Qualifier, fn: (tx: Transaction) => Promise<T>): Promise<T> {
-        const stack = TransactionContext.get(kTransactionStack) ?? [];
+        const stack = TransactionContext.get(TRANSACTION_STACK) ?? [];
         const suspended = stack.filter(f => f.dataSource === dataSource);
         const remaining = stack.filter(f => f.dataSource !== dataSource);
-        TransactionContext.set(kTransactionStack, remaining);
+        TransactionContext.set(TRANSACTION_STACK, remaining);
         try {
             return await fn(Transaction.NOOP);
         } finally {
             // Restore: take current stack (may have new frames from fn()),
             // remove any frames for the suspended dataSource that fn() added,
             // then append the original suspended frames.
-            const current = TransactionContext.get(kTransactionStack) ?? [];
+            const current = TransactionContext.get(TRANSACTION_STACK) ?? [];
             const cleaned = current.filter(f => f.dataSource !== dataSource);
-            TransactionContext.set(kTransactionStack, [...cleaned, ...suspended]);
+            TransactionContext.set(TRANSACTION_STACK, [...cleaned, ...suspended]);
         }
     }
 
@@ -534,7 +534,7 @@ class TransactionManager {
     }
 
     private findCurrentTransaction(dataSource: Qualifier): TransactionFrame | undefined {
-        const stack = TransactionContext.get(kTransactionStack);
+        const stack = TransactionContext.get(TRANSACTION_STACK);
         if (!stack) return undefined;
         for (let i = stack.length - 1; i >= 0; i--) {
             if (stack[i].dataSource === dataSource) return stack[i];
@@ -543,11 +543,11 @@ class TransactionManager {
     }
 
     private pushFrame(frame: TransactionFrame) {
-        TransactionContext.getOrInsertComputed(kTransactionStack, () => []).push(frame);
+        TransactionContext.getOrInsertComputed(TRANSACTION_STACK, () => []).push(frame);
     }
 
     private popFrame(frame: TransactionFrame) {
-        const stack = TransactionContext.get(kTransactionStack);
+        const stack = TransactionContext.get(TRANSACTION_STACK);
         if (stack) {
             const idx = stack.indexOf(frame);
             if (idx >= 0) stack.splice(idx, 1);
@@ -816,7 +816,7 @@ kavri:
 
 ## 11. Limitations
 
-**Concurrent transactions in the same ALS context.** `kTransactionStack` is shared across all async operations within a single `AsyncContext`. If two `begin()` calls run concurrently (e.g., via `Promise.all`), the second may see the first's frame and reuse it under `Propagation.Required` — even though they are independent.
+**Concurrent transactions in the same ALS context.** `TRANSACTION_STACK` is shared across all async operations within a single `AsyncContext`. If two `begin()` calls run concurrently (e.g., via `Promise.all`), the second may see the first's frame and reuse it under `Propagation.Required` — even though they are independent.
 
 ```ts
 // ⚠️ WRONG — concurrent transactions share the stack
@@ -841,7 +841,7 @@ declare class TransactionError extends Error {}
 ## 13. ALS Flow
 
 ```
-kTransactionStack: Key<TransactionFrame[]>
+TRANSACTION_STACK: Key<TransactionFrame[]>
 
 TransactionManager.begin(options, fn)
   │

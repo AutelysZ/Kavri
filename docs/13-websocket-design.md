@@ -193,13 +193,13 @@ class MsgpackCodec extends WebSocketCodec {
 
 ```ts
 /** The current WebSocketProtocol. Set at connection open. */
-const kProtocol = new Key<WebSocketProtocol>('protocol');
+const PROTOCOL = new Key<WebSocketProtocol>('protocol');
 
 /** The current controller instance handling this connection. */
-const kHandler = new Key<WebSocketHandlerBase>('handler');
+const HANDLER = new Key<WebSocketHandlerBase>('handler');
 
 /** The current WebSocketConnection. Set at connection open. */
-const kConnection = new Key<WebSocketConnection>('connection');
+const CONNECTION = new Key<WebSocketConnection>('connection');
 ```
 
 Available in `onOpen`, all message handlers, and `onClose` via the per-connection AsyncContext scope.
@@ -304,8 +304,8 @@ Usage:
 
 ```ts
 // Define typed keys for state and indexes
-const kUsername = new Key<string>('username');
-const kRoom = new Key<string>('room');  // used as index
+const USERNAME = new Key<string>('username');
+const ROOM = new Key<string>('room');  // used as index
 
 @Component()
 class NotificationService {
@@ -313,13 +313,13 @@ class NotificationService {
 
     /** O(1) — uses index */
     async notifyRoom(roomId: string, message: ChatMessage) {
-        this.hub.broadcastByIndex(ChatProtocol, kRoom, roomId, 'message', message);
+        this.hub.broadcastByIndex(ChatProtocol, ROOM, roomId, 'message', message);
     }
 
     /** Iterate all connections of a protocol */
     getOnlineUsers(): string[] {
         return [...this.hub.of(ChatProtocol)]
-            .map(c => c.getState(kUsername))
+            .map(c => c.getState(USERNAME))
             .filter(Boolean) as string[];
     }
 }
@@ -400,8 +400,8 @@ Example:
 
 ```ts
 // Typed keys for state and indexes
-const kUsername = new Key<string>('username');
-const kRoom = new Key<string>('room');  // used as index
+const USERNAME = new Key<string>('username');
+const ROOM = new Key<string>('room');  // used as index
 
 @WebSocketHandler(ChatProtocol)
 class ChatHandler
@@ -416,20 +416,20 @@ class ChatHandler
     // --- Lifecycle ---
 
     onOpen(conn: WebSocketConnection<typeof ChatProtocol>) {
-        const user = RequestContext.getOrThrow(CurrentUser);
-        conn.setState(kUsername, user.name);
+        const user = RequestContext.getOrThrow(CURRENT_USER);
+        conn.setState(USERNAME, user.name);
 
         // Set index for O(1) room-scoped broadcasts
-        conn.setIndex(kRoom, conn.params.roomId);
+        conn.setIndex(ROOM, conn.params.roomId);
 
         this.logger.info('user %s joined room %s', user.name, conn.params.roomId);
     }
 
     onClose(conn: WebSocketConnection<typeof ChatProtocol>) {
         // O(1) — broadcast to same room via index
-        this.broadcastByIndex(kRoom, conn.params.roomId,
+        this.broadcastByIndex(ROOM, conn.params.roomId,
             'presence',
-            { userId: conn.getState(kUsername)!, online: false },
+            { userId: conn.getState(USERNAME)!, online: false },
         );
         // state and indexes auto-cleaned on close
     }
@@ -437,17 +437,17 @@ class ChatHandler
     // --- Inbound message handlers (required by HandlerType) ---
 
     onSend(data: SendMessage, conn: WebSocketConnection<typeof ChatProtocol>) {
-        const username = conn.getState(kUsername)!;
+        const username = conn.getState(USERNAME)!;
         const msg = { from: username, text: data.text, timestamp: Date.now() };
         this.repo.save(conn.params.roomId, msg);
 
         // O(1) — broadcast to same room via index
-        this.broadcastByIndex(kRoom, conn.params.roomId, 'message', msg);
+        this.broadcastByIndex(ROOM, conn.params.roomId, 'message', msg);
     }
 
     onTyping(data: TypingEvent, conn: WebSocketConnection<typeof ChatProtocol>) {
-        this.broadcastByIndex(kRoom, conn.params.roomId, 'presence',
-            { userId: conn.getState(kUsername)!, online: true });
+        this.broadcastByIndex(ROOM, conn.params.roomId, 'presence',
+            { userId: conn.getState(USERNAME)!, online: true });
     }
 
     onUpload(data: Uint8Array, conn: WebSocketConnection<typeof ChatProtocol>) {
@@ -471,7 +471,7 @@ Connection established
        └─ onClose(conn)          ← still in connection scope
 ```
 
-State set in `onOpen` (e.g., `RequestContext.set(CurrentUser, user)`) is visible in all subsequent message handlers via prototype-chained scope. Each message handler runs in a `fork()` so it can set transient state without leaking to other messages.
+State set in `onOpen` (e.g., `RequestContext.set(CURRENT_USER, user)`) is visible in all subsequent message handlers via prototype-chained scope. Each message handler runs in a `fork()` so it can set transient state without leaking to other messages.
 
 ## 9. Upgrade flow
 
@@ -485,26 +485,26 @@ WebApplication.handleUpgrade(req, socket, head)
   │
   ▼
 RequestContext.run():
-  RequestContext.set(kRequest, req)
-  RequestContext.set(kURL, ...)
+  RequestContext.set(REQUEST, req)
+  RequestContext.set(URL, ...)
   │
   ▼
 RouteInterceptor.matchWebSocket(req.url)
-  → sets kEndpoint (WebSocket), kPathParams
+  → sets ENDPOINT (WebSocket), PATH_PARAMS
   → if request schema exists: merge path params + query, validate, parse
   │
   ▼
 [CorsInterceptor] → checks Origin header
   │
   ▼
-[AuthInterceptor] → validates token, sets CurrentUser
+[AuthInterceptor] → validates token, sets CURRENT_USER
   │
   ▼
 Upgrade succeeds → WebSocket connection established
   │
   ▼
 Handler.onOpen(conn)  ← in new per-connection RequestContext.run()
-                         inherits state from upgrade scope (CurrentUser, etc.)
+                         inherits state from upgrade scope (CURRENT_USER, etc.)
 ```
 
 HTTP interceptors run on the upgrade request up to `Interceptor.GUARD`. Auth, CORS, rate limiting all work naturally.
@@ -596,8 +596,8 @@ const LobbyProtocol = defineWebSocket('LobbyProtocol', '/lobby', {
 
 // --- Typed keys ---
 
-const kLobbyUser = new Key<string>('lobbyUser');
-const kLobbyRoom = new Key<string>('lobbyRoom');  // index — one per room via composite key
+const LOBBY_USER = new Key<string>('lobbyUser');
+const LOBBY_ROOM = new Key<string>('lobbyRoom');  // index — one per room via composite key
 
 // --- Controller ---
 // Note: a connection can join multiple rooms. Use composite index keys per room.
@@ -613,7 +613,7 @@ class LobbyHandler
     private roomKey(room: string) { return new Key<boolean>(`room:${room}`); }
 
     onOpen(conn: WebSocketConnection<typeof LobbyProtocol>) {
-        conn.setState(kLobbyUser, RequestContext.getOrThrow(CurrentUser).name);
+        conn.setState(LOBBY_USER, RequestContext.getOrThrow(CURRENT_USER).name);
     }
 
     onJoin(data: JoinRoom, conn: WebSocketConnection<typeof LobbyProtocol>) {
@@ -622,7 +622,7 @@ class LobbyHandler
 
         this.hub.broadcastByIndex(LobbyProtocol, key, true,
             'event',
-            { room: data.room, user: conn.getState(kLobbyUser)!, action: 'joined' },
+            { room: data.room, user: conn.getState(LOBBY_USER)!, action: 'joined' },
         );
     }
 
@@ -635,7 +635,7 @@ class LobbyHandler
         this.broadcastTo(
             c => true, // simplified; real impl would track rooms in state
             'message',
-            { from: conn.getState(kLobbyUser)!, text: data.text, room: '', ts: Date.now() },
+            { from: conn.getState(LOBBY_USER)!, text: data.text, room: '', ts: Date.now() },
         );
     }
 
@@ -661,7 +661,7 @@ class AnnouncementService {
 
     getOnlineUsers(): string[] {
         return [...this.hub.of(LobbyProtocol)]
-            .map(c => c.getState(kLobbyUser))
+            .map(c => c.getState(LOBBY_USER))
             .filter(Boolean) as string[];
     }
 }

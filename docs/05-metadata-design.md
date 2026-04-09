@@ -261,25 +261,25 @@ import { AsyncContext, Key } from '@kavri/basic';
 // Each module creates its own context
 const MyContext = new AsyncContext();
 
-const kRequestId = new Key<string>('requestId');
-const kUser = new Key<User>('user');
+const REQUEST_ID = new Key<string>('requestId');
+const USER = new Key<User>('user');
 
 // Run in a scope:
 await MyContext.run(async () => {
-    MyContext.set(kRequestId, crypto.randomUUID());
+    MyContext.set(REQUEST_ID, crypto.randomUUID());
     // ... handle request
 });
 
 // Fork a child scope:
 await MyContext.fork(async () => {
-    MyContext.set(kUser, overrideUser);  // only visible in this fork
-    // parent's kRequestId still visible via prototype chain
+    MyContext.set(USER, overrideUser);  // only visible in this fork
+    // parent's REQUEST_ID still visible via prototype chain
 });
 
 // Delete in child scope:
 await MyContext.fork(async () => {
-    MyContext.delete(kUser);             // removes own property
-    MyContext.get(kUser);                // parent's value still visible
+    MyContext.delete(USER);             // removes own property
+    MyContext.get(USER);                // parent's value still visible
 });
 ```
 
