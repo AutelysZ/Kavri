@@ -215,9 +215,10 @@ interface WebSocketConnection<T extends WebSocketProtocol = any, TState = any> {
     /**
      * Index values for this connection. Used by ConnectionHub for O(1) lookups.
      * Keys are index names, values are the indexed value.
-     * Set via conn.indexes.set('room', 'lobby') — automatically updates the hub's index.
+     * Mutations auto-update the hub's reverse index.
+     * Auto-cleaned on connection close.
      */
-    readonly indexes: ConnectionIndexMap;
+    readonly indexes: Map<string, unknown>;
 
     /** Send a typed outbound message. Schema data is validated and encoded via the codec. */
     send<K extends keyof T['outbound'] & string>(
@@ -227,20 +228,6 @@ interface WebSocketConnection<T extends WebSocketProtocol = any, TState = any> {
 
     /** Close the connection. */
     close(code?: number, reason?: string): void;
-}
-
-/**
- * Reactive map that auto-updates the ConnectionHub's index when mutated.
- * Supports one value per index type per connection.
- */
-interface ConnectionIndexMap extends Iterable<[string, unknown]> {
-    get(indexType: string): unknown;
-    /** Set an index value. Updates the hub's reverse index automatically. */
-    set(indexType: string, value: unknown): void;
-    /** Remove an index. Removes from the hub's reverse index. */
-    delete(indexType: string): void;
-    has(indexType: string): boolean;
-    [Symbol.iterator](): Iterator<[string, unknown]>;
 }
 ```
 
