@@ -102,7 +102,6 @@ jobs:
           git add -A
           git commit -m "release: v${{ needs.validate.outputs.version }}"
           git tag v${{ needs.validate.outputs.version }}
-          git push origin HEAD --tags
 
       - name: Copy LICENSE to packages
         run: |
@@ -114,6 +113,9 @@ jobs:
         run: pnpm -r publish --access public --no-git-checks --provenance
         env:
           NPM_CONFIG_PROVENANCE: true
+
+      - name: Push commit and tag
+        run: git push origin HEAD --tags
 
       - name: Create GitHub Release
         run: |
