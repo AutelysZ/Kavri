@@ -678,13 +678,6 @@ class WebConfig {
     /** Graceful shutdown timeout in milliseconds. Default 30s. */
     @IsInteger({ default: 30_000 }) shutdownTimeout!: number;
 }
-
-@Configuration('database')
-class DatabaseConfig {
-    @IsString() url!: string;
-    @IsInteger({ default: 2 }) poolMin!: number;
-    @IsInteger({ default: 10 }) poolMax!: number;
-}
 ```
 
 ## 12. Error Handling
