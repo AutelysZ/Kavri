@@ -1,0 +1,1 @@
+# @kavri/aws-secretmanager-resolver

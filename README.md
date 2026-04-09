@@ -17,49 +17,76 @@ Kavri uses default parameters as the injection mechanism. No reflection, no para
 ## Example
 
 ```ts
-import { Container, Component, Conditional, Provide, Touch, Use, inject, token } from '@kavri/container';
-import { Configuration, injectConfig, OverrideConfiguration, ConfigFileOptions } from '@kavri/config';
+import {
+  Container,
+  Component,
+  Conditional,
+  Provide,
+  Touch,
+  Use,
+  inject,
+  token,
+} from '@kavri/container';
+import {
+  Configuration,
+  injectConfig,
+  OverrideConfiguration,
+  ConfigFileOptions,
+} from '@kavri/config';
 import { IsString, IsInteger, IsBoolean } from '@kavri/schema';
 
 // config
 @Configuration('database')
 class DatabaseConfig {
-    @IsString({ in: ['psql', 'mysql'] }) driver!: string;
-    @IsString() url!: string;
+  @IsString({ in: ['psql', 'mysql'] }) driver!: string;
+  @IsString() url!: string;
 }
 
 @Configuration('telemetry')
 class TelemetryConfig {
-    @IsBoolean({ default: false }) enabled!: boolean;
+  @IsBoolean({ default: false }) enabled!: boolean;
 }
 
 // components
 abstract class Driver {
-    abstract query(sql: string): Promise<any>;
+  abstract query(sql: string): Promise<any>;
 }
 
 @Component('psql')
 class PsqlDriver extends Driver {
-    async query(sql: string) { return `psql:${sql}`; }
+  async query(sql: string) {
+    return `psql:${sql}`;
+  }
 }
 
 const SelectedDriver = token<Driver>(
-    (cfg = injectConfig(DatabaseConfig), d = inject(Driver, cfg.driver)) => d
+  (cfg = injectConfig(DatabaseConfig), d = inject(Driver, cfg.driver)) => d,
 );
 
 // conditional component
 @Component()
 @Conditional((config = injectConfig(TelemetryConfig, true)) => config?.enabled ?? false)
 class TelemetryService {
-    constructor(private readonly config = injectConfig(TelemetryConfig)) {}
-    send(metric: string, value: number): void {}
+  constructor(private readonly config = injectConfig(TelemetryConfig)) {}
+  send(metric: string, value: number): void {}
 }
 
 // external class via @Provide
-declare class Redis { connect(url: string): Promise<void>; disconnect(): Promise<void>; }
+declare class Redis {
+  connect(url: string): Promise<void>;
+  disconnect(): Promise<void>;
+}
 
 @Component()
-@Provide(Redis, async () => { const r = new Redis(); await r.connect('redis://localhost'); return r; }, { onDestroy: 'disconnect' })
+@Provide(
+  Redis,
+  async () => {
+    const r = new Redis();
+    await r.connect('redis://localhost');
+    return r;
+  },
+  { onDestroy: 'disconnect' },
+)
 @OverrideConfiguration(ConfigFileOptions, () => ({ configFile: './config/app' }))
 class AppModule {}
 
@@ -68,13 +95,15 @@ class AppModule {}
 @Touch(PsqlDriver)
 @Use(AppModule)
 class App {
-    constructor(
-        private readonly driver = inject(SelectedDriver),
-        private readonly redis = inject(Redis),
-        private readonly telemetry = inject(TelemetryService, true),
-    ) {}
+  constructor(
+    private readonly driver = inject(SelectedDriver),
+    private readonly redis = inject(Redis),
+    private readonly telemetry = inject(TelemetryService, true),
+  ) {}
 
-    async run() { console.log(await this.driver.query('select 1')); }
+  async run() {
+    console.log(await this.driver.query('select 1'));
+  }
 }
 
 const container = new Container();

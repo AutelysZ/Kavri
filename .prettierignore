@@ -1,0 +1,6 @@
+packages/*/index.js
+packages/*/index.d.ts
+packages/*/index.js.map
+packages/*/index.d.ts.map
+pnpm-lock.yaml
+docs/
