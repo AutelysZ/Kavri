@@ -554,12 +554,41 @@ Uses [`expressjs/serve-static`](https://github.com/expressjs/serve-static) (peer
 class StaticConfig {
     /** Root directory to serve files from. */
     @IsString({ default: './public' }) root!: string;
-    /** URL prefix. */
-    @IsString({ default: '/static' }) prefix!: string;
+    /** URL prefix. Empty string means serve from root. */
+    @IsString({ default: '' }) prefix!: string;
+
+    // --- serve-static options ---
+
+    /** Enable Accept-Ranges header. */
+    @IsBoolean({ default: true }) acceptRanges!: boolean;
+    /** Enable Cache-Control header. */
+    @IsBoolean({ default: true }) cacheControl!: boolean;
+    /** How to handle dotfiles: 'allow', 'deny', 'ignore'. */
+    @IsIn(['allow', 'deny', 'ignore'] as const, { default: 'ignore' }) dotfiles!: string;
+    /** Enable ETag generation. */
+    @IsBoolean({ default: true }) etag!: boolean;
+    /** File extensions to try when not provided (e.g., ['html']). false to disable. */
+    @AnyOf([IsArray(IsString()), IsBoolean()], { default: false }) extensions!: string[] | false;
+    /** Enable Cache-Control immutable directive. */
+    @IsBoolean({ default: false }) immutable!: boolean;
+    /** Directory index file(s). false to disable. */
+    @AnyOf([IsString(), IsArray(IsString()), IsBoolean()], { default: 'index.html' })
+    index!: string | string[] | false;
+    /** Enable Last-Modified header. */
+    @IsBoolean({ default: true }) lastModified!: boolean;
     /** Max-age Cache-Control header in milliseconds. */
     @IsInteger({ default: 0 }) maxAge!: number;
-    /** Enable directory index (index.html). */
-    @IsBoolean({ default: true }) index!: boolean;
+    /** Redirect to trailing '/' for directories. */
+    @IsBoolean({ default: true }) redirect!: boolean;
+
+    // --- SPA fallback ---
+
+    /**
+     * SPA fallback file path (relative to root). When set, serves this file
+     * for any request that doesn't match a static file.
+     * Typical value: 'index.html'.
+     */
+    @IsString({ optional: true }) fallback?: string;
 }
 
 @Component()
@@ -573,8 +602,17 @@ class StaticFileInterceptor extends Interceptor {
     @OnConstruct()
     init() {
         this.serve = serveStatic(this.config.root, {
+            acceptRanges: this.config.acceptRanges,
+            cacheControl: this.config.cacheControl,
+            dotfiles: this.config.dotfiles,
+            etag: this.config.etag,
+            extensions: this.config.extensions,
+            fallthrough: true,  // always fallthrough — we handle miss ourselves
+            immutable: this.config.immutable,
+            index: this.config.index,
+            lastModified: this.config.lastModified,
             maxAge: this.config.maxAge,
-            index: this.config.index ? 'index.html' : false,
+            redirect: this.config.redirect,
         });
     }
 
@@ -583,21 +621,41 @@ class StaticFileInterceptor extends Interceptor {
         const res = kResponse.getOrThrow();
         const url = req.url ?? '';
 
-        if (!url.startsWith(this.config.prefix)) return next();
+        if (this.config.prefix && !url.startsWith(this.config.prefix)) return next();
 
         // Strip prefix so serve-static resolves from root
-        req.url = url.slice(this.config.prefix.length) || '/';
+        if (this.config.prefix) {
+            req.url = url.slice(this.config.prefix.length) || '/';
+        }
 
         const served = await new Promise<boolean>((resolve) => {
             this.serve(req, res, () => resolve(false));
             res.on('finish', () => resolve(true));
         });
 
-        req.url = url;  // restore original URL
-        if (served) return;  // serve-static already wrote the response
+        if (this.config.prefix) req.url = url;  // restore original URL
+
+        if (served) return;
+
+        // SPA fallback: serve the fallback file for unmatched paths
+        if (this.config.fallback) {
+            const fallbackPath = resolve(this.config.root, this.config.fallback);
+            return new FileResponse(fallbackPath, 'text/html');
+        }
+
         return next();
     }
 }
+```
+
+SPA config example:
+```yaml
+kavri:
+  web:
+    static:
+      root: ./dist
+      fallback: index.html   # all unmatched routes → index.html
+      maxAge: 86400000        # 1 day for static assets
 ```
 
 ## 9. Transactions
