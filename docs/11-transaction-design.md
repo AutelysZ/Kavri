@@ -213,7 +213,7 @@ get(name) {
 }
 
 begin(name, options) {
-    return this.doBegin(this._pools.get(name)!, options); // internal pool, not public get()
+    return this.doBegin(this.get(name), options); // get() throws if not connected
 }
 
 child(connection, options) {
@@ -221,6 +221,7 @@ child(connection, options) {
 }
 
 async shutdown() {
+    await Promise.all(this._connecting.values()); // wait for in-flight connects
     for (const conn of this._pools.values()) {
         await this.close(conn);
     }
@@ -498,7 +499,12 @@ class TransactionManager {
         try {
             return await fn(Transaction.NOOP);
         } finally {
-            kTransactionStack.set([...remaining, ...suspended]);
+            // Restore: take current stack (may have new frames from fn()),
+            // remove any frames for the suspended dataSource that fn() added,
+            // then append the original suspended frames.
+            const current = kTransactionStack.get() ?? [];
+            const cleaned = current.filter(f => f.dataSource !== dataSource);
+            kTransactionStack.set([...cleaned, ...suspended]);
         }
     }
 
