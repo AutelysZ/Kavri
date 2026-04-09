@@ -613,9 +613,9 @@ declare function defineWebSocket<
     name: string,
     pathOrOptions: string | WebSocketOptions,
     messages: { inbound: TIn; outbound: TOut },
-): WebSocketDefinition<TIn, TOut>;
+): WebSocketProtocol<TIn, TOut>;
 
-interface WebSocketDefinition<
+interface WebSocketProtocol<
     TIn extends Record<string, MessageType> = any,
     TOut extends Record<string, MessageType> = any,
 > {

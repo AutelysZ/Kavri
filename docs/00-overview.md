@@ -23,7 +23,7 @@ Kavri is a TypeScript IoC framework focused on explicit dependency wiring with o
 @kavri/event   → EventType, EventBus, OnEvent, defineEvent
 @kavri/config  → @Configuration, injectConfig, OverrideConfiguration, Loader, Resolver, ConfigFileOptions, ProfileOptions, VariantOptions
 @kavri/logging  → Logger, RawLogger, injectLogger, LoggingProvider, LoggingInterceptor, LoggingOptions
-@kavri/web     → Controller, createController, Interceptor, WebApplication, kRequest, kResponse, ...
+@kavri/web     → Controller, ControllerType, Interceptor, WebApplication, kRequest, kResponse, ...
 @kavri/client  → createClient, injectClient, typed HTTP clients from service definitions
 @kavri/swagger → SwaggerInterceptor, OpenAPI JSON + Swagger UI serving
 @kavri/eslint-plugin → ESLint rules for inject-point enforcement
@@ -41,7 +41,7 @@ Kavri is a TypeScript IoC framework focused on explicit dependency wiring with o
 | [`03-configuration-design.md`](./03-configuration-design.md) | @Configuration, injectConfig, ConfigFileOptions, ProfileOptions, VariantOptions, sources, precedence |
 | [`04-event-design.md`](./04-event-design.md) | @EventType, @OnEvent, defineEvent, EventBus |
 | [`05-metadata-design.md`](./05-metadata-design.md) | Metadata.of, createClassDecorator, createMethodDecorator |
-| [`06-web-design.md`](./06-web-design.md) | Controller, createController, interceptors, WebApplication |
+| [`06-web-design.md`](./06-web-design.md) | Controller, ControllerType, interceptors, WebApplication |
 | [`08-eslint-plugin-design.md`](./08-eslint-plugin-design.md) | ESLint rules for inject-point enforcement |
 | [`09-schema-design.md`](./09-schema-design.md) | @Schema, field decorators, defineRoute, parse, toJsonSchema |
 | [`10-logging-design.md`](./10-logging-design.md) | Logger, injectLogger, LoggingOptions |

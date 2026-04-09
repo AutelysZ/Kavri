@@ -38,9 +38,9 @@ declare function defineWebSocket<
     name: string,
     pathOrOptions: string | WebSocketOptions,
     messages: { inbound: TIn; outbound: TOut },
-): WebSocketDefinition<TIn, TOut>;
+): WebSocketProtocol<TIn, TOut>;
 
-interface WebSocketDefinition<
+interface WebSocketProtocol<
     TIn extends Record<string, MessageType> = any,
     TOut extends Record<string, MessageType> = any,
 > {
@@ -192,11 +192,11 @@ class MsgpackCodec extends WebSocketCodec {
 ## 4. WebSocketConnection
 
 ```ts
-interface WebSocketConnection<T extends WebSocketDefinition = any, TState = any> {
+interface WebSocketConnection<T extends WebSocketProtocol = any, TState = any> {
     /** Unique connection ID. */
     readonly id: string;
 
-    /** The definition this connection belongs to. */
+    /** The protocol this connection belongs to. */
     readonly protocol: T;
 
     /**
@@ -212,6 +212,13 @@ interface WebSocketConnection<T extends WebSocketDefinition = any, TState = any>
      */
     state: TState;
 
+    /**
+     * Index values for this connection. Used by ConnectionHub for O(1) lookups.
+     * Keys are index names, values are the indexed value.
+     * Set via conn.indexes.set('room', 'lobby') — automatically updates the hub's index.
+     */
+    readonly indexes: ConnectionIndexMap;
+
     /** Send a typed outbound message. Schema data is validated and encoded via the codec. */
     send<K extends keyof T['outbound'] & string>(
         type: K,
@@ -221,33 +228,78 @@ interface WebSocketConnection<T extends WebSocketDefinition = any, TState = any>
     /** Close the connection. */
     close(code?: number, reason?: string): void;
 }
+
+/**
+ * Reactive map that auto-updates the ConnectionHub's index when mutated.
+ * Supports one value per index type per connection.
+ */
+interface ConnectionIndexMap extends Iterable<[string, unknown]> {
+    get(indexType: string): unknown;
+    /** Set an index value. Updates the hub's reverse index automatically. */
+    set(indexType: string, value: unknown): void;
+    /** Remove an index. Removes from the hub's reverse index. */
+    delete(indexType: string): void;
+    has(indexType: string): boolean;
+    [Symbol.iterator](): Iterator<[string, unknown]>;
+}
 ```
 
 ## 5. ConnectionHub
 
-Single `@Component()` that manages ALL WebSocket connections across all handlers. Other services inject the hub to broadcast or query connections. Scoped queries via `.of(def)`.
+Single `@Component()` that manages ALL WebSocket connections across all handlers. Stores connections grouped by protocol, with reverse indexes for O(1) lookups.
 
 **Handlers and controllers should never be injected by application code.**
+
+### Internal storage
+
+```ts
+// Conceptual structure:
+{
+    connections: Map<WebSocketProtocol, Set<WebSocketConnection>>,
+    indexes: Map<string, Map<unknown, Set<WebSocketConnection>>>,
+    //         indexType    indexValue    connections with that value
+}
+```
+
+When `conn.indexes.set('room', 'lobby')` is called, the hub's reverse index is updated:
+- `indexes.get('room').get('lobby')` now includes `conn`
+
+When the connection closes or calls `conn.indexes.delete('room')`, it's removed from the reverse index.
+
+### API
 
 ```ts
 @Component()
 class ConnectionHub {
-    /** All active connections across all definitions. */
-    readonly connections: ReadonlySet<WebSocketConnection>;
+    /** Get all connections for a protocol. */
+    of<T extends WebSocketProtocol>(protocol: T): ReadonlySet<WebSocketConnection<T>>;
 
-    /** Get connections for a specific definition. */
-    of<T extends WebSocketDefinition>(def: T): ReadonlySet<WebSocketConnection<T>>;
+    /** Get connections matching an index value. O(1) lookup. */
+    byIndex<T extends WebSocketProtocol>(
+        protocol: T,
+        indexType: string,
+        indexValue: unknown,
+    ): ReadonlySet<WebSocketConnection<T>>;
 
-    /** Broadcast to all connections of a definition. */
-    broadcast<T extends WebSocketDefinition, K extends keyof T['outbound'] & string>(
-        def: T,
+    /** Broadcast to all connections of a protocol. */
+    broadcast<T extends WebSocketProtocol, K extends keyof T['outbound'] & string>(
+        protocol: T,
         type: K,
         data: T['outbound'][K] extends 'binary' ? Uint8Array : InstanceType<T['outbound'][K]>,
     ): void;
 
-    /** Broadcast to matching connections of a definition. */
-    broadcastTo<T extends WebSocketDefinition, K extends keyof T['outbound'] & string>(
-        def: T,
+    /** Broadcast to connections matching an index. O(1) — no iteration over all connections. */
+    broadcastByIndex<T extends WebSocketProtocol, K extends keyof T['outbound'] & string>(
+        protocol: T,
+        indexType: string,
+        indexValue: unknown,
+        type: K,
+        data: T['outbound'][K] extends 'binary' ? Uint8Array : InstanceType<T['outbound'][K]>,
+    ): void;
+
+    /** Broadcast to connections matching a predicate. Iterates. */
+    broadcastTo<T extends WebSocketProtocol, K extends keyof T['outbound'] & string>(
+        protocol: T,
         predicate: (conn: WebSocketConnection<T>) => boolean,
         type: K,
         data: T['outbound'][K] extends 'binary' ? Uint8Array : InstanceType<T['outbound'][K]>,
@@ -255,26 +307,21 @@ class ConnectionHub {
 }
 ```
 
-Usage:
+### Usage
 
 ```ts
 @Component()
 class NotificationService {
     constructor(private readonly hub = inject(ConnectionHub)) {}
 
+    /** O(1) — uses index, no iteration */
     async notifyRoom(roomId: string, message: ChatMessage) {
-        this.hub.broadcastTo(ChatDef,
-            c => c.params.roomId === roomId,
-            'message',
-            message,
-        );
+        this.hub.broadcastByIndex(ChatDef, 'room', roomId, 'message', message);
     }
 
-    /** Example: access connection state from hub */
+    /** Iterate all connections of a protocol */
     getOnlineUsers(): string[] {
-        return [...this.hub.of(ChatDef)]
-            .map(c => c.state.username)
-            .filter(Boolean);
+        return [...this.hub.of(ChatDef)].map(c => c.state.username);
     }
 }
 ```
@@ -283,23 +330,54 @@ class NotificationService {
 
 ```ts
 /**
- * HandlerType maps a WebSocketDefinition's inbound messages to handler methods.
+ * HandlerType maps a WebSocketProtocol's inbound messages to handler methods.
  * TState types the connection's state field.
  * For each inbound key K:
  *   type = 'binary'  → on{Capitalize<K>}(data: Uint8Array, conn): Awaitable<void>
  *   type = class      → on{Capitalize<K>}(data: InstanceType<class>, conn): Awaitable<void>
  */
-type HandlerType<T extends WebSocketDefinition, TState = any> = {
+type HandlerType<T extends WebSocketProtocol, TState = any> = {
     [K in keyof T['inbound'] as `on${Capitalize<string & K>}`]:
         /* (data: ..., conn: WebSocketConnection<T, TState>) => Awaitable<void> */
 };
 
 /**
- * Base class for WebSocket handlers. Provides lifecycle hooks and
- * access to the ConnectionHub.
+ * Base class for WebSocket handlers. Provides lifecycle hooks,
+ * convenience broadcast methods scoped to this handler's protocol,
+ * and access to the ConnectionHub.
  */
-abstract class WebSocketHandlerBase<T extends WebSocketDefinition, TState = any> {
+abstract class WebSocketHandlerBase<T extends WebSocketProtocol, TState = any> {
     constructor(protected readonly hub = inject(ConnectionHub)) {}
+
+    // The protocol is set by @WebSocketHandler(protocol)
+    protected abstract readonly protocol: T;
+
+    /** Broadcast to ALL connections of this handler's protocol. */
+    broadcast<K extends keyof T['outbound'] & string>(
+        type: K,
+        data: T['outbound'][K] extends 'binary' ? Uint8Array : InstanceType<T['outbound'][K]>,
+    ): void {
+        this.hub.broadcast(this.protocol, type, data);
+    }
+
+    /** Broadcast to matching connections of this handler's protocol. */
+    broadcastTo<K extends keyof T['outbound'] & string>(
+        predicate: (conn: WebSocketConnection<T, TState>) => boolean,
+        type: K,
+        data: T['outbound'][K] extends 'binary' ? Uint8Array : InstanceType<T['outbound'][K]>,
+    ): void {
+        this.hub.broadcastTo(this.protocol, predicate, type, data);
+    }
+
+    /** Broadcast to connections matching an index. O(1). */
+    broadcastByIndex<K extends keyof T['outbound'] & string>(
+        indexType: string,
+        indexValue: unknown,
+        type: K,
+        data: T['outbound'][K] extends 'binary' ? Uint8Array : InstanceType<T['outbound'][K]>,
+    ): void {
+        this.hub.broadcastByIndex(this.protocol, indexType, indexValue, type, data);
+    }
 
     /** Called when a connection opens. Runs in AsyncContext.run(). */
     onOpen?(conn: WebSocketConnection<T, TState>): Awaitable<void>;
@@ -315,7 +393,7 @@ abstract class WebSocketHandlerBase<T extends WebSocketDefinition, TState = any>
  * Marks a class as a WebSocket handler. Composes @Component().
  * Registers the definition's path for WebSocket upgrade routing.
  */
-declare function WebSocketHandler<T extends WebSocketDefinition>(
+declare function WebSocketHandler<T extends WebSocketProtocol>(
     def: T,
 ): ClassDecorator<{ def: T }>;
 ```
@@ -342,37 +420,39 @@ class ChatHandler
     // --- Lifecycle ---
 
     onOpen(conn: WebSocketConnection<typeof ChatDef, ChatState>) {
-        // conn.params is typed as ChatParams — roomId: string, token?: string
         const user = CurrentUser.getOrThrow();
         conn.state.username = user.name;
         conn.state.joinedAt = Date.now();
+
+        // Set index for O(1) room-scoped broadcasts
+        conn.indexes.set('room', conn.params.roomId);
+
         this.logger.info('user %s joined room %s', user.name, conn.params.roomId);
     }
 
     onClose(conn: WebSocketConnection<typeof ChatDef, ChatState>) {
-        this.hub.broadcastTo(ChatDef,
-            c => c.params.roomId === conn.params.roomId && c.id !== conn.id,
+        // O(1) — broadcast to same room via index
+        this.broadcastByIndex('room', conn.params.roomId,
             'presence',
             { userId: conn.state.username, online: false },
         );
+        // conn.indexes auto-cleaned on close
     }
 
     // --- Inbound message handlers (required by HandlerType) ---
 
     onSend(data: SendMessage, conn: WebSocketConnection<typeof ChatDef, ChatState>) {
         const msg = { from: conn.state.username, text: data.text, timestamp: Date.now() };
-
         this.repo.save(conn.params.roomId, msg);
 
-        this.hub.broadcastTo(ChatDef,
-            c => c.params.roomId === conn.params.roomId,
-            'message',
-            msg,
-        );
+        // O(1) — broadcast to same room via index
+        this.broadcastByIndex('room', conn.params.roomId, 'message', msg);
     }
 
     onTyping(data: TypingEvent, conn: WebSocketConnection<typeof ChatDef, ChatState>) {
-        // broadcast typing indicator
+        // broadcast typing indicator to room
+        this.broadcastByIndex('room', conn.params.roomId, 'presence',
+            { userId: conn.state.username, online: true });
     }
 
     onUpload(data: Uint8Array, conn: WebSocketConnection<typeof ChatDef, ChatState>) {
@@ -523,10 +603,11 @@ const LobbyDef = defineWebSocket('LobbyDef', '/lobby', {
 
 interface LobbyState {
     username: string;
-    rooms: Set<string>;
 }
 
 // --- Handler ---
+// Note: a connection can join multiple rooms. Use one index entry per room.
+// conn.indexes supports multiple values per index type via set/delete.
 
 @WebSocketHandler(LobbyDef)
 class LobbyHandler
@@ -537,26 +618,28 @@ class LobbyHandler
 
     onOpen(conn: WebSocketConnection<typeof LobbyDef, LobbyState>) {
         conn.state.username = CurrentUser.getOrThrow().name;
-        conn.state.rooms = new Set();
     }
 
     onJoin(data: JoinRoom, conn: WebSocketConnection<typeof LobbyDef, LobbyState>) {
-        conn.state.rooms.add(data.room);
-        this.hub.broadcastTo(LobbyDef,
-            c => c.state.rooms?.has(data.room),
+        // Add index: this connection is in this room. One conn can have multiple room indexes.
+        conn.indexes.set(`room:${data.room}`, true);
+
+        this.hub.broadcastByIndex(LobbyDef, `room:${data.room}`, true,
             'event',
             { room: data.room, user: conn.state.username, action: 'joined' },
         );
     }
 
     onLeave(data: LeaveRoom, conn: WebSocketConnection<typeof LobbyDef, LobbyState>) {
-        conn.state.rooms.delete(data.room);
+        conn.indexes.delete(`room:${data.room}`);
     }
 
     onSend(data: SendMsg, conn: WebSocketConnection<typeof LobbyDef, LobbyState>) {
-        for (const room of conn.state.rooms) {
-            this.hub.broadcastTo(LobbyDef,
-                c => c.state.rooms?.has(room),
+        // Send to all rooms this connection is in
+        for (const [indexType] of conn.indexes) {
+            if (!indexType.startsWith('room:')) continue;
+            const room = indexType.slice(5);
+            this.hub.broadcastByIndex(LobbyDef, indexType, true,
                 'message',
                 { from: conn.state.username, text: data.text, room, ts: Date.now() },
             );
@@ -564,13 +647,15 @@ class LobbyHandler
     }
 
     onClose(conn: WebSocketConnection<typeof LobbyDef, LobbyState>) {
-        for (const room of conn.state.rooms) {
-            this.hub.broadcastTo(LobbyDef,
-                c => c.state.rooms?.has(room) && c.id !== conn.id,
+        for (const [indexType] of conn.indexes) {
+            if (!indexType.startsWith('room:')) continue;
+            const room = indexType.slice(5);
+            this.hub.broadcastByIndex(LobbyDef, indexType, true,
                 'event',
                 { room, user: conn.state.username, action: 'left' },
             );
         }
+        // conn.indexes auto-cleaned on close
     }
 }
 
@@ -580,9 +665,9 @@ class LobbyHandler
 class AnnouncementService {
     constructor(private readonly hub = inject(ConnectionHub)) {}
 
+    /** O(1) broadcast to a room via index */
     announce(room: string, text: string) {
-        this.hub.broadcastTo(LobbyDef,
-            c => c.state.rooms?.has(room),
+        this.hub.broadcastByIndex(LobbyDef, `room:${room}`, true,
             'message',
             { from: 'system', text, room, ts: Date.now() },
         );
