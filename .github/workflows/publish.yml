@@ -111,8 +111,6 @@ jobs:
 
       - name: Publish to npm
         run: pnpm -r publish --access public --no-git-checks --provenance --verbose
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Push commit and tag
         run: git push origin HEAD --tags
