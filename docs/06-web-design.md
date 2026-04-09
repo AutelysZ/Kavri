@@ -409,6 +409,18 @@ Double-submit cookie pattern. Stateless — no server-side token storage.
 
 The cookie is **not** `HttpOnly` — frontend JS must read it to echo in the request header. Security relies on same-origin policy: an attacker on a different origin can cause the browser to send the cookie, but can't read its value to set the header.
 
+CSRF check applies when:
+1. The request matches a controller action that is **not** decorated with `@NoCsrf()`, OR
+2. The request path matches one of `CsrfConfig.includes` (for non-action paths like legacy endpoints)
+
+```ts
+/**
+ * Method decorator. Marks a controller action as exempt from CSRF validation.
+ * Use for API endpoints that use token-based auth (Bearer), webhooks, etc.
+ */
+declare function NoCsrf(): MethodDecorator<{}>;
+```
+
 ```ts
 @Configuration('kavri.web.csrf')
 class CsrfConfig {
@@ -416,10 +428,8 @@ class CsrfConfig {
     @IsString({ default: '_csrf' }) cookie!: string;
     /** Header name the client must echo the token in. */
     @IsString({ default: 'x-csrf-token' }) header!: string;
-    /** HTTP methods that require CSRF validation. */
-    @IsArray(IsString(), { default: ['POST', 'PUT', 'DELETE', 'PATCH'] }) methods!: string[];
-    /** URL patterns to exclude from CSRF checks. */
-    @IsArray(IsString(), { optional: true }) exclude?: string[];
+    /** Extra path prefixes to protect (for paths that don't match a controller action). */
+    @IsArray(IsString(), { optional: true }) includes?: string[];
 }
 
 @Component()
@@ -431,7 +441,6 @@ class CsrfInterceptor extends Interceptor {
     async intercept(next: () => unknown) {
         const req = kRequest.getOrThrow();
         const res = kResponse.getOrThrow();
-        const method = req.method ?? 'GET';
 
         // Set CSRF cookie on every response if not present.
         // NOT HttpOnly — frontend must read it via document.cookie.
@@ -443,10 +452,7 @@ class CsrfInterceptor extends Interceptor {
                 `${this.config.cookie}=${token}; Path=/; SameSite=Strict`);
         }
 
-        // Validate on state-changing methods
-        if (this.config.methods.includes(method)) {
-            if (this.isExcluded(req.url ?? '')) return next();
-
+        if (this.requiresCheck(req)) {
             const headerToken = req.headers[this.config.header.toLowerCase()];
             if (!headerToken || headerToken !== token) {
                 throw new HttpException(403, 'CSRF token mismatch');
@@ -456,16 +462,46 @@ class CsrfInterceptor extends Interceptor {
         return next();
     }
 
-    private isExcluded(url: string): boolean {
-        if (!this.config.exclude) return false;
-        return this.config.exclude.some(pattern => url.startsWith(pattern));
+    private requiresCheck(req: IncomingMessage): boolean {
+        // Safe methods never need CSRF
+        if (['GET', 'HEAD', 'OPTIONS'].includes(req.method ?? '')) return false;
+
+        const endpoint = kEndpoint.get();
+        const ctrl = kController.get();
+
+        if (endpoint && ctrl) {
+            // Matched a controller action — check unless @NoCsrf
+            const noCsrf = Metadata.of(NoCsrf, ctrl, endpoint.name);
+            return noCsrf.length === 0;
+        }
+
+        // No action matched — check if path is in includes
+        if (this.config.includes) {
+            const url = req.url ?? '';
+            return this.config.includes.some(prefix => url.startsWith(prefix));
+        }
+
+        return false;
     }
 }
 ```
 
-Frontend usage:
+Usage:
+
 ```ts
-// Read token from cookie, send in header
+@Controller(UserRoute)
+class UserController implements ControllerType<typeof UserRoute> {
+    // CSRF checked (default for state-changing actions)
+    async createUser(input: CreateUserBody) { ... }
+
+    // CSRF skipped — this endpoint uses Bearer token auth
+    @NoCsrf()
+    async apiCreateUser(input: CreateUserBody) { ... }
+}
+```
+
+Frontend:
+```ts
 const token = document.cookie.match(/_csrf=([^;]+)/)?.[1];
 fetch('/api/data', {
     method: 'POST',
