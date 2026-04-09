@@ -26,6 +26,7 @@ export default tseslint.config(
       'docs/',
       '*.js',
       '*.mjs',
+      'scripts/',
     ],
   },
 );
