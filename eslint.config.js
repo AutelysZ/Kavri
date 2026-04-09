@@ -26,6 +26,7 @@ export default tseslint.config(
       'packages/*/dist/',
       'packages/*/tsdown.config.ts',
       'docs/',
+      'coverage/',
       '*.js',
       '*.mjs',
       'scripts/',

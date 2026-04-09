@@ -10,14 +10,18 @@ import type {
 
 // ---------------------------------------------------------------------------
 // Internal storage
+//
+// Class-level metadata: WeakMap<factory, Map<constructor, metadata[]>>
+// Member-level metadata: WeakMap<factory, Map<constructor, Map<key, metadata[]>>>
+//
+// WeakMap keyed by factory allows GC if a factory is unreferenced.
+// Inner Maps use strong references because Metadata.entries() must iterate.
 // ---------------------------------------------------------------------------
 
-// Class-level: factory → Map<constructor, metadata[]>
 const classStore = new WeakMap<Function, Map<Function, unknown[]>>();
-
-// Member-level (method/field): factory → Map<constructor, Map<key, metadata[]>>
 const memberStore = new WeakMap<Function, Map<Function, Map<Qualifier, unknown[]>>>();
 
+/** Push a class-level metadata entry. */
 function pushClassMeta(factory: Function, target: Function, metadata: unknown): void {
   let byTarget = classStore.get(factory);
   if (!byTarget) {
@@ -32,6 +36,7 @@ function pushClassMeta(factory: Function, target: Function, metadata: unknown): 
   items.push(metadata);
 }
 
+/** Push a member-level (method/field) metadata entry. */
 function pushMemberMeta(
   factory: Function,
   target: Function,
@@ -57,7 +62,13 @@ function pushMemberMeta(
 }
 
 // ---------------------------------------------------------------------------
-// TC39 pending metadata (method/field decorators can't access class constructor)
+// TC39 pending metadata
+//
+// TC39 method/field decorators cannot access the class constructor at
+// decoration time. Pending entries are stored in `context.metadata` (the
+// shared DecoratorMetadata object per class) and flushed when:
+// (a) a class decorator runs on the same class, or
+// (b) Metadata.of/entries/lookup lazily flushes via Symbol.metadata.
 // ---------------------------------------------------------------------------
 
 interface PendingEntry {
@@ -69,6 +80,7 @@ interface PendingEntry {
 const PENDING = Symbol('kavri:pending');
 const FLUSHED = Symbol('kavri:flushed');
 
+/** Store a pending member metadata entry in the TC39 DecoratorMetadata object. */
 function storePending(
   meta: DecoratorMetadata,
   factory: Function,
@@ -85,6 +97,7 @@ function storePending(
   pending.push({ factory, key, metadata });
 }
 
+/** Flush all pending entries from a DecoratorMetadata object into the member store. */
 function flushPending(meta: DecoratorMetadata, target: Function): void {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const obj = meta as any;
@@ -98,7 +111,10 @@ function flushPending(meta: DecoratorMetadata, target: Function): void {
   obj[FLUSHED] = true;
 }
 
-/** Lazy flush: if target has TC39 Symbol.metadata with unflushed entries, flush them. */
+/**
+ * Ensure any pending TC39 metadata for `target` is flushed.
+ * Checks `target[Symbol.metadata]` for unflushed entries.
+ */
 function ensureFlushed(target: Function): void {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const meta = (target as any)[Symbol.metadata] as DecoratorMetadata | undefined;
@@ -108,22 +124,21 @@ function ensureFlushed(target: Function): void {
 }
 
 // ---------------------------------------------------------------------------
-// Target resolution
+// Helpers
 // ---------------------------------------------------------------------------
 
+/** Resolve a target (class constructor or instance) to the class constructor. */
 function resolveTarget(target: object): Function {
   if (typeof target === 'function') return target;
   return target.constructor;
 }
 
-// ---------------------------------------------------------------------------
-// Decorator protocol detection
-// ---------------------------------------------------------------------------
-
+/** Check if an argument is a TC39 class decorator context. */
 function isTC39ClassContext(arg: unknown): arg is ClassDecoratorContext {
   return typeof arg === 'object' && arg !== null && (arg as { kind?: string }).kind === 'class';
 }
 
+/** Check if an argument is a TC39 method/field/getter/setter decorator context. */
 function isTC39MemberContext(
   arg: unknown,
 ): arg is ClassMethodDecoratorContext | ClassFieldDecoratorContext {
@@ -136,6 +151,27 @@ function isTC39MemberContext(
 // createClassDecorator
 // ---------------------------------------------------------------------------
 
+/**
+ * Create a class decorator that stores typed metadata.
+ *
+ * The returned decorator works with both TC39 and legacy decorator protocols.
+ * When applied, it stores `metadata` keyed by `factory` on the target class,
+ * readable via `Metadata.of(factory, target)`.
+ *
+ * The `extra` parameter composes additional decorators. This is how composite
+ * decorators work — e.g., a `@Scheduled` that also applies `@Component`.
+ *
+ * @param factory - The decorator factory function. Serves as the metadata key.
+ * @param metadata - The typed metadata to store.
+ * @param extra - Additional class decorators to apply alongside this one.
+ *
+ * @example
+ * ```ts
+ * function Tag(tag: string): ClassDecorator<{ tag: string }> {
+ *   return createClassDecorator(Tag, { tag });
+ * }
+ * ```
+ */
 export function createClassDecorator<T>(
   factory: ClassDecoratorFactory<T>,
   metadata: T,
@@ -164,6 +200,24 @@ export function createClassDecorator<T>(
 // createMethodDecorator
 // ---------------------------------------------------------------------------
 
+/**
+ * Create a method decorator that stores typed metadata.
+ *
+ * Works with both TC39 and legacy decorator protocols. In TC39 mode,
+ * metadata is stored as pending in `context.metadata` and flushed when
+ * a class decorator runs or when `Metadata.of()` queries the target.
+ *
+ * @param factory - The decorator factory function. Serves as the metadata key.
+ * @param metadata - The typed metadata to store.
+ * @param extra - Additional method decorators to apply alongside this one.
+ *
+ * @example
+ * ```ts
+ * function RateLimit(opts: { max: number }): MethodDecorator<{ max: number }> {
+ *   return createMethodDecorator(RateLimit, opts);
+ * }
+ * ```
+ */
 export function createMethodDecorator<T>(
   factory: MethodDecoratorFactory<T>,
   metadata: T,
@@ -175,7 +229,7 @@ export function createMethodDecorator<T>(
     descriptor?: PropertyDescriptor,
   ): void {
     if (isTC39MemberContext(contextOrKey)) {
-      // TC39: target is the method function, no class reference
+      // TC39: target is the method function, no class reference available
       const key = contextOrKey.name as Qualifier;
       storePending(contextOrKey.metadata, factory, key, metadata);
     } else {
@@ -200,6 +254,23 @@ export function createMethodDecorator<T>(
 // createFieldDecorator
 // ---------------------------------------------------------------------------
 
+/**
+ * Create a field decorator that stores typed metadata.
+ *
+ * Same dual-protocol support as {@link createMethodDecorator}.
+ * Used by `@kavri/schema` for schema field decorators (`@IsString`, `@IsInteger`, etc.).
+ *
+ * @param factory - The decorator factory function. Serves as the metadata key.
+ * @param metadata - The typed metadata to store.
+ * @param extra - Additional field decorators to apply alongside this one.
+ *
+ * @example
+ * ```ts
+ * function Column(type: string): FieldDecorator<{ type: string }> {
+ *   return createFieldDecorator(Column, { type });
+ * }
+ * ```
+ */
 export function createFieldDecorator<T>(
   factory: FieldDecoratorFactory<T>,
   metadata: T,
@@ -233,6 +304,74 @@ export function createFieldDecorator<T>(
 // ---------------------------------------------------------------------------
 // Metadata API
 // ---------------------------------------------------------------------------
+
+/**
+ * The Metadata API for reading and writing decorator metadata.
+ *
+ * All decorators created with `createClassDecorator`, `createMethodDecorator`,
+ * or `createFieldDecorator` store typed metadata that can be queried through
+ * this API. The decorator factory function itself serves as the metadata key.
+ */
+export interface MetadataAPI {
+  /**
+   * Read class-level metadata for a decorator factory on a target.
+   * Returns `readonly T[]` because a decorator can be applied multiple times.
+   * Works on both class constructors and instances.
+   */
+  of<T>(factory: ClassDecoratorFactory<T>, target: object): readonly T[];
+
+  /**
+   * Read member-level (method/field) metadata for a decorator factory on a target.
+   * @param key - The method or field name (string or symbol).
+   */
+  of<T>(
+    factory: MethodDecoratorFactory<T> | FieldDecoratorFactory<T>,
+    target: object,
+    key: Qualifier,
+  ): readonly T[];
+
+  /**
+   * Programmatically attach class-level metadata without using decorator syntax.
+   * Uses push semantics — appends to the metadata array.
+   */
+  apply<T>(factory: ClassDecoratorFactory<T>, target: object, metadata: T): void;
+
+  /**
+   * Programmatically attach member-level metadata without using decorator syntax.
+   */
+  apply<T>(
+    factory: MethodDecoratorFactory<T> | FieldDecoratorFactory<T>,
+    target: object,
+    key: Qualifier,
+    metadata: T,
+  ): void;
+
+  /**
+   * Get all registered `[constructor, metadata]` pairs for a class decorator factory.
+   * Used by subsystems to discover all decorated classes.
+   */
+  entries<T>(factory: ClassDecoratorFactory<T>): readonly [Function, T][];
+
+  /**
+   * Get all registered `[constructor, key, metadata]` triples for a method decorator factory.
+   */
+  entries<T>(factory: MethodDecoratorFactory<T>): readonly [Function, Qualifier, T][];
+
+  /**
+   * Walk the prototype chain and collect metadata from the class and all ancestors.
+   * Returns metadata from most-derived to base.
+   */
+  lookup<T>(factory: ClassDecoratorFactory<T>, clazz: Function): readonly T[];
+
+  /**
+   * Walk the prototype chain for member-level metadata.
+   */
+  lookup<T>(
+    factory: MethodDecoratorFactory<T> | FieldDecoratorFactory<T>,
+    clazz: Function,
+    key: Qualifier,
+  ): readonly T[];
+}
 
 function metadataOf(factory: Function, target: object, key?: Qualifier): readonly unknown[] {
   const ctor = resolveTarget(target);
@@ -303,33 +442,7 @@ function metadataLookup(factory: Function, clazz: Function, key?: Qualifier): re
   return result;
 }
 
-export interface MetadataAPI {
-  of<T>(factory: ClassDecoratorFactory<T>, target: object): readonly T[];
-  of<T>(
-    factory: MethodDecoratorFactory<T> | FieldDecoratorFactory<T>,
-    target: object,
-    key: Qualifier,
-  ): readonly T[];
-
-  apply<T>(factory: ClassDecoratorFactory<T>, target: object, metadata: T): void;
-  apply<T>(
-    factory: MethodDecoratorFactory<T> | FieldDecoratorFactory<T>,
-    target: object,
-    key: Qualifier,
-    metadata: T,
-  ): void;
-
-  entries<T>(factory: ClassDecoratorFactory<T>): readonly [Function, T][];
-  entries<T>(factory: MethodDecoratorFactory<T>): readonly [Function, Qualifier, T][];
-
-  lookup<T>(factory: ClassDecoratorFactory<T>, clazz: Function): readonly T[];
-  lookup<T>(
-    factory: MethodDecoratorFactory<T> | FieldDecoratorFactory<T>,
-    clazz: Function,
-    key: Qualifier,
-  ): readonly T[];
-}
-
+/** @see {@link MetadataAPI} */
 export const Metadata: MetadataAPI = {
   of: metadataOf,
   apply: metadataApply,

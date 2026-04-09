@@ -13,9 +13,22 @@ describe('Key', () => {
     });
   });
 
-  it('getOrThrow throws outside scope', () => {
+  it('getOrThrow throws when not in scope', () => {
     const k = new Key<string>('x');
-    expect(() => k.getOrThrow()).toThrow('not set');
+    expect(() => k.getOrThrow()).toThrow('"x" is not set');
+  });
+
+  it('getOrThrow throws for unnamed key', () => {
+    const k = new Key<string>();
+    expect(() => k.getOrThrow()).toThrow('"(unnamed)" is not set');
+  });
+
+  it('getOrThrow returns value when set', async () => {
+    const k = AsyncContext.key<number>('v');
+    await AsyncContext.run(() => {
+      k.set(42);
+      expect(k.getOrThrow()).toBe(42);
+    });
   });
 
   it('getOrInsertComputed inserts on miss', async () => {
@@ -41,10 +54,34 @@ describe('Key', () => {
     });
   });
 
-  it('throws on set/delete outside scope', () => {
+  it('throws on set outside scope', () => {
     const k = new Key<string>('no-scope');
     expect(() => k.set('x')).toThrow('Not in AsyncContext scope');
+  });
+
+  it('throws on delete outside scope', () => {
+    const k = new Key<string>('no-scope');
     expect(() => k.delete()).toThrow('Not in AsyncContext scope');
+  });
+
+  it('get returns undefined outside scope', () => {
+    const k = new Key<string>('outside');
+    expect(k.get()).toBeUndefined();
+  });
+
+  it('has returns false outside scope', () => {
+    const k = new Key<string>('outside');
+    expect(k.has()).toBe(false);
+  });
+
+  it('name property is set', () => {
+    const k = new Key<string>('mykey');
+    expect(k.name).toBe('mykey');
+  });
+
+  it('name property is undefined when not provided', () => {
+    const k = new Key<string>();
+    expect(k.name).toBeUndefined();
   });
 });
 
@@ -101,16 +138,24 @@ describe('AsyncContext', () => {
     });
   });
 
-  it('enter creates scope imperatively', async () => {
-    // enter() uses enterWith which persists for the current async context
-    // Test via run to get a clean context
+  it('enter is a no-op when already in scope', async () => {
     await AsyncContext.run(() => {
-      // Already in scope — enter() is a no-op
       const k = AsyncContext.key<number>('enter');
       AsyncContext.enter();
       k.set(1);
       expect(k.get()).toBe(1);
     });
+  });
+
+  it('enter creates scope when not active', () => {
+    // enter() uses enterWith — persists for the current async context
+    // We can test it doesn't throw
+    expect(AsyncContext.isActive()).toBe(false);
+    AsyncContext.enter();
+    expect(AsyncContext.isActive()).toBe(true);
+    const k = AsyncContext.key<number>('entered');
+    k.set(99);
+    expect(k.get()).toBe(99);
   });
 
   it('run returns the value from fn', async () => {
@@ -119,9 +164,7 @@ describe('AsyncContext', () => {
   });
 
   it('run handles async fn', async () => {
-    const result = await AsyncContext.run(async () => {
-      return 'async-result';
-    });
+    const result = await AsyncContext.run(async () => 'async-result');
     expect(result).toBe('async-result');
   });
 
@@ -130,6 +173,16 @@ describe('AsyncContext', () => {
       return AsyncContext.fork(() => 'forked');
     });
     expect(result).toBe('forked');
+  });
+
+  it('fork outside scope creates child of empty root', async () => {
+    // fork() when not in a scope creates a child of Object.create(null)
+    const k = AsyncContext.key<string>('fork-root');
+    const result = await AsyncContext.fork(() => {
+      k.set('value');
+      return k.get();
+    });
+    expect(result).toBe('value');
   });
 
   it('nested forks create prototype chain', async () => {
@@ -146,6 +199,17 @@ describe('AsyncContext', () => {
           expect(k2.get()).toBe('mid');
         });
       });
+    });
+  });
+
+  it('key() creates distinct keys with same name', async () => {
+    const k1 = AsyncContext.key<string>('same');
+    const k2 = AsyncContext.key<string>('same');
+    await AsyncContext.run(() => {
+      k1.set('a');
+      k2.set('b');
+      expect(k1.get()).toBe('a');
+      expect(k2.get()).toBe('b');
     });
   });
 });
