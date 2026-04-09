@@ -192,20 +192,25 @@ class MsgpackCodec extends WebSocketCodec {
 ## 4. WebSocketConnection
 
 ```ts
-/**
- * TReq is inferred from WebSocketOptions.request.
- * If request schema is provided, params is typed as InstanceType<request>.
- * Otherwise, params is Record<string, string>.
- */
-interface WebSocketConnection<T extends WebSocketDefinition = any> {
+interface WebSocketConnection<T extends WebSocketDefinition = any, TState = any> {
     /** Unique connection ID. */
     readonly id: string;
+
+    /** The definition this connection belongs to. */
+    readonly protocol: T;
 
     /**
      * Validated request params (path + query merged, parsed via request schema).
      * Typed when options.request is provided, otherwise Record<string, string>.
      */
     readonly params: T['options'] extends { request: AnyConstructor<infer R> } ? R : Record<string, string>;
+
+    /**
+     * Mutable per-connection state. Typed via the handler's TState parameter.
+     * Initialized to {} on connection open. Accessible from any context that
+     * has the connection reference (handler methods, ConnectionHub queries, etc.).
+     */
+    state: TState;
 
     /** Send a typed outbound message. Schema data is validated and encoded via the codec. */
     send<K extends keyof T['outbound'] & string>(
@@ -220,23 +225,29 @@ interface WebSocketConnection<T extends WebSocketDefinition = any> {
 
 ## 5. ConnectionHub
 
-Manages connections for a WebSocket definition. Separate from the handler so other services can broadcast without injecting the handler (avoids circular dependencies).
+Single `@Component()` that manages ALL WebSocket connections across all handlers. Other services inject the hub to broadcast or query connections. Scoped queries via `.of(def)`.
 
 **Handlers and controllers should never be injected by application code.**
 
 ```ts
-class ConnectionHub<T extends WebSocketDefinition = any> {
-    /** All active connections. */
-    readonly connections: ReadonlySet<WebSocketConnection<T>>;
+@Component()
+class ConnectionHub {
+    /** All active connections across all definitions. */
+    readonly connections: ReadonlySet<WebSocketConnection>;
 
-    /** Send to all connections. */
-    broadcast<K extends keyof T['outbound'] & string>(
+    /** Get connections for a specific definition. */
+    of<T extends WebSocketDefinition>(def: T): ReadonlySet<WebSocketConnection<T>>;
+
+    /** Broadcast to all connections of a definition. */
+    broadcast<T extends WebSocketDefinition, K extends keyof T['outbound'] & string>(
+        def: T,
         type: K,
         data: T['outbound'][K] extends 'binary' ? Uint8Array : InstanceType<T['outbound'][K]>,
     ): void;
 
-    /** Send to connections matching a predicate. */
-    broadcastTo<K extends keyof T['outbound'] & string>(
+    /** Broadcast to matching connections of a definition. */
+    broadcastTo<T extends WebSocketDefinition, K extends keyof T['outbound'] & string>(
+        def: T,
         predicate: (conn: WebSocketConnection<T>) => boolean,
         type: K,
         data: T['outbound'][K] extends 'binary' ? Uint8Array : InstanceType<T['outbound'][K]>,
@@ -244,19 +255,26 @@ class ConnectionHub<T extends WebSocketDefinition = any> {
 }
 ```
 
-A `ConnectionHub` is auto-registered per `@WebSocketHandler(def)`, named after the definition. Inject by qualifier:
+Usage:
 
 ```ts
 @Component()
 class NotificationService {
-    constructor(private readonly chatHub = inject(ConnectionHub, 'ChatDef')) {}
+    constructor(private readonly hub = inject(ConnectionHub)) {}
 
     async notifyRoom(roomId: string, message: ChatMessage) {
-        this.chatHub.broadcastTo(
+        this.hub.broadcastTo(ChatDef,
             c => c.params.roomId === roomId,
             'message',
             message,
         );
+    }
+
+    /** Example: access connection state from hub */
+    getOnlineUsers(): string[] {
+        return [...this.hub.of(ChatDef)]
+            .map(c => c.state.username)
+            .filter(Boolean);
     }
 }
 ```
@@ -266,35 +284,36 @@ class NotificationService {
 ```ts
 /**
  * HandlerType maps a WebSocketDefinition's inbound messages to handler methods.
+ * TState types the connection's state field.
  * For each inbound key K:
  *   type = 'binary'  → on{Capitalize<K>}(data: Uint8Array, conn): Awaitable<void>
  *   type = class      → on{Capitalize<K>}(data: InstanceType<class>, conn): Awaitable<void>
  */
-type HandlerType<T extends WebSocketDefinition> = {
-    [K in keyof T['inbound'] as `on${Capitalize<string & K>}`]: /* typed handler method */
+type HandlerType<T extends WebSocketDefinition, TState = any> = {
+    [K in keyof T['inbound'] as `on${Capitalize<string & K>}`]:
+        /* (data: ..., conn: WebSocketConnection<T, TState>) => Awaitable<void> */
 };
 
 /**
  * Base class for WebSocket handlers. Provides lifecycle hooks and
  * access to the ConnectionHub.
  */
-abstract class WebSocketHandlerBase<T extends WebSocketDefinition> {
-    constructor(protected readonly hub = inject(ConnectionHub, /* def.name */)) {}
+abstract class WebSocketHandlerBase<T extends WebSocketDefinition, TState = any> {
+    constructor(protected readonly hub = inject(ConnectionHub)) {}
 
     /** Called when a connection opens. Runs in AsyncContext.run(). */
-    onOpen?(conn: WebSocketConnection<T>): Awaitable<void>;
+    onOpen?(conn: WebSocketConnection<T, TState>): Awaitable<void>;
 
     /** Called when a connection closes. */
-    onClose?(conn: WebSocketConnection<T>, code: number, reason: string): Awaitable<void>;
+    onClose?(conn: WebSocketConnection<T, TState>, code: number, reason: string): Awaitable<void>;
 
     /** Called on connection error. */
-    onError?(conn: WebSocketConnection<T>, error: Error): Awaitable<void>;
+    onError?(conn: WebSocketConnection<T, TState>, error: Error): Awaitable<void>;
 }
 
 /**
  * Marks a class as a WebSocket handler. Composes @Component().
  * Registers the definition's path for WebSocket upgrade routing.
- * Auto-registers a ConnectionHub named after the definition.
  */
 declare function WebSocketHandler<T extends WebSocketDefinition>(
     def: T,
@@ -304,10 +323,16 @@ declare function WebSocketHandler<T extends WebSocketDefinition>(
 Example handler:
 
 ```ts
+/** Typed per-connection state. */
+interface ChatState {
+    username: string;
+    joinedAt: number;
+}
+
 @WebSocketHandler(ChatDef)
 class ChatHandler
-    extends WebSocketHandlerBase<typeof ChatDef>
-    implements HandlerType<typeof ChatDef>
+    extends WebSocketHandlerBase<typeof ChatDef, ChatState>
+    implements HandlerType<typeof ChatDef, ChatState>
 {
     constructor(
         private readonly repo = inject(MessageRepository),
@@ -316,40 +341,41 @@ class ChatHandler
 
     // --- Lifecycle ---
 
-    onOpen(conn: WebSocketConnection<typeof ChatDef>) {
+    onOpen(conn: WebSocketConnection<typeof ChatDef, ChatState>) {
         // conn.params is typed as ChatParams — roomId: string, token?: string
-        this.logger.info('user joined room %s', conn.params.roomId);
-        CurrentUser.set(kUser.getOrThrow()); // from auth interceptor during upgrade
+        const user = CurrentUser.getOrThrow();
+        conn.state.username = user.name;
+        conn.state.joinedAt = Date.now();
+        this.logger.info('user %s joined room %s', user.name, conn.params.roomId);
     }
 
-    onClose(conn: WebSocketConnection<typeof ChatDef>) {
-        this.hub.broadcastTo(
+    onClose(conn: WebSocketConnection<typeof ChatDef, ChatState>) {
+        this.hub.broadcastTo(ChatDef,
             c => c.params.roomId === conn.params.roomId && c.id !== conn.id,
             'presence',
-            { userId: CurrentUser.getOrThrow().id, online: false },
+            { userId: conn.state.username, online: false },
         );
     }
 
     // --- Inbound message handlers (required by HandlerType) ---
 
-    onSend(data: SendMessage, conn: WebSocketConnection<typeof ChatDef>) {
-        const user = CurrentUser.getOrThrow();
-        const msg = { from: user.name, text: data.text, timestamp: Date.now() };
+    onSend(data: SendMessage, conn: WebSocketConnection<typeof ChatDef, ChatState>) {
+        const msg = { from: conn.state.username, text: data.text, timestamp: Date.now() };
 
         this.repo.save(conn.params.roomId, msg);
 
-        this.hub.broadcastTo(
+        this.hub.broadcastTo(ChatDef,
             c => c.params.roomId === conn.params.roomId,
             'message',
             msg,
         );
     }
 
-    onTyping(data: TypingEvent, conn: WebSocketConnection<typeof ChatDef>) {
+    onTyping(data: TypingEvent, conn: WebSocketConnection<typeof ChatDef, ChatState>) {
         // broadcast typing indicator
     }
 
-    onUpload(data: Uint8Array, conn: WebSocketConnection<typeof ChatDef>) {
+    onUpload(data: Uint8Array, conn: WebSocketConnection<typeof ChatDef, ChatState>) {
         // handle binary upload
     }
 }
@@ -493,47 +519,57 @@ const LobbyDef = defineWebSocket('LobbyDef', '/lobby', {
     outbound: { message: ChatMsg, event: RoomEvent },
 });
 
+// --- Per-connection state ---
+
+interface LobbyState {
+    username: string;
+    rooms: Set<string>;
+}
+
 // --- Handler ---
 
 @WebSocketHandler(LobbyDef)
 class LobbyHandler
-    extends WebSocketHandlerBase<typeof LobbyDef>
-    implements HandlerType<typeof LobbyDef>
+    extends WebSocketHandlerBase<typeof LobbyDef, LobbyState>
+    implements HandlerType<typeof LobbyDef, LobbyState>
 {
-    private rooms = new Map<string, Set<WebSocketConnection<typeof LobbyDef>>>();
-
     constructor(private readonly logger = injectLogger(LobbyHandler)) { super(); }
 
-    onJoin(data: JoinRoom, conn: WebSocketConnection<typeof LobbyDef>) {
-        const room = this.rooms.get(data.room) ?? new Set();
-        room.add(conn);
-        this.rooms.set(data.room, room);
-        for (const c of room) {
-            c.send('event', { room: data.room, user: conn.id, action: 'joined' });
+    onOpen(conn: WebSocketConnection<typeof LobbyDef, LobbyState>) {
+        conn.state.username = CurrentUser.getOrThrow().name;
+        conn.state.rooms = new Set();
+    }
+
+    onJoin(data: JoinRoom, conn: WebSocketConnection<typeof LobbyDef, LobbyState>) {
+        conn.state.rooms.add(data.room);
+        this.hub.broadcastTo(LobbyDef,
+            c => c.state.rooms?.has(data.room),
+            'event',
+            { room: data.room, user: conn.state.username, action: 'joined' },
+        );
+    }
+
+    onLeave(data: LeaveRoom, conn: WebSocketConnection<typeof LobbyDef, LobbyState>) {
+        conn.state.rooms.delete(data.room);
+    }
+
+    onSend(data: SendMsg, conn: WebSocketConnection<typeof LobbyDef, LobbyState>) {
+        for (const room of conn.state.rooms) {
+            this.hub.broadcastTo(LobbyDef,
+                c => c.state.rooms?.has(room),
+                'message',
+                { from: conn.state.username, text: data.text, room, ts: Date.now() },
+            );
         }
     }
 
-    onLeave(data: LeaveRoom, conn: WebSocketConnection<typeof LobbyDef>) {
-        this.rooms.get(data.room)?.delete(conn);
-    }
-
-    onSend(data: SendMsg, conn: WebSocketConnection<typeof LobbyDef>) {
-        for (const [roomName, members] of this.rooms) {
-            if (members.has(conn)) {
-                for (const c of members) {
-                    c.send('message', { from: conn.id, text: data.text, room: roomName, ts: Date.now() });
-                }
-            }
-        }
-    }
-
-    onClose(conn: WebSocketConnection<typeof LobbyDef>) {
-        for (const [roomName, members] of this.rooms) {
-            if (members.delete(conn)) {
-                for (const c of members) {
-                    c.send('event', { room: roomName, user: conn.id, action: 'left' });
-                }
-            }
+    onClose(conn: WebSocketConnection<typeof LobbyDef, LobbyState>) {
+        for (const room of conn.state.rooms) {
+            this.hub.broadcastTo(LobbyDef,
+                c => c.state.rooms?.has(room) && c.id !== conn.id,
+                'event',
+                { room, user: conn.state.username, action: 'left' },
+            );
         }
     }
 }
@@ -542,14 +578,18 @@ class LobbyHandler
 
 @Component()
 class AnnouncementService {
-    constructor(private readonly lobbyHub = inject(ConnectionHub, 'LobbyDef')) {}
+    constructor(private readonly hub = inject(ConnectionHub)) {}
 
     announce(room: string, text: string) {
-        this.lobbyHub.broadcastTo(
-            c => true, // all connections
+        this.hub.broadcastTo(LobbyDef,
+            c => c.state.rooms?.has(room),
             'message',
             { from: 'system', text, room, ts: Date.now() },
         );
+    }
+
+    getOnlineUsers(): string[] {
+        return [...this.hub.of(LobbyDef)].map(c => c.state.username);
     }
 }
 
