@@ -1,6 +1,6 @@
 {
   "name": "@kavri/logging",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "type": "module",
   "main": "dist/index.mjs",
   "types": "dist/index.d.mts",
