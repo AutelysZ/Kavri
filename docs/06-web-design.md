@@ -113,17 +113,22 @@ const user = CurrentUser.getOrThrow();
 
 Controllers are the sole mechanism for implementing HTTP endpoints. Every controller implements a route definition from `@kavri/schema`.
 
-### @Controller(route) + ControllerType
+### @Controller(route | protocol) + ControllerType
 
 ```ts
 /**
+ * @Controller is overloaded: accepts RouteDefinition (HTTP) or WebSocketProtocol (WS).
+ * See 13-websocket-design.md for the WebSocket variant.
+ *
  * ControllerType maps a RouteDefinition's endpoints to handler method signatures.
  * For each endpoint key K:
  *   request = 'void' → K(): Awaitable<ResponseType>
  *   request = class  → K(input: InstanceType<request>): Awaitable<ResponseType>
+ *
+ * For WebSocketProtocol, ControllerType maps inbound messages to on{Key} methods.
  */
-type ControllerType<T extends RouteDefinition<any>> = {
-    [K in keyof T['endpoints']]: /* typed handler method */
+type ControllerType<T extends RouteDefinition<any> | WebSocketProtocol> = {
+    /* typed method signatures derived from T */
 };
 ```
 
@@ -542,7 +547,7 @@ See [11-transaction-design.md](./11-transaction-design.md). `@Transactional()`, 
 
 ## 10. WebSocket
 
-See [13-websocket-design.md](./13-websocket-design.md). `defineWebSocket()`, `@WebSocketHandler(def)`, `WebSocketHandlerBase`, `HandlerType`, `ConnectionHub`, `WebSocketCodec`.
+See [13-websocket-design.md](./13-websocket-design.md). `defineWebSocket()`, `@Controller(protocol)`, `WebSocketControllerBase`, `ControllerType`, `ConnectionHub`, `WebSocketCodec`.
 
 ## 11. Configuration
 

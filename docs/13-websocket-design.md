@@ -5,7 +5,7 @@ Package: `@kavri/web` — definitions in `@kavri/schema`, client in `@kavri/clie
 ## 1. Design principles
 
 - **Definition-first.** `defineWebSocket()` in `@kavri/schema` defines a typed bidirectional contract — shared between client and server, like `defineRoute`.
-- **Handler = controller.** `@WebSocketHandler(def)` + `implements HandlerType<typeof def>` mirrors `@Controller(route)` + `implements ControllerType<typeof route>`.
+- **Same pattern as HTTP.** `@Controller(protocol)` + `implements ControllerType<typeof protocol>` — same decorator, same type helper as HTTP routes.
 - **No stringly-typed dispatch.** Inbound message types map to handler methods by name. Greppable. Type-safe.
 - **Pluggable wire format.** `WebSocketCodec` abstract class handles encode/decode. Built-in `KavriWebSocketCodec` (JSON with `type`/`data` envelope). Custom codecs for binary protocols, STOMP, etc.
 - **Per-connection AsyncContext.** `onOpen` runs in `AsyncContext.run()`. Message handlers `fork()` from it. Per-connection state works like per-request state.
@@ -330,13 +330,13 @@ class NotificationService {
 
 ```ts
 /**
- * HandlerType maps a WebSocketProtocol's inbound messages to handler methods.
+ * ControllerType maps a WebSocketProtocol's inbound messages to handler methods.
  * TState types the connection's state field.
  * For each inbound key K:
  *   type = 'binary'  → on{Capitalize<K>}(data: Uint8Array, conn): Awaitable<void>
  *   type = class      → on{Capitalize<K>}(data: InstanceType<class>, conn): Awaitable<void>
  */
-type HandlerType<T extends WebSocketProtocol, TState = any> = {
+type ControllerType<T extends WebSocketProtocol, TState = any> = {
     [K in keyof T['inbound'] as `on${Capitalize<string & K>}`]:
         /* (data: ..., conn: WebSocketConnection<T, TState>) => Awaitable<void> */
 };
@@ -346,10 +346,10 @@ type HandlerType<T extends WebSocketProtocol, TState = any> = {
  * convenience broadcast methods scoped to this handler's protocol,
  * and access to the ConnectionHub.
  */
-abstract class WebSocketHandlerBase<T extends WebSocketProtocol, TState = any> {
+abstract class WebSocketControllerBase<T extends WebSocketProtocol, TState = any> {
     constructor(protected readonly hub = inject(ConnectionHub)) {}
 
-    // The protocol is set by @WebSocketHandler(protocol)
+    // The protocol is set by @Controller(protocol)
     protected abstract readonly protocol: T;
 
     /** Broadcast to ALL connections of this handler's protocol. */
@@ -390,12 +390,12 @@ abstract class WebSocketHandlerBase<T extends WebSocketProtocol, TState = any> {
 }
 
 /**
- * Marks a class as a WebSocket handler. Composes @Component().
- * Registers the definition's path for WebSocket upgrade routing.
+ * @Controller is overloaded: accepts RouteDefinition (HTTP) or WebSocketProtocol (WS).
+ * Composes @Component(). Registers the protocol's path for WebSocket upgrade routing.
+ *
+ * declare function Controller(route: RouteDefinition<any>): ClassDecorator<...>;
+ * declare function Controller(protocol: WebSocketProtocol): ClassDecorator<...>;
  */
-declare function WebSocketHandler<T extends WebSocketProtocol>(
-    def: T,
-): ClassDecorator<{ def: T }>;
 ```
 
 Example handler:
@@ -407,14 +407,14 @@ interface ChatState {
     joinedAt: number;
 }
 
-@WebSocketHandler(ChatProtocol)
-class ChatHandler
-    extends WebSocketHandlerBase<typeof ChatProtocol, ChatState>
-    implements HandlerType<typeof ChatProtocol, ChatState>
+@Controller(ChatProtocol)
+class ChatController
+    extends WebSocketControllerBase<typeof ChatProtocol, ChatState>
+    implements ControllerType<typeof ChatProtocol, ChatState>
 {
     constructor(
         private readonly repo = inject(MessageRepository),
-        private readonly logger = injectLogger(ChatHandler),
+        private readonly logger = injectLogger(ChatController),
     ) { super(); }
 
     // --- Lifecycle ---
@@ -439,7 +439,7 @@ class ChatHandler
         // conn.indexes auto-cleaned on close
     }
 
-    // --- Inbound message handlers (required by HandlerType) ---
+    // --- Inbound message handlers (required by ControllerType) ---
 
     onSend(data: SendMessage, conn: WebSocketConnection<typeof ChatProtocol, ChatState>) {
         const msg = { from: conn.state.username, text: data.text, timestamp: Date.now() };
@@ -461,7 +461,7 @@ class ChatHandler
 }
 ```
 
-Method naming: inbound key `send` → method `onSend`, key `typing` → method `onTyping`. Enforced by `HandlerType`.
+Method naming: inbound key `send` → method `onSend`, key `typing` → method `onTyping`. Enforced by `ControllerType`.
 
 ## 7. Per-connection AsyncContext
 
@@ -562,7 +562,7 @@ ws.close();
 ```ts
 import { Schema, IsString, IsBoolean, IsInteger, defineWebSocket } from '@kavri/schema';
 import {
-    WebSocketHandler, WebSocketHandlerBase, HandlerType,
+    Controller, ControllerType, WebSocketControllerBase,
     WebSocketConnection, ConnectionHub,
 } from '@kavri/web';
 import { Component, Touch, inject } from '@kavri/container';
@@ -609,12 +609,12 @@ interface LobbyState {
 // Note: a connection can join multiple rooms. Use one index entry per room.
 // conn.indexes supports multiple values per index type via set/delete.
 
-@WebSocketHandler(LobbyProtocol)
-class LobbyHandler
-    extends WebSocketHandlerBase<typeof LobbyProtocol, LobbyState>
-    implements HandlerType<typeof LobbyProtocol, LobbyState>
+@Controller(LobbyProtocol)
+class LobbyController
+    extends WebSocketControllerBase<typeof LobbyProtocol, LobbyState>
+    implements ControllerType<typeof LobbyProtocol, LobbyState>
 {
-    constructor(private readonly logger = injectLogger(LobbyHandler)) { super(); }
+    constructor(private readonly logger = injectLogger(LobbyController)) { super(); }
 
     onOpen(conn: WebSocketConnection<typeof LobbyProtocol, LobbyState>) {
         conn.state.username = CurrentUser.getOrThrow().name;
@@ -681,7 +681,7 @@ class AnnouncementService {
 // --- Bootstrap ---
 
 @Component()
-@Touch(LobbyHandler)
+@Touch(LobbyController)
 class MyApp {}
 
 const app = await WebApplication.create(MyApp);
