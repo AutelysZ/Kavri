@@ -546,25 +546,54 @@ See [09-schema-design.md](./09-schema-design.md#openapi-generation). `generateOp
 
 ## 8. Static Assets
 
+Uses [`expressjs/serve-static`](https://github.com/expressjs/serve-static) (peer dependency). Handles caching headers, range requests, directory index, etc.
+
 ```ts
 @Configuration('kavri.web.static')
 class StaticConfig {
+    /** Root directory to serve files from. */
     @IsString({ default: './public' }) root!: string;
+    /** URL prefix. */
     @IsString({ default: '/static' }) prefix!: string;
+    /** Max-age Cache-Control header in milliseconds. */
+    @IsInteger({ default: 0 }) maxAge!: number;
+    /** Enable directory index (index.html). */
+    @IsBoolean({ default: true }) index!: boolean;
 }
 
 @Component()
 @Priority(Interceptor.ROUTE - 1)
 @ConditionalOnConfiguration(StaticConfig)
 class StaticFileInterceptor extends Interceptor {
+    private serve!: ReturnType<typeof serveStatic>;
+
     constructor(private readonly config = injectConfig(StaticConfig)) { super(); }
 
+    @OnConstruct()
+    init() {
+        this.serve = serveStatic(this.config.root, {
+            maxAge: this.config.maxAge,
+            index: this.config.index ? 'index.html' : false,
+        });
+    }
+
     async intercept(next: () => unknown) {
-        const url = kRequest.getOrThrow().url ?? '';
-        if (url.startsWith(this.config.prefix)) {
-            const filePath = resolve(this.config.root, url.slice(this.config.prefix.length));
-            return new FileResponse(filePath);
-        }
+        const req = kRequest.getOrThrow();
+        const res = kResponse.getOrThrow();
+        const url = req.url ?? '';
+
+        if (!url.startsWith(this.config.prefix)) return next();
+
+        // Strip prefix so serve-static resolves from root
+        req.url = url.slice(this.config.prefix.length) || '/';
+
+        const served = await new Promise<boolean>((resolve) => {
+            this.serve(req, res, () => resolve(false));
+            res.on('finish', () => resolve(true));
+        });
+
+        req.url = url;  // restore original URL
+        if (served) return;  // serve-static already wrote the response
         return next();
     }
 }
