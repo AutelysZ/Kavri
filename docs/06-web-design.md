@@ -409,9 +409,9 @@ Double-submit cookie pattern. Stateless — no server-side token storage.
 
 The cookie is **not** `HttpOnly` — frontend JS must read it to echo in the request header. Security relies on same-origin policy: an attacker on a different origin can cause the browser to send the cookie, but can't read its value to set the header.
 
-CSRF check applies when:
+CSRF check applies to all HTTP methods when:
 1. The request matches a controller action that is **not** decorated with `@NoCsrf()`, OR
-2. The request path matches one of `CsrfConfig.includes` (for non-action paths like legacy endpoints)
+2. The request path matches one of `CsrfConfig.includes` (for non-action paths)
 
 ```ts
 /**
@@ -463,9 +463,6 @@ class CsrfInterceptor extends Interceptor {
     }
 
     private requiresCheck(req: IncomingMessage): boolean {
-        // Safe methods never need CSRF
-        if (['GET', 'HEAD', 'OPTIONS'].includes(req.method ?? '')) return false;
-
         const endpoint = kEndpoint.get();
         const ctrl = kController.get();
 
