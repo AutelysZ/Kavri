@@ -407,10 +407,12 @@ class RateLimitInterceptor extends Interceptor {
 
 Double-submit cookie pattern. Stateless — no server-side token storage.
 
+The cookie is **not** `HttpOnly` — frontend JS must read it to echo in the request header. Security relies on same-origin policy: an attacker on a different origin can cause the browser to send the cookie, but can't read its value to set the header.
+
 ```ts
 @Configuration('kavri.web.csrf')
 class CsrfConfig {
-    /** Cookie name for the CSRF token. */
+    /** Cookie name for the CSRF token. Must be JS-readable (not HttpOnly). */
     @IsString({ default: '_csrf' }) cookie!: string;
     /** Header name the client must echo the token in. */
     @IsString({ default: 'x-csrf-token' }) header!: string;
@@ -431,13 +433,14 @@ class CsrfInterceptor extends Interceptor {
         const res = kResponse.getOrThrow();
         const method = req.method ?? 'GET';
 
-        // Set CSRF cookie on every response if not present
+        // Set CSRF cookie on every response if not present.
+        // NOT HttpOnly — frontend must read it via document.cookie.
         const cookies = parseCookies(req.headers['cookie'] ?? '');
         let token = cookies[this.config.cookie];
         if (!token) {
             token = crypto.randomUUID();
             res.setHeader('Set-Cookie',
-                `${this.config.cookie}=${token}; Path=/; SameSite=Strict; HttpOnly`);
+                `${this.config.cookie}=${token}; Path=/; SameSite=Strict`);
         }
 
         // Validate on state-changing methods
@@ -458,6 +461,17 @@ class CsrfInterceptor extends Interceptor {
         return this.config.exclude.some(pattern => url.startsWith(pattern));
     }
 }
+```
+
+Frontend usage:
+```ts
+// Read token from cookie, send in header
+const token = document.cookie.match(/_csrf=([^;]+)/)?.[1];
+fetch('/api/data', {
+    method: 'POST',
+    headers: { 'x-csrf-token': token },
+    credentials: 'same-origin',
+});
 ```
 
 ## 6. Clients
