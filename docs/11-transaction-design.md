@@ -395,11 +395,7 @@ class TransactionManager {
 ```ts
 class TransactionManager {
     async begin<T>(options: TransactionOptions, fn: (tx: Transaction) => Promise<T>): Promise<T> {
-        // Auto-wrap in AsyncContext if not active
-        if (!AsyncContext.isActive()) {
-            return AsyncContext.run(() => this.begin(options, fn));
-        }
-
+        return AsyncContext.run(async () => {
         const resolution = this.resolveSource(options);
         const driver = this.drivers.get(resolution.driver)!;
         const propagation = options.propagation ?? Propagation.Required;
@@ -431,6 +427,7 @@ class TransactionManager {
                 if (current) throw new TransactionError('Transaction not allowed');
                 return fn(Transaction.NOOP);
         }
+        }); // end AsyncContext.run
     }
 
     private async executeNew<T>(driver, resolution, options, fn): Promise<T> {
@@ -847,7 +844,7 @@ kTransactionStack: Key<TransactionFrame[]>
 
 TransactionManager.begin(options, fn)
   │
-  ├─ if !AsyncContext.isActive() → AsyncContext.run(() => begin(options, fn))
+  ├─ AsyncContext.run() — reuses scope if active, creates root if not
   │
   ├─ resolveSource(options) → { dataSource, driver }
   ├─ findCurrentTransaction(dataSource) → existing frame?
