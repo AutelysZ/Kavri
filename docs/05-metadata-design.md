@@ -204,6 +204,9 @@ Each Key has a unique `symbol` internally. State is stored as `Record<symbol, an
 declare class Key<T> {
     readonly name?: string;
 
+    /** Check if value is set in current scope. */
+    has(): boolean;
+
     /** Get value from current scope. Returns undefined if not set or not in scope. */
     get(): T | undefined;
 
@@ -271,6 +274,13 @@ const als = new AsyncLocalStorage<State>();
 // Key implementation:
 class KeyImpl<T> {
     private readonly sym = Symbol(name);
+
+    has(): boolean {
+        const state = als.getStore();
+        if (!state) return false;
+        const val = state[this.sym];
+        return val !== undefined && val !== DELETED;
+    }
 
     get(): T | undefined {
         const state = als.getStore();

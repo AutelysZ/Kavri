@@ -969,7 +969,7 @@ All parse interceptors are **passive** — if the target key is already set (by 
 @Priority(Interceptor.PARSE)
 class QueryParseInterceptor extends Interceptor {
     async intercept(next: () => unknown) {
-        if (kQuery.get() === undefined) {
+        if (!kQuery.has()) {
             const url = kURL.getOrThrow();
             kQuery.set(Object.fromEntries(url.searchParams));
         }
@@ -984,7 +984,7 @@ class JsonParseInterceptor extends Interceptor {
     constructor(private readonly config = injectConfig(WebConfig)) { super(); }
 
     async intercept(next: () => unknown) {
-        if (kBody.get() !== undefined) return next();
+        if (kBody.has()) return next();
 
         const endpoint = kEndpoint.get();
         if (!endpoint || endpoint.request === 'void') return next();
@@ -1006,7 +1006,7 @@ class UrlencodedParseInterceptor extends Interceptor {
     constructor(private readonly config = injectConfig(WebConfig)) { super(); }
 
     async intercept(next: () => unknown) {
-        if (kBody.get() !== undefined) return next();
+        if (kBody.has()) return next();
 
         const endpoint = kEndpoint.get();
         if (!endpoint || endpoint.request === 'void') return next();
@@ -1028,7 +1028,7 @@ class MultipartParseInterceptor extends Interceptor {
     constructor(private readonly config = injectConfig(WebConfig)) { super(); }
 
     async intercept(next: () => unknown) {
-        if (kBody.get() !== undefined) return next();
+        if (kBody.has()) return next();
 
         const endpoint = kEndpoint.get();
         if (!endpoint || endpoint.request === 'void') return next();
@@ -1049,7 +1049,7 @@ class MultipartParseInterceptor extends Interceptor {
 @Priority(Interceptor.PARSE + 1)
 class BinaryParseInterceptor extends Interceptor {
     async intercept(next: () => unknown) {
-        if (kBody.get() !== undefined) return next();
+        if (kBody.has()) return next();
 
         const endpoint = kEndpoint.get();
         if (!endpoint || endpoint.request === 'void') return next();
