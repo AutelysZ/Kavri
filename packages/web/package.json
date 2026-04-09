@@ -24,5 +24,10 @@
     "@kavri/config": "workspace:*",
     "@kavri/schema": "workspace:*"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/acrazing/Kavri",
+    "directory": "packages/web"
+  }
 }

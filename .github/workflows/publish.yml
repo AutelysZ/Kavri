@@ -112,13 +112,8 @@ jobs:
             cp LICENSE "$dir"
           done
 
-      - name: Debug auth
-        run: npm whoami --registry https://registry.npmjs.org || echo "not logged in"
-
       - name: Publish to npm
-        run: pnpm -r publish --access public --no-git-checks --provenance --verbose
-        env:
-          NPM_CONFIG_PROVENANCE: 'true'
+        run: pnpm -r publish --access public --no-git-checks --provenance
 
       - name: Push commit and tag
         run: git push origin HEAD --tags
