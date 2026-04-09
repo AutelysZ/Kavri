@@ -53,7 +53,7 @@ echo "    All packages built."
 
 echo ""
 echo "==> Bumping all packages to 0.0.1..."
-node scripts/bump-version.mjs patch
+pnpm -r exec npm version patch --no-git-tag-version
 
 echo ""
 echo "==> Copying LICENSE to packages..."
