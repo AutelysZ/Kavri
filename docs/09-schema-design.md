@@ -646,7 +646,7 @@ class ChatMessage {
     @IsInteger() timestamp!: number;
 }
 
-const ChatDef = defineWebSocket('ChatDef', { path: '/chat/:roomId', request: ChatParams }, {
+const ChatProtocol = defineWebSocket('ChatProtocol', { path: '/chat/:roomId', request: ChatParams }, {
     inbound: { send: SendMessage, upload: 'binary' },
     outbound: { message: ChatMessage, file: 'binary' },
 });

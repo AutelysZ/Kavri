@@ -84,7 +84,7 @@ class ChatParams {
     @IsString({ optional: true }) token?: string;  // query param for auth fallback
 }
 
-const ChatDef = defineWebSocket('ChatDef', { path: '/chat/:roomId', request: ChatParams }, {
+const ChatProtocol = defineWebSocket('ChatProtocol', { path: '/chat/:roomId', request: ChatParams }, {
     inbound: {
         send: SendMessage,
         typing: TypingEvent,
@@ -98,7 +98,7 @@ const ChatDef = defineWebSocket('ChatDef', { path: '/chat/:roomId', request: Cha
 });
 
 // Custom codec:
-const GameDef = defineWebSocket('GameDef', { path: '/game', codec: 'msgpack' }, {
+const GameProtocol = defineWebSocket('GameProtocol', { path: '/game', codec: 'msgpack' }, {
     inbound: { move: MoveAction, ping: 'binary' },
     outbound: { state: GameState, pong: 'binary' },
 });
@@ -316,12 +316,12 @@ class NotificationService {
 
     /** O(1) — uses index, no iteration */
     async notifyRoom(roomId: string, message: ChatMessage) {
-        this.hub.broadcastByIndex(ChatDef, 'room', roomId, 'message', message);
+        this.hub.broadcastByIndex(ChatProtocol, 'room', roomId, 'message', message);
     }
 
     /** Iterate all connections of a protocol */
     getOnlineUsers(): string[] {
-        return [...this.hub.of(ChatDef)].map(c => c.state.username);
+        return [...this.hub.of(ChatProtocol)].map(c => c.state.username);
     }
 }
 ```
@@ -407,10 +407,10 @@ interface ChatState {
     joinedAt: number;
 }
 
-@WebSocketHandler(ChatDef)
+@WebSocketHandler(ChatProtocol)
 class ChatHandler
-    extends WebSocketHandlerBase<typeof ChatDef, ChatState>
-    implements HandlerType<typeof ChatDef, ChatState>
+    extends WebSocketHandlerBase<typeof ChatProtocol, ChatState>
+    implements HandlerType<typeof ChatProtocol, ChatState>
 {
     constructor(
         private readonly repo = inject(MessageRepository),
@@ -419,7 +419,7 @@ class ChatHandler
 
     // --- Lifecycle ---
 
-    onOpen(conn: WebSocketConnection<typeof ChatDef, ChatState>) {
+    onOpen(conn: WebSocketConnection<typeof ChatProtocol, ChatState>) {
         const user = CurrentUser.getOrThrow();
         conn.state.username = user.name;
         conn.state.joinedAt = Date.now();
@@ -430,7 +430,7 @@ class ChatHandler
         this.logger.info('user %s joined room %s', user.name, conn.params.roomId);
     }
 
-    onClose(conn: WebSocketConnection<typeof ChatDef, ChatState>) {
+    onClose(conn: WebSocketConnection<typeof ChatProtocol, ChatState>) {
         // O(1) — broadcast to same room via index
         this.broadcastByIndex('room', conn.params.roomId,
             'presence',
@@ -441,7 +441,7 @@ class ChatHandler
 
     // --- Inbound message handlers (required by HandlerType) ---
 
-    onSend(data: SendMessage, conn: WebSocketConnection<typeof ChatDef, ChatState>) {
+    onSend(data: SendMessage, conn: WebSocketConnection<typeof ChatProtocol, ChatState>) {
         const msg = { from: conn.state.username, text: data.text, timestamp: Date.now() };
         this.repo.save(conn.params.roomId, msg);
 
@@ -449,13 +449,13 @@ class ChatHandler
         this.broadcastByIndex('room', conn.params.roomId, 'message', msg);
     }
 
-    onTyping(data: TypingEvent, conn: WebSocketConnection<typeof ChatDef, ChatState>) {
+    onTyping(data: TypingEvent, conn: WebSocketConnection<typeof ChatProtocol, ChatState>) {
         // broadcast typing indicator to room
         this.broadcastByIndex('room', conn.params.roomId, 'presence',
             { userId: conn.state.username, online: true });
     }
 
-    onUpload(data: Uint8Array, conn: WebSocketConnection<typeof ChatDef, ChatState>) {
+    onUpload(data: Uint8Array, conn: WebSocketConnection<typeof ChatProtocol, ChatState>) {
         // handle binary upload
     }
 }
@@ -535,7 +535,7 @@ Ping/pong is automatic. The framework sends pings at `pingInterval` and closes c
 ```ts
 import { createWebSocketClient } from '@kavri/client';
 
-const ws = createWebSocketClient(ChatDef, { url: 'wss://example.com' });
+const ws = createWebSocketClient(ChatProtocol, { url: 'wss://example.com' });
 
 // Typed send — only inbound message types allowed
 ws.send('send', { text: 'hello' });
@@ -594,7 +594,7 @@ class RoomEvent {
     @IsString() action!: string;
 }
 
-const LobbyDef = defineWebSocket('LobbyDef', '/lobby', {
+const LobbyProtocol = defineWebSocket('LobbyProtocol', '/lobby', {
     inbound: { join: JoinRoom, leave: LeaveRoom, send: SendMsg },
     outbound: { message: ChatMsg, event: RoomEvent },
 });
@@ -609,48 +609,48 @@ interface LobbyState {
 // Note: a connection can join multiple rooms. Use one index entry per room.
 // conn.indexes supports multiple values per index type via set/delete.
 
-@WebSocketHandler(LobbyDef)
+@WebSocketHandler(LobbyProtocol)
 class LobbyHandler
-    extends WebSocketHandlerBase<typeof LobbyDef, LobbyState>
-    implements HandlerType<typeof LobbyDef, LobbyState>
+    extends WebSocketHandlerBase<typeof LobbyProtocol, LobbyState>
+    implements HandlerType<typeof LobbyProtocol, LobbyState>
 {
     constructor(private readonly logger = injectLogger(LobbyHandler)) { super(); }
 
-    onOpen(conn: WebSocketConnection<typeof LobbyDef, LobbyState>) {
+    onOpen(conn: WebSocketConnection<typeof LobbyProtocol, LobbyState>) {
         conn.state.username = CurrentUser.getOrThrow().name;
     }
 
-    onJoin(data: JoinRoom, conn: WebSocketConnection<typeof LobbyDef, LobbyState>) {
+    onJoin(data: JoinRoom, conn: WebSocketConnection<typeof LobbyProtocol, LobbyState>) {
         // Add index: this connection is in this room. One conn can have multiple room indexes.
         conn.indexes.set(`room:${data.room}`, true);
 
-        this.hub.broadcastByIndex(LobbyDef, `room:${data.room}`, true,
+        this.hub.broadcastByIndex(LobbyProtocol, `room:${data.room}`, true,
             'event',
             { room: data.room, user: conn.state.username, action: 'joined' },
         );
     }
 
-    onLeave(data: LeaveRoom, conn: WebSocketConnection<typeof LobbyDef, LobbyState>) {
+    onLeave(data: LeaveRoom, conn: WebSocketConnection<typeof LobbyProtocol, LobbyState>) {
         conn.indexes.delete(`room:${data.room}`);
     }
 
-    onSend(data: SendMsg, conn: WebSocketConnection<typeof LobbyDef, LobbyState>) {
+    onSend(data: SendMsg, conn: WebSocketConnection<typeof LobbyProtocol, LobbyState>) {
         // Send to all rooms this connection is in
         for (const [indexType] of conn.indexes) {
             if (!indexType.startsWith('room:')) continue;
             const room = indexType.slice(5);
-            this.hub.broadcastByIndex(LobbyDef, indexType, true,
+            this.hub.broadcastByIndex(LobbyProtocol, indexType, true,
                 'message',
                 { from: conn.state.username, text: data.text, room, ts: Date.now() },
             );
         }
     }
 
-    onClose(conn: WebSocketConnection<typeof LobbyDef, LobbyState>) {
+    onClose(conn: WebSocketConnection<typeof LobbyProtocol, LobbyState>) {
         for (const [indexType] of conn.indexes) {
             if (!indexType.startsWith('room:')) continue;
             const room = indexType.slice(5);
-            this.hub.broadcastByIndex(LobbyDef, indexType, true,
+            this.hub.broadcastByIndex(LobbyProtocol, indexType, true,
                 'event',
                 { room, user: conn.state.username, action: 'left' },
             );
@@ -667,14 +667,14 @@ class AnnouncementService {
 
     /** O(1) broadcast to a room via index */
     announce(room: string, text: string) {
-        this.hub.broadcastByIndex(LobbyDef, `room:${room}`, true,
+        this.hub.broadcastByIndex(LobbyProtocol, `room:${room}`, true,
             'message',
             { from: 'system', text, room, ts: Date.now() },
         );
     }
 
     getOnlineUsers(): string[] {
-        return [...this.hub.of(LobbyDef)].map(c => c.state.username);
+        return [...this.hub.of(LobbyProtocol)].map(c => c.state.username);
     }
 }
 
