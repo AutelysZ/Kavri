@@ -1,0 +1,339 @@
+import type {
+  Qualifier,
+  ClassDecorator,
+  MethodDecorator,
+  FieldDecorator,
+  ClassDecoratorFactory,
+  MethodDecoratorFactory,
+  FieldDecoratorFactory,
+} from './types.js';
+
+// ---------------------------------------------------------------------------
+// Internal storage
+// ---------------------------------------------------------------------------
+
+// Class-level: factory → Map<constructor, metadata[]>
+const classStore = new WeakMap<Function, Map<Function, unknown[]>>();
+
+// Member-level (method/field): factory → Map<constructor, Map<key, metadata[]>>
+const memberStore = new WeakMap<Function, Map<Function, Map<Qualifier, unknown[]>>>();
+
+function pushClassMeta(factory: Function, target: Function, metadata: unknown): void {
+  let byTarget = classStore.get(factory);
+  if (!byTarget) {
+    byTarget = new Map();
+    classStore.set(factory, byTarget);
+  }
+  let items = byTarget.get(target);
+  if (!items) {
+    items = [];
+    byTarget.set(target, items);
+  }
+  items.push(metadata);
+}
+
+function pushMemberMeta(
+  factory: Function,
+  target: Function,
+  key: Qualifier,
+  metadata: unknown,
+): void {
+  let byTarget = memberStore.get(factory);
+  if (!byTarget) {
+    byTarget = new Map();
+    memberStore.set(factory, byTarget);
+  }
+  let byKey = byTarget.get(target);
+  if (!byKey) {
+    byKey = new Map();
+    byTarget.set(target, byKey);
+  }
+  let items = byKey.get(key);
+  if (!items) {
+    items = [];
+    byKey.set(key, items);
+  }
+  items.push(metadata);
+}
+
+// ---------------------------------------------------------------------------
+// TC39 pending metadata (method/field decorators can't access class constructor)
+// ---------------------------------------------------------------------------
+
+interface PendingEntry {
+  factory: Function;
+  key: Qualifier;
+  metadata: unknown;
+}
+
+const PENDING = Symbol('kavri:pending');
+const FLUSHED = Symbol('kavri:flushed');
+
+function storePending(
+  meta: DecoratorMetadata,
+  factory: Function,
+  key: Qualifier,
+  metadata: unknown,
+): void {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const obj = meta as any;
+  let pending = obj[PENDING] as PendingEntry[] | undefined;
+  if (!pending) {
+    pending = [];
+    obj[PENDING] = pending;
+  }
+  pending.push({ factory, key, metadata });
+}
+
+function flushPending(meta: DecoratorMetadata, target: Function): void {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const obj = meta as any;
+  const pending = obj[PENDING] as PendingEntry[] | undefined;
+  if (pending) {
+    for (const entry of pending) {
+      pushMemberMeta(entry.factory, target, entry.key, entry.metadata);
+    }
+    delete obj[PENDING];
+  }
+  obj[FLUSHED] = true;
+}
+
+/** Lazy flush: if target has TC39 Symbol.metadata with unflushed entries, flush them. */
+function ensureFlushed(target: Function): void {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const meta = (target as any)[Symbol.metadata] as DecoratorMetadata | undefined;
+  if (meta && !(meta as Record<symbol, unknown>)[FLUSHED]) {
+    flushPending(meta, target);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Target resolution
+// ---------------------------------------------------------------------------
+
+function resolveTarget(target: object): Function {
+  if (typeof target === 'function') return target;
+  return target.constructor;
+}
+
+// ---------------------------------------------------------------------------
+// Decorator protocol detection
+// ---------------------------------------------------------------------------
+
+function isTC39ClassContext(arg: unknown): arg is ClassDecoratorContext {
+  return typeof arg === 'object' && arg !== null && (arg as { kind?: string }).kind === 'class';
+}
+
+function isTC39MemberContext(
+  arg: unknown,
+): arg is ClassMethodDecoratorContext | ClassFieldDecoratorContext {
+  if (typeof arg !== 'object' || arg === null) return false;
+  const kind = (arg as { kind?: string }).kind;
+  return kind === 'method' || kind === 'field' || kind === 'getter' || kind === 'setter';
+}
+
+// ---------------------------------------------------------------------------
+// createClassDecorator
+// ---------------------------------------------------------------------------
+
+export function createClassDecorator<T>(
+  factory: ClassDecoratorFactory<T>,
+  metadata: T,
+  extra?: ClassDecorator<unknown>[],
+): ClassDecorator<T> {
+  const decorator = function (target: Function, context?: ClassDecoratorContext): void {
+    pushClassMeta(factory, target, metadata);
+
+    // TC39: flush pending method/field metadata now that we have the class
+    if (isTC39ClassContext(context)) {
+      flushPending(context.metadata, target);
+    }
+
+    if (extra) {
+      for (const d of extra) {
+        (d as Function)(target, context);
+      }
+    }
+  } as ClassDecorator<T>;
+
+  Object.defineProperty(decorator, 'metadata', { value: metadata, writable: false });
+  return decorator;
+}
+
+// ---------------------------------------------------------------------------
+// createMethodDecorator
+// ---------------------------------------------------------------------------
+
+export function createMethodDecorator<T>(
+  factory: MethodDecoratorFactory<T>,
+  metadata: T,
+  extra?: MethodDecorator<unknown>[],
+): MethodDecorator<T> {
+  const decorator = function (
+    target: unknown,
+    contextOrKey: ClassMethodDecoratorContext | string | symbol,
+    descriptor?: PropertyDescriptor,
+  ): void {
+    if (isTC39MemberContext(contextOrKey)) {
+      // TC39: target is the method function, no class reference
+      const key = contextOrKey.name as Qualifier;
+      storePending(contextOrKey.metadata, factory, key, metadata);
+    } else {
+      // Legacy: target is prototype (instance) or constructor (static)
+      const key = contextOrKey as Qualifier;
+      const ctor = typeof target === 'function' ? target : (target as object).constructor;
+      pushMemberMeta(factory, ctor, key, metadata);
+    }
+
+    if (extra) {
+      for (const d of extra) {
+        (d as Function)(target, contextOrKey, descriptor);
+      }
+    }
+  } as MethodDecorator<T>;
+
+  Object.defineProperty(decorator, 'metadata', { value: metadata, writable: false });
+  return decorator;
+}
+
+// ---------------------------------------------------------------------------
+// createFieldDecorator
+// ---------------------------------------------------------------------------
+
+export function createFieldDecorator<T>(
+  factory: FieldDecoratorFactory<T>,
+  metadata: T,
+  extra?: FieldDecorator<unknown>[],
+): FieldDecorator<T> {
+  const decorator = function (
+    target: unknown,
+    contextOrKey: ClassFieldDecoratorContext | string | symbol,
+    descriptor?: PropertyDescriptor,
+  ): void {
+    if (isTC39MemberContext(contextOrKey)) {
+      const key = contextOrKey.name as Qualifier;
+      storePending(contextOrKey.metadata, factory, key, metadata);
+    } else {
+      const key = contextOrKey as Qualifier;
+      const ctor = typeof target === 'function' ? target : (target as object).constructor;
+      pushMemberMeta(factory, ctor, key, metadata);
+    }
+
+    if (extra) {
+      for (const d of extra) {
+        (d as Function)(target, contextOrKey, descriptor);
+      }
+    }
+  } as FieldDecorator<T>;
+
+  Object.defineProperty(decorator, 'metadata', { value: metadata, writable: false });
+  return decorator;
+}
+
+// ---------------------------------------------------------------------------
+// Metadata API
+// ---------------------------------------------------------------------------
+
+function metadataOf(factory: Function, target: object, key?: Qualifier): readonly unknown[] {
+  const ctor = resolveTarget(target);
+  ensureFlushed(ctor);
+  if (key === undefined) {
+    return classStore.get(factory)?.get(ctor) ?? [];
+  }
+  return memberStore.get(factory)?.get(ctor)?.get(key) ?? [];
+}
+
+function metadataApply(
+  factory: Function,
+  target: object,
+  keyOrMetadata: unknown,
+  metadata?: unknown,
+): void {
+  const ctor = resolveTarget(target);
+  if (metadata === undefined) {
+    pushClassMeta(factory, ctor, keyOrMetadata);
+  } else {
+    pushMemberMeta(factory, ctor, keyOrMetadata as Qualifier, metadata);
+  }
+}
+
+function metadataEntries(factory: Function): readonly unknown[] {
+  const cm = classStore.get(factory);
+  if (cm) {
+    const result: [Function, unknown][] = [];
+    for (const [ctor, items] of cm) {
+      for (const item of items) {
+        result.push([ctor, item]);
+      }
+    }
+    return result;
+  }
+
+  const mm = memberStore.get(factory);
+  if (mm) {
+    const result: [Function, Qualifier, unknown][] = [];
+    for (const [ctor, byKey] of mm) {
+      for (const [key, items] of byKey) {
+        for (const item of items) {
+          result.push([ctor, key, item]);
+        }
+      }
+    }
+    return result;
+  }
+
+  return [];
+}
+
+function metadataLookup(factory: Function, clazz: Function, key?: Qualifier): readonly unknown[] {
+  const result: unknown[] = [];
+  let current: Function | null = clazz;
+  while (current && current !== Object && current !== Function) {
+    ensureFlushed(current);
+    if (key === undefined) {
+      const items = classStore.get(factory)?.get(current);
+      if (items) result.push(...items);
+    } else {
+      const items = memberStore.get(factory)?.get(current)?.get(key);
+      if (items) result.push(...items);
+    }
+    const proto = Object.getPrototypeOf(current.prototype);
+    current = proto ? proto.constructor : null;
+  }
+  return result;
+}
+
+export interface MetadataAPI {
+  of<T>(factory: ClassDecoratorFactory<T>, target: object): readonly T[];
+  of<T>(
+    factory: MethodDecoratorFactory<T> | FieldDecoratorFactory<T>,
+    target: object,
+    key: Qualifier,
+  ): readonly T[];
+
+  apply<T>(factory: ClassDecoratorFactory<T>, target: object, metadata: T): void;
+  apply<T>(
+    factory: MethodDecoratorFactory<T> | FieldDecoratorFactory<T>,
+    target: object,
+    key: Qualifier,
+    metadata: T,
+  ): void;
+
+  entries<T>(factory: ClassDecoratorFactory<T>): readonly [Function, T][];
+  entries<T>(factory: MethodDecoratorFactory<T>): readonly [Function, Qualifier, T][];
+
+  lookup<T>(factory: ClassDecoratorFactory<T>, clazz: Function): readonly T[];
+  lookup<T>(
+    factory: MethodDecoratorFactory<T> | FieldDecoratorFactory<T>,
+    clazz: Function,
+    key: Qualifier,
+  ): readonly T[];
+}
+
+export const Metadata: MetadataAPI = {
+  of: metadataOf,
+  apply: metadataApply,
+  entries: metadataEntries,
+  lookup: metadataLookup,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+} as any;
