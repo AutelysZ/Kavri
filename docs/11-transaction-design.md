@@ -272,13 +272,13 @@ class DefaultDataSourceResolver extends DataSourceResolver {
 ### Multi-tenant example
 
 ```ts
-const kTenantId = AsyncContext.key<string>('tenantId');
+const kTenantId = new Key<string>('tenantId');
 
 @Component()
 @Priority(1000)
 class TenantDataSourceResolver extends DataSourceResolver {
     resolve(options: DataSourceResolveOptions): DataSourceResolution | undefined {
-        const tenantId = kTenantId.get();
+        const tenantId = RequestContext.get(kTenantId);
         if (!tenantId) return undefined;
         return { dataSource: `tenant_${tenantId}`, driver: 'drizzle' };
     }
@@ -292,11 +292,11 @@ class TenantInterceptor extends Interceptor {
     ) {}
 
     async intercept(next: () => unknown) {
-        const req = kRequest.getOrThrow();
+        const req = RequestContext.getOrThrow(kRequest);
         const tenantId = req.headers['x-tenant-id'] as string;
         if (!tenantId) return next();
 
-        kTenantId.set(tenantId);
+        RequestContext.set(kTenantId, tenantId);
 
         // connect() is idempotent — only connects once per name
         const tenantConfig = await fetchTenantConfig(tenantId);
@@ -352,10 +352,11 @@ class Transaction {
 
 ## 7. TransactionManager
 
-Manages ALS-based transaction stack. If called outside an `AsyncContext`, auto-wraps in `AsyncContext.run()`.
+Manages ALS-based transaction stack. If called outside a `TransactionContext` scope, auto-wraps in `TransactionContext.run()`.
 
 ```ts
-const kTransactionStack = AsyncContext.key<TransactionFrame[]>('transactionStack');
+export const TransactionContext = new AsyncContext();
+const kTransactionStack = new Key<TransactionFrame[]>('transactionStack');
 
 interface TransactionFrame {
     dataSource: Qualifier;
@@ -373,7 +374,7 @@ class TransactionManager {
     ) {}
 
     /**
-     * Begin a transaction. Auto-wraps in AsyncContext.run() if not active.
+     * Begin a transaction. Auto-wraps in TransactionContext.run() if not active.
      * Auto-commits on fn success. Auto-rollbacks on fn throw.
      */
     begin<T>(options: TransactionOptions, fn: (tx: Transaction) => Promise<T>): Promise<T>;
@@ -395,7 +396,7 @@ class TransactionManager {
 ```ts
 class TransactionManager {
     async begin<T>(options: TransactionOptions, fn: (tx: Transaction) => Promise<T>): Promise<T> {
-        return AsyncContext.run(async () => {
+        return TransactionContext.run(async () => {
         const resolution = this.resolveSource(options);
         const driver = this.drivers.get(resolution.driver)!;
         const propagation = options.propagation ?? Propagation.Required;
@@ -427,7 +428,7 @@ class TransactionManager {
                 if (current) throw new TransactionError('Transaction not allowed');
                 return fn(Transaction.NOOP);
         }
-        }); // end AsyncContext.run
+        }); // end TransactionContext.run
     }
 
     private async executeNew<T>(driver, resolution, options, fn): Promise<T> {
@@ -489,19 +490,19 @@ class TransactionManager {
     }
 
     private async executeSuspended<T>(dataSource: Qualifier, fn: (tx: Transaction) => Promise<T>): Promise<T> {
-        const stack = kTransactionStack.get() ?? [];
+        const stack = TransactionContext.get(kTransactionStack) ?? [];
         const suspended = stack.filter(f => f.dataSource === dataSource);
         const remaining = stack.filter(f => f.dataSource !== dataSource);
-        kTransactionStack.set(remaining);
+        TransactionContext.set(kTransactionStack, remaining);
         try {
             return await fn(Transaction.NOOP);
         } finally {
             // Restore: take current stack (may have new frames from fn()),
             // remove any frames for the suspended dataSource that fn() added,
             // then append the original suspended frames.
-            const current = kTransactionStack.get() ?? [];
+            const current = TransactionContext.get(kTransactionStack) ?? [];
             const cleaned = current.filter(f => f.dataSource !== dataSource);
-            kTransactionStack.set([...cleaned, ...suspended]);
+            TransactionContext.set(kTransactionStack, [...cleaned, ...suspended]);
         }
     }
 
@@ -533,7 +534,7 @@ class TransactionManager {
     }
 
     private findCurrentTransaction(dataSource: Qualifier): TransactionFrame | undefined {
-        const stack = kTransactionStack.get();
+        const stack = TransactionContext.get(kTransactionStack);
         if (!stack) return undefined;
         for (let i = stack.length - 1; i >= 0; i--) {
             if (stack[i].dataSource === dataSource) return stack[i];
@@ -542,11 +543,11 @@ class TransactionManager {
     }
 
     private pushFrame(frame: TransactionFrame) {
-        kTransactionStack.getOrInsertComputed(() => []).push(frame);
+        TransactionContext.getOrInsertComputed(kTransactionStack, () => []).push(frame);
     }
 
     private popFrame(frame: TransactionFrame) {
-        const stack = kTransactionStack.get();
+        const stack = TransactionContext.get(kTransactionStack);
         if (stack) {
             const idx = stack.indexOf(frame);
             if (idx >= 0) stack.splice(idx, 1);
@@ -844,7 +845,7 @@ kTransactionStack: Key<TransactionFrame[]>
 
 TransactionManager.begin(options, fn)
   │
-  ├─ AsyncContext.run() — reuses scope if active, creates root if not
+  ├─ TransactionContext.run() — reuses scope if active, creates root if not
   │
   ├─ resolveSource(options) → { dataSource, driver }
   ├─ findCurrentTransaction(dataSource) → existing frame?

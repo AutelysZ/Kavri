@@ -194,11 +194,14 @@ This is how subsystems discover decorated classes without a central registry.
 
 ## 8. AsyncContext (`@kavri/basic`)
 
-Async-scoped key-value store backed by `AsyncLocalStorage`. Used by `@kavri/web` for request state, `@kavri/logging` for log context, `@kavri/web` transactions for the transaction stack.
+Async-scoped key-value store backed by `AsyncLocalStorage`. Each usage scenario creates its own `AsyncContext` instance — there is no global singleton.
+
+- `@kavri/web` creates `RequestContext` for HTTP/WebSocket request state
+- `@kavri/web` creates `TransactionContext` for the transaction stack
 
 ### Key
 
-A thin typed wrapper around a unique symbol. Keys carry no methods — all operations go through `AsyncContext`.
+A thin typed wrapper around a unique symbol. Keys carry no methods — all operations go through the `AsyncContext` instance.
 
 ```ts
 declare class Key<T> {
@@ -209,13 +212,8 @@ declare class Key<T> {
 
 ### AsyncContext
 
-Instance of `AsyncContextStore`. The internal `AsyncLocalStorage` is created lazily on first `enter()`/`run()`/`fork()` call.
-
 ```ts
-declare class AsyncContextStore {
-    /** Create a typed key. Each key has a unique symbol. */
-    key<T>(name?: string): Key<T>;
-
+declare class AsyncContext {
     /** Check if currently inside a scope. */
     isActive(): boolean;
 
@@ -253,58 +251,35 @@ declare class AsyncContextStore {
 }
 ```
 
-State is `Record<symbol, any>`. `has()` uses `symbol in state` so `set(key, undefined)` is distinguishable from absence. `delete()` uses `delete state[key.symbol]` on the current scope only — does not affect parent scopes.
-
-### Exported instance
-
-```ts
-export const AsyncContext: AsyncContextStore;
-```
+The internal `AsyncLocalStorage` is created lazily on first `enter()`/`run()`/`fork()` call. State is `Record<symbol, any>`. `has()` uses `symbol in state` so `set(key, undefined)` is distinguishable from absence. `delete()` uses `delete state[key.symbol]` on the current scope only — does not affect parent scopes.
 
 ### Usage
 
 ```ts
-const kRequestId = AsyncContext.key<string>('requestId');
-const kUser = AsyncContext.key<User>('user');
+import { AsyncContext, Key } from '@kavri/basic';
 
-await AsyncContext.run(async () => {
-    AsyncContext.set(kRequestId, crypto.randomUUID());
+// Each module creates its own context
+const MyContext = new AsyncContext();
+
+const kRequestId = new Key<string>('requestId');
+const kUser = new Key<User>('user');
+
+// Run in a scope:
+await MyContext.run(async () => {
+    MyContext.set(kRequestId, crypto.randomUUID());
     // ... handle request
 });
 
-await AsyncContext.fork(async () => {
-    AsyncContext.set(kUser, overrideUser);  // only visible in this fork
+// Fork a child scope:
+await MyContext.fork(async () => {
+    MyContext.set(kUser, overrideUser);  // only visible in this fork
     // parent's kRequestId still visible via prototype chain
 });
 
-await AsyncContext.fork(async () => {
-    AsyncContext.delete(kUser);             // removes own property
-    AsyncContext.get(kUser);                // parent's value still visible
-});
-```
-
-### Usage
-
-```ts
-const kRequestId = AsyncContext.key<string>('requestId');
-const kUser = AsyncContext.key<User>('user');
-
-// Web framework per-request:
-await AsyncContext.run(async () => {
-    kRequestId.set(crypto.randomUUID());
-    // ... handle request
-});
-
-// Fork a child scope (e.g., per-subrequest):
-await AsyncContext.fork(async () => {
-    kUser.set(overrideUser);  // only visible in this fork
-    // parent's kRequestId still visible via prototype chain
-});
-
-// Delete a key in child scope:
-await AsyncContext.fork(async () => {
-    kUser.delete();           // blocks parent's value
-    kUser.get();              // undefined
+// Delete in child scope:
+await MyContext.fork(async () => {
+    MyContext.delete(kUser);             // removes own property
+    MyContext.get(kUser);                // parent's value still visible
 });
 ```
 

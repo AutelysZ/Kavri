@@ -8,7 +8,7 @@ Package: `@kavri/web` — definitions in `@kavri/schema`, client in `@kavri/clie
 - **Mirrors HTTP pattern.** `@WebSocketHandler(protocol)` + `implements HandlerType<typeof protocol>` mirrors `@Controller(route)` + `implements ControllerType<typeof route>`.
 - **No stringly-typed dispatch.** Inbound message types map to handler methods by name. Greppable. Type-safe.
 - **Pluggable wire format.** `WebSocketCodec` abstract class handles encode/decode. Built-in `KavriWebSocketCodec` (JSON with `type`/`data` envelope). Custom codecs for binary protocols, STOMP, etc.
-- **Per-connection AsyncContext.** `onOpen` runs in `AsyncContext.run()`. Message handlers `fork()` from it. Per-connection state works like per-request state.
+- **Per-connection AsyncContext.** `onOpen` runs in `RequestContext.run()`. Message handlers `fork()` from it. Per-connection state works like per-request state.
 - **ConnectionHub.** Separate injectable class for broadcasting. Handlers and controllers should never be injected by application code.
 - **Auth via HTTP interceptors.** The upgrade request flows through the HTTP interceptor chain (ROUTE → CORS → GUARD). No separate auth mechanism.
 
@@ -193,13 +193,13 @@ class MsgpackCodec extends WebSocketCodec {
 
 ```ts
 /** The current WebSocketProtocol. Set at connection open. */
-const kProtocol = AsyncContext.key<WebSocketProtocol>('protocol');
+const kProtocol = new Key<WebSocketProtocol>('protocol');
 
 /** The current controller instance handling this connection. */
-const kHandler = AsyncContext.key<WebSocketHandlerBase>('handler');
+const kHandler = new Key<WebSocketHandlerBase>('handler');
 
 /** The current WebSocketConnection. Set at connection open. */
-const kConnection = AsyncContext.key<WebSocketConnection>('connection');
+const kConnection = new Key<WebSocketConnection>('connection');
 ```
 
 Available in `onOpen`, all message handlers, and `onClose` via the per-connection AsyncContext scope.
@@ -304,8 +304,8 @@ Usage:
 
 ```ts
 // Define typed keys for state and indexes
-const kUsername = AsyncContext.key<string>('username');
-const kRoom = AsyncContext.key<string>('room');  // used as index
+const kUsername = new Key<string>('username');
+const kRoom = new Key<string>('room');  // used as index
 
 @Component()
 class NotificationService {
@@ -377,7 +377,7 @@ abstract class WebSocketHandlerBase<T extends WebSocketProtocol> {
         this.hub.broadcastByIndex(this.protocol, key, value, type, data);
     }
 
-    /** Called when a connection opens. Runs in AsyncContext.run(). */
+    /** Called when a connection opens. Runs in RequestContext.run(). */
     onOpen?(conn: WebSocketConnection<T>): Awaitable<void>;
 
     /** Called when a connection closes. */
@@ -400,8 +400,8 @@ Example:
 
 ```ts
 // Typed keys for state and indexes
-const kUsername = AsyncContext.key<string>('username');
-const kRoom = AsyncContext.key<string>('room');  // used as index
+const kUsername = new Key<string>('username');
+const kRoom = new Key<string>('room');  // used as index
 
 @WebSocketHandler(ChatProtocol)
 class ChatHandler
@@ -416,7 +416,7 @@ class ChatHandler
     // --- Lifecycle ---
 
     onOpen(conn: WebSocketConnection<typeof ChatProtocol>) {
-        const user = CurrentUser.getOrThrow();
+        const user = RequestContext.getOrThrow(CurrentUser);
         conn.setState(kUsername, user.name);
 
         // Set index for O(1) room-scoped broadcasts
@@ -464,14 +464,14 @@ Each connection gets its own `AsyncContext` scope:
 
 ```
 Connection established
-  └─ AsyncContext.run()          ← root scope for this connection
+  └─ RequestContext.run()          ← root scope for this connection
        ├─ onOpen(conn)           ← set up per-connection state
        ├─ fork() → onSend(...)   ← inherits connection state
        ├─ fork() → onTyping(...) ← inherits connection state
        └─ onClose(conn)          ← still in connection scope
 ```
 
-State set in `onOpen` (e.g., `CurrentUser.set(user)`) is visible in all subsequent message handlers via prototype-chained scope. Each message handler runs in a `fork()` so it can set transient state without leaking to other messages.
+State set in `onOpen` (e.g., `RequestContext.set(CurrentUser, user)`) is visible in all subsequent message handlers via prototype-chained scope. Each message handler runs in a `fork()` so it can set transient state without leaking to other messages.
 
 ## 9. Upgrade flow
 
@@ -484,9 +484,9 @@ Client sends: GET /chat/room1 (Upgrade: websocket)
 WebApplication.handleUpgrade(req, socket, head)
   │
   ▼
-AsyncContext.run():
-  kRequest.set(req)
-  kURL.set(...)
+RequestContext.run():
+  RequestContext.set(kRequest, req)
+  RequestContext.set(kURL, ...)
   │
   ▼
 RouteInterceptor.matchWebSocket(req.url)
@@ -503,7 +503,7 @@ RouteInterceptor.matchWebSocket(req.url)
 Upgrade succeeds → WebSocket connection established
   │
   ▼
-Handler.onOpen(conn)  ← in new per-connection AsyncContext.run()
+Handler.onOpen(conn)  ← in new per-connection RequestContext.run()
                          inherits state from upgrade scope (CurrentUser, etc.)
 ```
 
@@ -596,8 +596,8 @@ const LobbyProtocol = defineWebSocket('LobbyProtocol', '/lobby', {
 
 // --- Typed keys ---
 
-const kLobbyUser = AsyncContext.key<string>('lobbyUser');
-const kLobbyRoom = AsyncContext.key<string>('lobbyRoom');  // index — one per room via composite key
+const kLobbyUser = new Key<string>('lobbyUser');
+const kLobbyRoom = new Key<string>('lobbyRoom');  // index — one per room via composite key
 
 // --- Controller ---
 // Note: a connection can join multiple rooms. Use composite index keys per room.
@@ -610,10 +610,10 @@ class LobbyHandler
     constructor(private readonly logger = injectLogger(LobbyHandler)) { super(); }
 
     // Per-room index key. Each room gets its own Key so one connection can be in many rooms.
-    private roomKey(room: string) { return AsyncContext.key<boolean>(`room:${room}`); }
+    private roomKey(room: string) { return new Key<boolean>(`room:${room}`); }
 
     onOpen(conn: WebSocketConnection<typeof LobbyProtocol>) {
-        conn.setState(kLobbyUser, CurrentUser.getOrThrow().name);
+        conn.setState(kLobbyUser, RequestContext.getOrThrow(CurrentUser).name);
     }
 
     onJoin(data: JoinRoom, conn: WebSocketConnection<typeof LobbyProtocol>) {
@@ -652,7 +652,7 @@ class AnnouncementService {
 
     /** O(1) broadcast to a room via index */
     announce(room: string, text: string) {
-        const key = AsyncContext.key<boolean>(`room:${room}`);
+        const key = new Key<boolean>(`room:${room}`);
         this.hub.broadcastByIndex(LobbyProtocol, key, true,
             'message',
             { from: 'system', text, room, ts: Date.now() },

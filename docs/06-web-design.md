@@ -37,76 +37,64 @@ class RawResponse {
 
 Normal handler return → JSON serialized with 200. Return `Redirect`, `FileResponse`, `StreamResponse`, or `RawResponse` for non-standard responses.
 
-## 3. AsyncContext & Request Keys
+## 3. RequestContext & Request Keys
 
-`AsyncContext` and `Key<T>` live in `@kavri/basic` (see [05-metadata-design.md](./05-metadata-design.md#8-asynccontext)). The web module defines keys and uses `AsyncContext.run()`/`AsyncContext.fork()` for per-request scoping.
+`AsyncContext` and `Key<T>` live in `@kavri/basic`. The web module creates its own `RequestContext` instance and defines typed keys for request-scoped state. WebSocket connections also use `RequestContext` since upgrades are HTTP requests.
+
+```ts
+import { AsyncContext, Key } from '@kavri/basic';
+
+/** Request-scoped async context for HTTP and WebSocket. */
+export const RequestContext = new AsyncContext();
+```
 
 ### Built-in request keys
-
-The framework sets these during request processing:
 
 ```ts
 import { IncomingMessage, ServerResponse } from 'node:http';
 
 // --- Set by framework at request start ---
 
-/** The raw Node.js request. */
-const kRequest = AsyncContext.key<IncomingMessage>('request');
-
-/** The raw Node.js response. */
-const kResponse = AsyncContext.key<ServerResponse>('response');
-
-/** Parsed URL of the request. */
-const kURL = AsyncContext.key<URL>('url');
+const kRequest = new Key<IncomingMessage>('request');
+const kResponse = new Key<ServerResponse>('response');
+const kURL = new Key<URL>('url');
 
 // --- Set by ROUTE stage ---
 
-/** The matched endpoint metadata from defineRoute. Null if no route matched. */
-const kEndpoint = AsyncContext.key<Endpoint<any, any> | null>('endpoint');
-
-/** The matched controller instance. Null if no route matched. */
-const kController = AsyncContext.key<object | null>('controller');
+const kEndpoint = new Key<Endpoint<any, any> | null>('endpoint');
+const kController = new Key<object | null>('controller');
 
 // --- Set by PARSE stage (raw pieces) ---
 
-/** Path parameters extracted by the router. */
-const kPathParams = AsyncContext.key<Record<string, string>>('pathParams');
-
-/** Query string parameters. */
-const kQuery = AsyncContext.key<Record<string, string>>('query');
-
-/** Parsed request body (JSON object, string, etc.). */
-const kBody = AsyncContext.key<unknown>('body');
-
-/** Uploaded files (multipart requests only). */
-const kFiles = AsyncContext.key<Record<string, MultipartFile | MultipartFile[]>>('files');
+const kPathParams = new Key<Record<string, string>>('pathParams');
+const kQuery = new Key<Record<string, string>>('query');
+const kBody = new Key<unknown>('body');
+const kFiles = new Key<Record<string, MultipartFile | MultipartFile[]>>('files');
 
 // --- Set by RESOLVE stage (merged) ---
 
-/** Final merged params: path params + query + body + files, shaped to request schema. */
-const kParams = AsyncContext.key<unknown>('params');
+const kParams = new Key<unknown>('params');
 
 // --- For logging (from @kavri/logging integration) ---
 
-/** Request-scoped logging context. Interceptors append data here. */
-const kLogging = AsyncContext.key<Record<string, unknown>>('logging');
+const kLogging = new Key<Record<string, unknown>>('logging');
 ```
 
 ### Usage
 
 ```ts
 // Read built-in request data
-const req = kRequest.getOrThrow();
-const params = kParams.get();
+const req = RequestContext.getOrThrow(kRequest);
+const params = RequestContext.get(kParams);
 
 // Custom keys for interceptor → handler communication
-const CurrentUser = AsyncContext.key<User>('currentUser');
+const CurrentUser = new Key<User>('currentUser');
 
 // In interceptor:
-CurrentUser.set(authenticatedUser);
+RequestContext.set(CurrentUser, authenticatedUser);
 
 // In handler:
-const user = CurrentUser.getOrThrow();
+const user = RequestContext.getOrThrow(CurrentUser);
 ```
 
 ## 4. Controllers
@@ -140,7 +128,7 @@ class UserController implements ControllerType<typeof UserRoute> {
     }
 
     async createUser(input: CreateUserBody): Promise<UserResponse> {
-        const userId = CurrentUser.getOrThrow().id;
+        const userId = RequestContext.getOrThrow(CurrentUser).id;
         return this.repo.create({ ...input, createdBy: userId });
     }
 
@@ -153,7 +141,7 @@ class UserController implements ControllerType<typeof UserRoute> {
 - `@Controller(route)` composes `@Component()` and registers all routing metadata from the route definition.
 - `implements ControllerType<typeof route>` enforces that all endpoint methods are implemented with correct types. No `extends`/`override`/`super()` needed.
 - Handlers receive parsed input. Return typed response or a special response object (`Redirect`, `FileResponse`, etc.).
-- Access per-request data via `Key.get()` / `Key.getOrThrow()`.
+- Access per-request data via `RequestContext.get(key)` / `RequestContext.getOrThrow(key)`.
 - **Controllers should never be injected by application code.** They are discovered by the framework via `Metadata.entries(Controller)`.
 
 ## 5. Interceptors
@@ -184,7 +172,7 @@ Use `@Priority(Interceptor.EXCEPTION)` to place an interceptor at the exception-
 
 Interceptors can:
 - Short-circuit: `throw new HttpException(401)` or return without calling `next()`
-- Modify request state: `CurrentUser.set(authUser)`
+- Modify request state: `RequestContext.set(CurrentUser, authUser)`
 - Transform response: `const res = await next(); return transform(res);`
 
 ```ts
@@ -196,7 +184,7 @@ class LoggingInterceptor extends Interceptor {
         try {
             return await next();
         } finally {
-            console.log(`${kRequest.getOrThrow().method} ${kRequest.getOrThrow().url} ${Date.now() - start}ms`);
+            console.log(`${RequestContext.getOrThrow(kRequest).method} ${RequestContext.getOrThrow(kRequest).url} ${Date.now() - start}ms`);
         }
     }
 }
@@ -219,7 +207,7 @@ class BasicAuthInterceptor extends Interceptor {
     constructor(private readonly config = injectConfig(BasicAuthOptions)) { super(); }
 
     async intercept(next: () => unknown) {
-        const auth = kRequest.getOrThrow().headers['authorization'];
+        const auth = RequestContext.getOrThrow(kRequest).headers['authorization'];
         // parse Basic auth, compare, throw HttpException(401) on failure
         return next();
     }
@@ -258,8 +246,8 @@ class CompressionInterceptor extends Interceptor {
     }
 
     async intercept(next: () => unknown) {
-        const req = kRequest.getOrThrow();
-        const res = kResponse.getOrThrow();
+        const req = RequestContext.getOrThrow(kRequest);
+        const res = RequestContext.getOrThrow(kResponse);
 
         // Wrap res with compression before downstream writes to it
         await new Promise<void>((resolve, reject) => {
@@ -297,8 +285,8 @@ class CorsInterceptor extends Interceptor {
     constructor(private readonly config = injectConfig(CorsOptions)) { super(); }
 
     async intercept(next: () => unknown) {
-        const req = kRequest.getOrThrow();
-        const res = kResponse.getOrThrow();
+        const req = RequestContext.getOrThrow(kRequest);
+        const res = RequestContext.getOrThrow(kResponse);
         const origin = req.headers['origin'];
 
         if (!origin) return next();
@@ -381,8 +369,8 @@ class RateLimitInterceptor extends Interceptor {
     ) { super(); }
 
     async intercept(next: () => unknown) {
-        const req = kRequest.getOrThrow();
-        const res = kResponse.getOrThrow();
+        const req = RequestContext.getOrThrow(kRequest);
+        const res = RequestContext.getOrThrow(kResponse);
         const key = req.socket.remoteAddress ?? 'unknown';
 
         const { count, resetAt } = await this.store.increment(key, this.config.window);
@@ -440,8 +428,8 @@ class CsrfInterceptor extends Interceptor {
     constructor(private readonly config = injectConfig(CsrfOptions)) { super(); }
 
     async intercept(next: () => unknown) {
-        const req = kRequest.getOrThrow();
-        const res = kResponse.getOrThrow();
+        const req = RequestContext.getOrThrow(kRequest);
+        const res = RequestContext.getOrThrow(kResponse);
 
         // Set CSRF cookie on every response if not present.
         // NOT HttpOnly — frontend must read it via document.cookie.
@@ -464,8 +452,8 @@ class CsrfInterceptor extends Interceptor {
     }
 
     private requiresCheck(req: IncomingMessage): boolean {
-        const endpoint = kEndpoint.get();
-        const ctrl = kController.get();
+        const endpoint = RequestContext.get(kEndpoint);
+        const ctrl = RequestContext.get(kController);
 
         if (endpoint && ctrl) {
             // Matched a controller action — check unless @NoCsrf
@@ -617,8 +605,8 @@ class StaticFileInterceptor extends Interceptor {
     }
 
     async intercept(next: () => unknown) {
-        const req = kRequest.getOrThrow();
-        const res = kResponse.getOrThrow();
+        const req = RequestContext.getOrThrow(kRequest);
+        const res = RequestContext.getOrThrow(kResponse);
         const url = req.url ?? '';
 
         if (this.config.prefix && !url.startsWith(this.config.prefix)) return next();
@@ -791,10 +779,10 @@ class WebApplication {
     /** Return raw Node.js HTTP handler. */
     toHandler(): (req: IncomingMessage, res: ServerResponse) => void {
         return (req, res) => {
-            AsyncContext.run(async () => {
-                kRequest.set(req);
-                kResponse.set(res);
-                kURL.set(new URL(req.url!, `http://${req.headers.host}`));
+            RequestContext.run(async () => {
+                RequestContext.set(kRequest, req);
+                RequestContext.set(kResponse, res);
+                RequestContext.set(kURL, new URL(req.url!, `http://${req.headers.host}`));
 
                 const chain = this.buildChain(this.interceptors, 0);
                 await chain();
@@ -846,7 +834,7 @@ The outermost interceptor. Awaits the result from the entire downstream chain an
 @Priority(Interceptor.RESPONSE)
 class ResponseInterceptor extends Interceptor {
     async intercept(next: () => unknown) {
-        const res = kResponse.getOrThrow();
+        const res = RequestContext.getOrThrow(kResponse);
         const result = await next();
 
         // If response already written (e.g., static file interceptor piped directly), skip
@@ -931,13 +919,13 @@ class RouteInterceptor extends Interceptor {
     }
 
     async intercept(next: () => unknown) {
-        const req = kRequest.getOrThrow();
+        const req = RequestContext.getOrThrow(kRequest);
         const match = this.router.match(req.method!, req.url!);
 
         if (match) {
-            kEndpoint.set(match.endpoint);
-            kController.set(match.ctrl);
-            kPathParams.set(match.params);
+            RequestContext.set(kEndpoint, match.endpoint);
+            RequestContext.set(kController, match.ctrl);
+            RequestContext.set(kPathParams, match.params);
         } else {
             // Check if the path exists but method is wrong → 405
             const allowedMethods = this.router.getAllowedMethods(req.url!);
@@ -947,9 +935,9 @@ class RouteInterceptor extends Interceptor {
                 });
             }
 
-            kEndpoint.set(null);
-            kController.set(null);
-            kPathParams.set({});
+            RequestContext.set(kEndpoint, null);
+            RequestContext.set(kController, null);
+            RequestContext.set(kPathParams, {});
         }
 
         return next();
@@ -969,9 +957,9 @@ All parse interceptors are **passive** — if the target key is already set (by 
 @Priority(Interceptor.PARSE)
 class QueryParseInterceptor extends Interceptor {
     async intercept(next: () => unknown) {
-        if (!kQuery.has()) {
-            const url = kURL.getOrThrow();
-            kQuery.set(Object.fromEntries(url.searchParams));
+        if (!RequestContext.has(kQuery)) {
+            const url = RequestContext.getOrThrow(kURL);
+            RequestContext.set(kQuery, Object.fromEntries(url.searchParams));
         }
         return next();
     }
@@ -984,17 +972,17 @@ class JsonParseInterceptor extends Interceptor {
     constructor(private readonly config = injectConfig(WebOptions)) { super(); }
 
     async intercept(next: () => unknown) {
-        if (kBody.has()) return next();
+        if (RequestContext.has(kBody)) return next();
 
-        const endpoint = kEndpoint.get();
+        const endpoint = RequestContext.get(kEndpoint);
         if (!endpoint || endpoint.request === 'void') return next();
 
-        const req = kRequest.getOrThrow();
+        const req = RequestContext.getOrThrow(kRequest);
         const contentType = req.headers['content-type'] ?? '';
         if (!contentType.includes('application/json')) return next();
 
         const raw = await readBody(req, this.config.maxBodySize);
-        kBody.set(JSON.parse(raw));
+        RequestContext.set(kBody, JSON.parse(raw));
         return next();
     }
 }
@@ -1006,17 +994,17 @@ class UrlencodedParseInterceptor extends Interceptor {
     constructor(private readonly config = injectConfig(WebOptions)) { super(); }
 
     async intercept(next: () => unknown) {
-        if (kBody.has()) return next();
+        if (RequestContext.has(kBody)) return next();
 
-        const endpoint = kEndpoint.get();
+        const endpoint = RequestContext.get(kEndpoint);
         if (!endpoint || endpoint.request === 'void') return next();
 
-        const req = kRequest.getOrThrow();
+        const req = RequestContext.getOrThrow(kRequest);
         const contentType = req.headers['content-type'] ?? '';
         if (!contentType.includes('application/x-www-form-urlencoded')) return next();
 
         const raw = await readBody(req, this.config.maxBodySize);
-        kBody.set(Object.fromEntries(new URLSearchParams(raw)));
+        RequestContext.set(kBody, Object.fromEntries(new URLSearchParams(raw)));
         return next();
     }
 }
@@ -1028,18 +1016,18 @@ class MultipartParseInterceptor extends Interceptor {
     constructor(private readonly config = injectConfig(WebOptions)) { super(); }
 
     async intercept(next: () => unknown) {
-        if (kBody.has()) return next();
+        if (RequestContext.has(kBody)) return next();
 
-        const endpoint = kEndpoint.get();
+        const endpoint = RequestContext.get(kEndpoint);
         if (!endpoint || endpoint.request === 'void') return next();
         if ((endpoint.options.requestType ?? 'data') !== 'multipart') return next();
 
-        const req = kRequest.getOrThrow();
+        const req = RequestContext.getOrThrow(kRequest);
         const maxBodySize = endpoint.options.multipart?.maxBodySize ?? this.config.maxBodySize;
 
         const { fields, files } = await parseMultipart(req, endpoint.options.multipart!, maxBodySize);
-        kBody.set(fields);
-        kFiles.set(files);
+        RequestContext.set(kBody, fields);
+        RequestContext.set(kFiles, files);
         return next();
     }
 }
@@ -1049,13 +1037,13 @@ class MultipartParseInterceptor extends Interceptor {
 @Priority(Interceptor.PARSE + 1)
 class BinaryParseInterceptor extends Interceptor {
     async intercept(next: () => unknown) {
-        if (kBody.has()) return next();
+        if (RequestContext.has(kBody)) return next();
 
-        const endpoint = kEndpoint.get();
+        const endpoint = RequestContext.get(kEndpoint);
         if (!endpoint || endpoint.request === 'void') return next();
         if ((endpoint.options.requestType ?? 'data') !== 'binary') return next();
 
-        kBody.set(kRequest.getOrThrow());
+        RequestContext.set(kBody, RequestContext.getOrThrow(kRequest));
         return next();
     }
 }
@@ -1072,16 +1060,16 @@ Merges raw pieces (PathParams, Query, Body, Files) into a single object matching
 @Priority(Interceptor.RESOLVE)
 class ResolveInterceptor extends Interceptor {
     async intercept(next: () => unknown) {
-        const endpoint = kEndpoint.get();
+        const endpoint = RequestContext.get(kEndpoint);
         if (!endpoint || endpoint.request === 'void') {
-            kParams.set(undefined);
+            RequestContext.set(kParams, undefined);
             return next();
         }
 
-        const pathParams = kPathParams.get() ?? {};
-        const query = kQuery.get() ?? {};
-        const body = kBody.get();
-        const files = kFiles.get() ?? {};
+        const pathParams = RequestContext.get(kPathParams) ?? {};
+        const query = RequestContext.get(kQuery) ?? {};
+        const body = RequestContext.get(kBody);
+        const files = RequestContext.get(kFiles) ?? {};
 
         // Merge: path params + query + body fields + files
         // Path params and query are always merged.
@@ -1101,7 +1089,7 @@ class ResolveInterceptor extends Interceptor {
             merged[fieldName] = fileOrFiles;
         }
 
-        kParams.set(merged);
+        RequestContext.set(kParams, merged);
         return next();
     }
 }
@@ -1116,12 +1104,12 @@ Validates `Params` against the endpoint's request schema. Throws `HttpException(
 @Priority(Interceptor.VALIDATE)
 class ValidateInterceptor extends Interceptor {
     async intercept(next: () => unknown) {
-        const endpoint = kEndpoint.get();
+        const endpoint = RequestContext.get(kEndpoint);
         if (!endpoint || endpoint.request === 'void') {
             return next();
         }
 
-        const params = kParams.get();
+        const params = RequestContext.get(kParams);
         const requestClass = endpoint.request as AnyConstructor<any>;
 
         // Validate and parse using @kavri/schema
@@ -1135,7 +1123,7 @@ class ValidateInterceptor extends Interceptor {
 
         // Parse into typed instance (applies custom parsers like @IsDate)
         const parsed = parse(requestClass, params);
-        kParams.set(parsed);
+        RequestContext.set(kParams, parsed);
 
         return next();
     }
@@ -1151,8 +1139,8 @@ Dispatches to the matched controller action. If no HTTP endpoint matched, passes
 @Priority(Interceptor.ACTION)
 class ActionInterceptor extends Interceptor {
     async intercept(next: () => unknown) {
-        const endpoint = kEndpoint.get();
-        const ctrl = kController.get();
+        const endpoint = RequestContext.get(kEndpoint);
+        const ctrl = RequestContext.get(kController);
 
         // No HTTP endpoint matched — pass through (may be WS or static)
         if (!endpoint || !ctrl) return next();
@@ -1166,7 +1154,7 @@ class ActionInterceptor extends Interceptor {
         }
 
         // Call handler with parsed params (or no args if void)
-        const params = kParams.get();
+        const params = RequestContext.get(kParams);
         const result = endpoint.request === 'void'
             ? await handler.call(ctrl)
             : await handler.call(ctrl, params);
@@ -1194,13 +1182,13 @@ Handles WebSocket upgrade requests. If the matched endpoint is a WebSocket proto
 @Priority(Interceptor.ACTION)
 class WebSocketUpgradeInterceptor extends Interceptor {
     async intercept(next: () => unknown) {
-        const endpoint = kEndpoint.get();
+        const endpoint = RequestContext.get(kEndpoint);
 
         // Not a WebSocket endpoint — pass through
         if (!endpoint?.websocket) return next();
 
-        const req = kRequest.getOrThrow();
-        const res = kResponse.getOrThrow();
+        const req = RequestContext.getOrThrow(kRequest);
+        const res = RequestContext.getOrThrow(kResponse);
 
         // Upgrade the connection using the matched handler and codec
         // Sets up per-connection AsyncContext, calls onOpen, wires message dispatch
@@ -1211,7 +1199,7 @@ class WebSocketUpgradeInterceptor extends Interceptor {
         // Implementation delegates to the WebSocket handler framework:
         // 1. Upgrade HTTP → WebSocket
         // 2. Register connection in ConnectionHub
-        // 3. AsyncContext.run() for the connection scope
+        // 3. RequestContext.run() for the connection scope
         // 4. Call handler.onOpen(conn)
         // 5. Wire inbound message → decode → validate → dispatch to handler method
     }
@@ -1339,9 +1327,9 @@ class UserController implements ControllerType<typeof UserRoute> {
 @Priority(Interceptor.GUARD)
 class AuthInterceptor extends Interceptor {
     async intercept(next: () => unknown) {
-        const token = kRequest.getOrThrow().headers['authorization'];
+        const token = RequestContext.getOrThrow(kRequest).headers['authorization'];
         if (!token) throw new HttpException(401);
-        CurrentUser.set(verifyToken(token));
+        RequestContext.set(CurrentUser, verifyToken(token));
         return next();
     }
 }

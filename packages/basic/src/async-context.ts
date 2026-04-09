@@ -57,7 +57,7 @@ export class Key<T> {
  * });
  * ```
  */
-export class AsyncContextStore {
+export class AsyncContext {
   private als: AsyncLocalStorage<State> | undefined;
 
   /** Ensure the ALS is initialized. Lazy to avoid overhead when unused. */
@@ -66,11 +66,6 @@ export class AsyncContextStore {
       this.als = new AsyncLocalStorage<State>();
     }
     return this.als;
-  }
-
-  /** Create a typed key. Each key has a unique internal symbol. */
-  key<T>(name?: string): Key<T> {
-    return new Key<T>(name);
   }
 
   /** Returns `true` if currently inside a scope. */

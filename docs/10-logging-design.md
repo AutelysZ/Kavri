@@ -148,8 +148,8 @@ Example — inject request data from `@kavri/web`:
 @Component()
 class WebLogEnricher extends LoggingInterceptor {
     intercept(context: LoggingContext): LoggingContext | undefined {
-        if (AsyncContext.isActive()) {
-            const extra = kLogging.get();
+        if (RequestContext.isActive()) {
+            const extra = RequestContext.get(kLogging);
             if (extra) {
                 context.fields = { ...extra, ...context.fields };
             }
