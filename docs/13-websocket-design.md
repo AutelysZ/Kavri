@@ -189,10 +189,27 @@ class MsgpackCodec extends WebSocketCodec {
 // Usage: @Touch(MsgpackCodec) in app module
 ```
 
-## 4. WebSocketConnection
+## 4. Built-in Keys
 
 ```ts
-interface WebSocketConnection<T extends WebSocketProtocol = any, TState = any> {
+/** The current WebSocketProtocol. Set at connection open. */
+const kProtocol = AsyncContext.key<WebSocketProtocol>('protocol');
+
+/** The current controller instance handling this connection. */
+const kHandler = AsyncContext.key<WebSocketControllerBase>('handler');
+
+/** The current WebSocketConnection. Set at connection open. */
+const kConnection = AsyncContext.key<WebSocketConnection>('connection');
+```
+
+Available in `onOpen`, all message handlers, and `onClose` via the per-connection AsyncContext scope.
+
+## 5. WebSocketConnection
+
+State and indexes use `Key<T>` from `@kavri/basic` — same typed key pattern as `AsyncContext`.
+
+```ts
+interface WebSocketConnection<T extends WebSocketProtocol = any> {
     /** Unique connection ID. */
     readonly id: string;
 
@@ -205,20 +222,25 @@ interface WebSocketConnection<T extends WebSocketProtocol = any, TState = any> {
      */
     readonly params: T['options'] extends { request: AnyConstructor<infer R> } ? R : Record<string, string>;
 
-    /**
-     * Mutable per-connection state. Typed via the handler's TState parameter.
-     * Initialized to {} on connection open. Accessible from any context that
-     * has the connection reference (handler methods, ConnectionHub queries, etc.).
-     */
-    state: TState;
+    /** Get a state value. */
+    getState<V>(key: Key<V>): V | undefined;
+    /** Set a state value. */
+    setState<V>(key: Key<V>, value: V): void;
+    /** Delete a state value. */
+    deleteState(key: Key<any>): void;
 
     /**
-     * Index values for this connection. Used by ConnectionHub for O(1) lookups.
-     * Keys are index names, values are the indexed value.
-     * Mutations auto-update the hub's reverse index.
-     * Auto-cleaned on connection close.
+     * Set an index value. Also sets the state for the same key.
+     * Updates the ConnectionHub's reverse index for O(1) lookups.
      */
-    readonly indexes: Map<string, unknown>;
+    setIndex<V>(key: Key<V>, value: V): void;
+    /** Get an index value. */
+    getIndex<V>(key: Key<V>): V | undefined;
+    /**
+     * Delete an index. Also deletes the state for the same key.
+     * Removes from the ConnectionHub's reverse index.
+     */
+    deleteIndex(key: Key<any>): void;
 
     /** Send a typed outbound message. Schema data is validated and encoded via the codec. */
     send<K extends keyof T['outbound'] & string>(
@@ -231,29 +253,13 @@ interface WebSocketConnection<T extends WebSocketProtocol = any, TState = any> {
 }
 ```
 
-## 5. ConnectionHub
+`setIndex(key, value)` = `setState(key, value)` + update hub's reverse index. Indexes are a subset of state that the hub tracks for O(1) lookups. All indexes and state are auto-cleaned on connection close.
 
-Single `@Component()` that manages ALL WebSocket connections across all handlers. Stores connections grouped by protocol, with reverse indexes for O(1) lookups.
+## 6. ConnectionHub
 
-**Handlers and controllers should never be injected by application code.**
+Single `@Component()` that manages ALL WebSocket connections across all handlers. Indexes are private — managed automatically via `conn.setIndex()`/`conn.deleteIndex()`.
 
-### Internal storage
-
-```ts
-// Conceptual structure:
-{
-    connections: Map<WebSocketProtocol, Set<WebSocketConnection>>,
-    indexes: Map<string, Map<unknown, Set<WebSocketConnection>>>,
-    //         indexType    indexValue    connections with that value
-}
-```
-
-When `conn.indexes.set('room', 'lobby')` is called, the hub's reverse index is updated:
-- `indexes.get('room').get('lobby')` now includes `conn`
-
-When the connection closes or calls `conn.indexes.delete('room')`, it's removed from the reverse index.
-
-### API
+**Controllers should never be injected by application code.**
 
 ```ts
 @Component()
@@ -262,10 +268,10 @@ class ConnectionHub {
     of<T extends WebSocketProtocol>(protocol: T): ReadonlySet<WebSocketConnection<T>>;
 
     /** Get connections matching an index value. O(1) lookup. */
-    byIndex<T extends WebSocketProtocol>(
+    byIndex<T extends WebSocketProtocol, V>(
         protocol: T,
-        indexType: string,
-        indexValue: unknown,
+        key: Key<V>,
+        value: V,
     ): ReadonlySet<WebSocketConnection<T>>;
 
     /** Broadcast to all connections of a protocol. */
@@ -275,11 +281,11 @@ class ConnectionHub {
         data: T['outbound'][K] extends 'binary' ? Uint8Array : InstanceType<T['outbound'][K]>,
     ): void;
 
-    /** Broadcast to connections matching an index. O(1) — no iteration over all connections. */
-    broadcastByIndex<T extends WebSocketProtocol, K extends keyof T['outbound'] & string>(
+    /** Broadcast to connections matching an index. O(1). */
+    broadcastByIndex<T extends WebSocketProtocol, K extends keyof T['outbound'] & string, V>(
         protocol: T,
-        indexType: string,
-        indexValue: unknown,
+        key: Key<V>,
+        value: V,
         type: K,
         data: T['outbound'][K] extends 'binary' ? Uint8Array : InstanceType<T['outbound'][K]>,
     ): void;
@@ -294,52 +300,57 @@ class ConnectionHub {
 }
 ```
 
-### Usage
+Usage:
 
 ```ts
+// Define typed keys for state and indexes
+const kUsername = AsyncContext.key<string>('username');
+const kRoom = AsyncContext.key<string>('room');  // used as index
+
 @Component()
 class NotificationService {
     constructor(private readonly hub = inject(ConnectionHub)) {}
 
-    /** O(1) — uses index, no iteration */
+    /** O(1) — uses index */
     async notifyRoom(roomId: string, message: ChatMessage) {
-        this.hub.broadcastByIndex(ChatProtocol, 'room', roomId, 'message', message);
+        this.hub.broadcastByIndex(ChatProtocol, kRoom, roomId, 'message', message);
     }
 
     /** Iterate all connections of a protocol */
     getOnlineUsers(): string[] {
-        return [...this.hub.of(ChatProtocol)].map(c => c.state.username);
+        return [...this.hub.of(ChatProtocol)]
+            .map(c => c.getState(kUsername))
+            .filter(Boolean) as string[];
     }
 }
 ```
 
-## 6. Handler
+## 7. Controller
 
 ```ts
 /**
- * ControllerType maps a WebSocketProtocol's inbound messages to handler methods.
- * TState types the connection's state field.
+ * ControllerType maps a WebSocketProtocol's inbound messages to controller methods.
  * For each inbound key K:
  *   type = 'binary'  → on{Capitalize<K>}(data: Uint8Array, conn): Awaitable<void>
  *   type = class      → on{Capitalize<K>}(data: InstanceType<class>, conn): Awaitable<void>
  */
-type ControllerType<T extends WebSocketProtocol, TState = any> = {
+type ControllerType<T extends WebSocketProtocol> = {
     [K in keyof T['inbound'] as `on${Capitalize<string & K>}`]:
-        /* (data: ..., conn: WebSocketConnection<T, TState>) => Awaitable<void> */
+        /* (data: ..., conn: WebSocketConnection<T>) => Awaitable<void> */
 };
 
 /**
- * Base class for WebSocket handlers. Provides lifecycle hooks,
- * convenience broadcast methods scoped to this handler's protocol,
+ * Base class for WebSocket controllers. Provides lifecycle hooks,
+ * convenience broadcast methods scoped to this controller's protocol,
  * and access to the ConnectionHub.
  */
-abstract class WebSocketControllerBase<T extends WebSocketProtocol, TState = any> {
+abstract class WebSocketControllerBase<T extends WebSocketProtocol> {
     constructor(protected readonly hub = inject(ConnectionHub)) {}
 
     // The protocol is set by @Controller(protocol)
     protected abstract readonly protocol: T;
 
-    /** Broadcast to ALL connections of this handler's protocol. */
+    /** Broadcast to ALL connections of this controller's protocol. */
     broadcast<K extends keyof T['outbound'] & string>(
         type: K,
         data: T['outbound'][K] extends 'binary' ? Uint8Array : InstanceType<T['outbound'][K]>,
@@ -347,9 +358,9 @@ abstract class WebSocketControllerBase<T extends WebSocketProtocol, TState = any
         this.hub.broadcast(this.protocol, type, data);
     }
 
-    /** Broadcast to matching connections of this handler's protocol. */
+    /** Broadcast to matching connections of this controller's protocol. */
     broadcastTo<K extends keyof T['outbound'] & string>(
-        predicate: (conn: WebSocketConnection<T, TState>) => boolean,
+        predicate: (conn: WebSocketConnection<T>) => boolean,
         type: K,
         data: T['outbound'][K] extends 'binary' ? Uint8Array : InstanceType<T['outbound'][K]>,
     ): void {
@@ -357,23 +368,23 @@ abstract class WebSocketControllerBase<T extends WebSocketProtocol, TState = any
     }
 
     /** Broadcast to connections matching an index. O(1). */
-    broadcastByIndex<K extends keyof T['outbound'] & string>(
-        indexType: string,
-        indexValue: unknown,
+    broadcastByIndex<K extends keyof T['outbound'] & string, V>(
+        key: Key<V>,
+        value: V,
         type: K,
         data: T['outbound'][K] extends 'binary' ? Uint8Array : InstanceType<T['outbound'][K]>,
     ): void {
-        this.hub.broadcastByIndex(this.protocol, indexType, indexValue, type, data);
+        this.hub.broadcastByIndex(this.protocol, key, value, type, data);
     }
 
     /** Called when a connection opens. Runs in AsyncContext.run(). */
-    onOpen?(conn: WebSocketConnection<T, TState>): Awaitable<void>;
+    onOpen?(conn: WebSocketConnection<T>): Awaitable<void>;
 
     /** Called when a connection closes. */
-    onClose?(conn: WebSocketConnection<T, TState>, code: number, reason: string): Awaitable<void>;
+    onClose?(conn: WebSocketConnection<T>, code: number, reason: string): Awaitable<void>;
 
     /** Called on connection error. */
-    onError?(conn: WebSocketConnection<T, TState>, error: Error): Awaitable<void>;
+    onError?(conn: WebSocketConnection<T>, error: Error): Awaitable<void>;
 }
 
 /**
@@ -385,19 +396,17 @@ abstract class WebSocketControllerBase<T extends WebSocketProtocol, TState = any
  */
 ```
 
-Example handler:
+Example:
 
 ```ts
-/** Typed per-connection state. */
-interface ChatState {
-    username: string;
-    joinedAt: number;
-}
+// Typed keys for state and indexes
+const kUsername = AsyncContext.key<string>('username');
+const kRoom = AsyncContext.key<string>('room');  // used as index
 
 @Controller(ChatProtocol)
 class ChatController
-    extends WebSocketControllerBase<typeof ChatProtocol, ChatState>
-    implements ControllerType<typeof ChatProtocol, ChatState>
+    extends WebSocketControllerBase<typeof ChatProtocol>
+    implements ControllerType<typeof ChatProtocol>
 {
     constructor(
         private readonly repo = inject(MessageRepository),
@@ -406,43 +415,42 @@ class ChatController
 
     // --- Lifecycle ---
 
-    onOpen(conn: WebSocketConnection<typeof ChatProtocol, ChatState>) {
+    onOpen(conn: WebSocketConnection<typeof ChatProtocol>) {
         const user = CurrentUser.getOrThrow();
-        conn.state.username = user.name;
-        conn.state.joinedAt = Date.now();
+        conn.setState(kUsername, user.name);
 
         // Set index for O(1) room-scoped broadcasts
-        conn.indexes.set('room', conn.params.roomId);
+        conn.setIndex(kRoom, conn.params.roomId);
 
         this.logger.info('user %s joined room %s', user.name, conn.params.roomId);
     }
 
-    onClose(conn: WebSocketConnection<typeof ChatProtocol, ChatState>) {
+    onClose(conn: WebSocketConnection<typeof ChatProtocol>) {
         // O(1) — broadcast to same room via index
-        this.broadcastByIndex('room', conn.params.roomId,
+        this.broadcastByIndex(kRoom, conn.params.roomId,
             'presence',
-            { userId: conn.state.username, online: false },
+            { userId: conn.getState(kUsername)!, online: false },
         );
-        // conn.indexes auto-cleaned on close
+        // state and indexes auto-cleaned on close
     }
 
     // --- Inbound message handlers (required by ControllerType) ---
 
-    onSend(data: SendMessage, conn: WebSocketConnection<typeof ChatProtocol, ChatState>) {
-        const msg = { from: conn.state.username, text: data.text, timestamp: Date.now() };
+    onSend(data: SendMessage, conn: WebSocketConnection<typeof ChatProtocol>) {
+        const username = conn.getState(kUsername)!;
+        const msg = { from: username, text: data.text, timestamp: Date.now() };
         this.repo.save(conn.params.roomId, msg);
 
         // O(1) — broadcast to same room via index
-        this.broadcastByIndex('room', conn.params.roomId, 'message', msg);
+        this.broadcastByIndex(kRoom, conn.params.roomId, 'message', msg);
     }
 
-    onTyping(data: TypingEvent, conn: WebSocketConnection<typeof ChatProtocol, ChatState>) {
-        // broadcast typing indicator to room
-        this.broadcastByIndex('room', conn.params.roomId, 'presence',
-            { userId: conn.state.username, online: true });
+    onTyping(data: TypingEvent, conn: WebSocketConnection<typeof ChatProtocol>) {
+        this.broadcastByIndex(kRoom, conn.params.roomId, 'presence',
+            { userId: conn.getState(kUsername)!, online: true });
     }
 
-    onUpload(data: Uint8Array, conn: WebSocketConnection<typeof ChatProtocol, ChatState>) {
+    onUpload(data: Uint8Array, conn: WebSocketConnection<typeof ChatProtocol>) {
         // handle binary upload
     }
 }
@@ -450,7 +458,7 @@ class ChatController
 
 Method naming: inbound key `send` → method `onSend`, key `typing` → method `onTyping`. Enforced by `ControllerType`.
 
-## 7. Per-connection AsyncContext
+## 8. Per-connection AsyncContext
 
 Each connection gets its own `AsyncContext` scope:
 
@@ -465,7 +473,7 @@ Connection established
 
 State set in `onOpen` (e.g., `CurrentUser.set(user)`) is visible in all subsequent message handlers via prototype-chained scope. Each message handler runs in a `fork()` so it can set transient state without leaking to other messages.
 
-## 8. Upgrade flow
+## 9. Upgrade flow
 
 The `http.Server` `'upgrade'` event is handled by `WebApplication`:
 
@@ -501,7 +509,7 @@ Handler.onOpen(conn)  ← in new per-connection AsyncContext.run()
 
 HTTP interceptors run on the upgrade request up to `Interceptor.GUARD`. Auth, CORS, rate limiting all work naturally.
 
-## 9. Configuration
+## 10. Configuration
 
 ```ts
 @Configuration('kavri.web.ws')
@@ -517,7 +525,7 @@ class WebSocketConfig {
 
 Ping/pong is automatic. The framework sends pings at `pingInterval` and closes connections that don't respond within `pingTimeout`.
 
-## 10. Client (`@kavri/client`)
+## 11. Client (`@kavri/client`)
 
 ```ts
 import { createWebSocketClient } from '@kavri/client';
@@ -544,7 +552,7 @@ ws.on('error', (err) => { ... });
 ws.close();
 ```
 
-## 11. Example: multi-room chat
+## 12. Example: multi-room chat
 
 ```ts
 import { Schema, IsString, IsBoolean, IsInteger, defineWebSocket } from '@kavri/schema';
@@ -586,63 +594,53 @@ const LobbyProtocol = defineWebSocket('LobbyProtocol', '/lobby', {
     outbound: { message: ChatMsg, event: RoomEvent },
 });
 
-// --- Per-connection state ---
+// --- Typed keys ---
 
-interface LobbyState {
-    username: string;
-}
+const kLobbyUser = AsyncContext.key<string>('lobbyUser');
+const kLobbyRoom = AsyncContext.key<string>('lobbyRoom');  // index — one per room via composite key
 
-// --- Handler ---
-// Note: a connection can join multiple rooms. Use one index entry per room.
-// conn.indexes supports multiple values per index type via set/delete.
+// --- Controller ---
+// Note: a connection can join multiple rooms. Use composite index keys per room.
 
 @Controller(LobbyProtocol)
 class LobbyController
-    extends WebSocketControllerBase<typeof LobbyProtocol, LobbyState>
-    implements ControllerType<typeof LobbyProtocol, LobbyState>
+    extends WebSocketControllerBase<typeof LobbyProtocol>
+    implements ControllerType<typeof LobbyProtocol>
 {
     constructor(private readonly logger = injectLogger(LobbyController)) { super(); }
 
-    onOpen(conn: WebSocketConnection<typeof LobbyProtocol, LobbyState>) {
-        conn.state.username = CurrentUser.getOrThrow().name;
+    // Per-room index key. Each room gets its own Key so one connection can be in many rooms.
+    private roomKey(room: string) { return AsyncContext.key<boolean>(`room:${room}`); }
+
+    onOpen(conn: WebSocketConnection<typeof LobbyProtocol>) {
+        conn.setState(kLobbyUser, CurrentUser.getOrThrow().name);
     }
 
-    onJoin(data: JoinRoom, conn: WebSocketConnection<typeof LobbyProtocol, LobbyState>) {
-        // Add index: this connection is in this room. One conn can have multiple room indexes.
-        conn.indexes.set(`room:${data.room}`, true);
+    onJoin(data: JoinRoom, conn: WebSocketConnection<typeof LobbyProtocol>) {
+        const key = this.roomKey(data.room);
+        conn.setIndex(key, true);
 
-        this.hub.broadcastByIndex(LobbyProtocol, `room:${data.room}`, true,
+        this.hub.broadcastByIndex(LobbyProtocol, key, true,
             'event',
-            { room: data.room, user: conn.state.username, action: 'joined' },
+            { room: data.room, user: conn.getState(kLobbyUser)!, action: 'joined' },
         );
     }
 
-    onLeave(data: LeaveRoom, conn: WebSocketConnection<typeof LobbyProtocol, LobbyState>) {
-        conn.indexes.delete(`room:${data.room}`);
+    onLeave(data: LeaveRoom, conn: WebSocketConnection<typeof LobbyProtocol>) {
+        conn.deleteIndex(this.roomKey(data.room));
     }
 
-    onSend(data: SendMsg, conn: WebSocketConnection<typeof LobbyProtocol, LobbyState>) {
-        // Send to all rooms this connection is in
-        for (const [indexType] of conn.indexes) {
-            if (!indexType.startsWith('room:')) continue;
-            const room = indexType.slice(5);
-            this.hub.broadcastByIndex(LobbyProtocol, indexType, true,
-                'message',
-                { from: conn.state.username, text: data.text, room, ts: Date.now() },
-            );
-        }
+    onSend(data: SendMsg, conn: WebSocketConnection<typeof LobbyProtocol>) {
+        // broadcast to all rooms — predicate fallback for multi-room
+        this.broadcastTo(
+            c => true, // simplified; real impl would track rooms in state
+            'message',
+            { from: conn.getState(kLobbyUser)!, text: data.text, room: '', ts: Date.now() },
+        );
     }
 
-    onClose(conn: WebSocketConnection<typeof LobbyProtocol, LobbyState>) {
-        for (const [indexType] of conn.indexes) {
-            if (!indexType.startsWith('room:')) continue;
-            const room = indexType.slice(5);
-            this.hub.broadcastByIndex(LobbyProtocol, indexType, true,
-                'event',
-                { room, user: conn.state.username, action: 'left' },
-            );
-        }
-        // conn.indexes auto-cleaned on close
+    onClose(conn: WebSocketConnection<typeof LobbyProtocol>) {
+        // state and indexes auto-cleaned on close
     }
 }
 
@@ -654,14 +652,17 @@ class AnnouncementService {
 
     /** O(1) broadcast to a room via index */
     announce(room: string, text: string) {
-        this.hub.broadcastByIndex(LobbyProtocol, `room:${room}`, true,
+        const key = AsyncContext.key<boolean>(`room:${room}`);
+        this.hub.broadcastByIndex(LobbyProtocol, key, true,
             'message',
             { from: 'system', text, room, ts: Date.now() },
         );
     }
 
     getOnlineUsers(): string[] {
-        return [...this.hub.of(LobbyProtocol)].map(c => c.state.username);
+        return [...this.hub.of(LobbyProtocol)]
+            .map(c => c.getState(kLobbyUser))
+            .filter(Boolean) as string[];
     }
 }
 
