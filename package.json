@@ -3,6 +3,7 @@
   "type": "module",
   "scripts": {
     "build": "pnpm -r run build",
+    "test": "vitest run",
     "typecheck": "pnpm -r run typecheck",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
@@ -21,7 +22,8 @@
     "prettier": "^3.5.3",
     "tsdown": "^0.21.7",
     "typescript": "^5.8.3",
-    "typescript-eslint": "^8.33.0"
+    "typescript-eslint": "^8.33.0",
+    "vitest": "^4.1.4"
   },
   "lint-staged": {
     "*.{ts,js,mjs}": [
