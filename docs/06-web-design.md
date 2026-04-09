@@ -961,69 +961,75 @@ class RouteInterceptor extends Interceptor {
 
 Body parsing is split into specialized interceptors. Each handles one content type and skips if not applicable. All share the same priority — only one activates per request based on `Content-Type` and `requestType`.
 
+All parse interceptors are **passive** — if the target key is already set (by a user interceptor earlier in the chain), parsing is skipped. This allows custom parsing logic to take priority.
+
 ```ts
-/** Parses query string on every request. Always active. */
+/** Parses query string. Skips if kQuery already set. */
 @Component()
 @Priority(Interceptor.PARSE)
 class QueryParseInterceptor extends Interceptor {
     async intercept(next: () => unknown) {
-        const url = kURL.getOrThrow();
-        kQuery.set(Object.fromEntries(url.searchParams));
+        if (kQuery.get() === undefined) {
+            const url = kURL.getOrThrow();
+            kQuery.set(Object.fromEntries(url.searchParams));
+        }
         return next();
     }
 }
 
-/** Parses JSON request bodies. Activates when Content-Type is application/json. */
+/** Parses JSON request bodies. Skips if kBody already set. */
 @Component()
 @Priority(Interceptor.PARSE + 1)
 class JsonParseInterceptor extends Interceptor {
     constructor(private readonly config = injectConfig(WebConfig)) { super(); }
 
     async intercept(next: () => unknown) {
+        if (kBody.get() !== undefined) return next();
+
         const endpoint = kEndpoint.get();
         if (!endpoint || endpoint.request === 'void') return next();
 
         const req = kRequest.getOrThrow();
         const contentType = req.headers['content-type'] ?? '';
-
         if (!contentType.includes('application/json')) return next();
 
-        const maxBodySize = this.config.maxBodySize;
-        const raw = await readBody(req, maxBodySize);
+        const raw = await readBody(req, this.config.maxBodySize);
         kBody.set(JSON.parse(raw));
         return next();
     }
 }
 
-/** Parses URL-encoded form bodies. Activates when Content-Type is application/x-www-form-urlencoded. */
+/** Parses URL-encoded form bodies. Skips if kBody already set. */
 @Component()
 @Priority(Interceptor.PARSE + 1)
 class UrlencodedParseInterceptor extends Interceptor {
     constructor(private readonly config = injectConfig(WebConfig)) { super(); }
 
     async intercept(next: () => unknown) {
+        if (kBody.get() !== undefined) return next();
+
         const endpoint = kEndpoint.get();
         if (!endpoint || endpoint.request === 'void') return next();
 
         const req = kRequest.getOrThrow();
         const contentType = req.headers['content-type'] ?? '';
-
         if (!contentType.includes('application/x-www-form-urlencoded')) return next();
 
-        const maxBodySize = this.config.maxBodySize;
-        const raw = await readBody(req, maxBodySize);
+        const raw = await readBody(req, this.config.maxBodySize);
         kBody.set(Object.fromEntries(new URLSearchParams(raw)));
         return next();
     }
 }
 
-/** Parses multipart/form-data bodies. Activates when requestType is 'multipart'. */
+/** Parses multipart/form-data bodies. Skips if kBody already set. */
 @Component()
 @Priority(Interceptor.PARSE + 1)
 class MultipartParseInterceptor extends Interceptor {
     constructor(private readonly config = injectConfig(WebConfig)) { super(); }
 
     async intercept(next: () => unknown) {
+        if (kBody.get() !== undefined) return next();
+
         const endpoint = kEndpoint.get();
         if (!endpoint || endpoint.request === 'void') return next();
         if ((endpoint.options.requestType ?? 'data') !== 'multipart') return next();
@@ -1038,11 +1044,13 @@ class MultipartParseInterceptor extends Interceptor {
     }
 }
 
-/** Passes the raw request stream as body. Activates when requestType is 'binary'. */
+/** Passes the raw request stream as body. Skips if kBody already set. */
 @Component()
 @Priority(Interceptor.PARSE + 1)
 class BinaryParseInterceptor extends Interceptor {
     async intercept(next: () => unknown) {
+        if (kBody.get() !== undefined) return next();
+
         const endpoint = kEndpoint.get();
         if (!endpoint || endpoint.request === 'void') return next();
         if ((endpoint.options.requestType ?? 'data') !== 'binary') return next();
@@ -1053,7 +1061,7 @@ class BinaryParseInterceptor extends Interceptor {
 }
 ```
 
-Each interceptor is a `@Component()` — users can replace any parser by providing their own at the same priority with `@Conditional`.
+Each interceptor is a `@Component()` — users can replace any parser by providing their own at a higher priority, setting the key before the built-in parser runs.
 
 ### ResolveInterceptor (RESOLVE = 7000)
 
