@@ -85,18 +85,18 @@ Examples:
 
 ```ts
 // Enabled when kavri.web.cors config section exists
-@ConditionalOnConfiguration(CorsConfig)
+@ConditionalOnConfiguration(CorsOptions)
 class CorsInterceptor extends Interceptor { ... }
 
 // Enabled when kavri.web.compression exists AND config.enabled is truthy
-@ConditionalOnConfiguration(CompressionConfig, 'enabled')
+@ConditionalOnConfiguration(CompressionOptions, 'enabled')
 class CompressionInterceptor extends Interceptor { ... }
 ```
 
 Equivalent to:
 ```ts
-@Conditional((config = injectConfig(CorsConfig, true)) => config !== undefined)
-@Conditional((config = injectConfig(CompressionConfig, true)) => config !== undefined && !!config.enabled)
+@Conditional((config = injectConfig(CorsOptions, true)) => config !== undefined)
+@Conditional((config = injectConfig(CompressionOptions, true)) => config !== undefined && !!config.enabled)
 ```
 
 ## 4. Lifecycle decorators
@@ -336,13 +336,13 @@ import { Configuration, injectConfig, OverrideConfiguration, ConfigFileOptions }
 import { IsString, IsBoolean } from '@kavri/schema';
 
 @Configuration('database')
-class DatabaseConfig {
+class DatabaseOptions {
   @IsString() driver!: string;
   @IsString() url!: string;
 }
 
 @Configuration('telemetry')
-class TelemetryConfig {
+class TelemetryOptions {
   @IsBoolean({ default: false }) enabled!: boolean;
 }
 
@@ -356,7 +356,7 @@ class PsqlDriver extends Driver {
 }
 
 const SelectedDriver = token<Driver>(
-  (cfg = injectConfig(DatabaseConfig), d = inject(Driver, cfg.driver)) => d,
+  (cfg = injectConfig(DatabaseOptions), d = inject(Driver, cfg.driver)) => d,
 );
 
 declare class Redis {
@@ -374,9 +374,9 @@ declare class Redis {
 class AppModule {}
 
 @Component()
-@Conditional((config = injectConfig(TelemetryConfig, true)) => config?.enabled ?? false)
+@Conditional((config = injectConfig(TelemetryOptions, true)) => config?.enabled ?? false)
 class TelemetryService {
-  constructor(private readonly config = injectConfig(TelemetryConfig)) {}
+  constructor(private readonly config = injectConfig(TelemetryOptions)) {}
   send(metric: string, value: number): void {}
 }
 

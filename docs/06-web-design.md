@@ -206,7 +206,7 @@ class LoggingInterceptor extends Interceptor {
 
 ```ts
 @Configuration('kavri.web.auth.basic')
-class BasicAuthConfig {
+class BasicAuthOptions {
     @IsString() username!: string;
     @IsString() password!: string;
     @IsString({ default: 'Restricted' }) realm!: string;
@@ -214,9 +214,9 @@ class BasicAuthConfig {
 
 @Component()
 @Priority(Interceptor.GUARD)
-@ConditionalOnConfiguration(BasicAuthConfig)
+@ConditionalOnConfiguration(BasicAuthOptions)
 class BasicAuthInterceptor extends Interceptor {
-    constructor(private readonly config = injectConfig(BasicAuthConfig)) { super(); }
+    constructor(private readonly config = injectConfig(BasicAuthOptions)) { super(); }
 
     async intercept(next: () => unknown) {
         const auth = kRequest.getOrThrow().headers['authorization'];
@@ -232,7 +232,7 @@ Uses [`expressjs/compression`](https://github.com/expressjs/compression) (peer d
 
 ```ts
 @Configuration('kavri.web.compression')
-class CompressionConfig {
+class CompressionOptions {
     /** Minimum response size in bytes to compress. Default 1KB. */
     @IsInteger({ default: 1024 }) threshold!: number;
     /** Compression level (zlib). -1 = default, 0 = none, 9 = best. */
@@ -243,11 +243,11 @@ class CompressionConfig {
 
 @Component()
 @Priority(Interceptor.RESPONSE + 1)
-@ConditionalOnConfiguration(CompressionConfig)
+@ConditionalOnConfiguration(CompressionOptions)
 class CompressionInterceptor extends Interceptor {
     private compress!: ReturnType<typeof compression>;
 
-    constructor(private readonly config = injectConfig(CompressionConfig)) { super(); }
+    constructor(private readonly config = injectConfig(CompressionOptions)) { super(); }
 
     @OnConstruct()
     init() {
@@ -275,7 +275,7 @@ class CompressionInterceptor extends Interceptor {
 
 ```ts
 @Configuration('kavri.web.cors')
-class CorsConfig {
+class CorsOptions {
     /** Allowed origins. '*' for all. */
     @IsArray(IsString(), { default: ['*'] }) origins!: string[];
     /** Allowed HTTP methods. */
@@ -292,9 +292,9 @@ class CorsConfig {
 
 @Component()
 @Priority(Interceptor.CORS)
-@ConditionalOnConfiguration(CorsConfig)
+@ConditionalOnConfiguration(CorsOptions)
 class CorsInterceptor extends Interceptor {
-    constructor(private readonly config = injectConfig(CorsConfig)) { super(); }
+    constructor(private readonly config = injectConfig(CorsOptions)) { super(); }
 
     async intercept(next: () => unknown) {
         const req = kRequest.getOrThrow();
@@ -337,7 +337,7 @@ Token-bucket rate limiter. Keyed by client IP by default. Configurable key extra
 
 ```ts
 @Configuration('kavri.web.rateLimit')
-class RateLimitConfig {
+class RateLimitOptions {
     /** Max requests per window. */
     @IsInteger({ default: 100 }) max!: number;
     /** Window size in milliseconds. */
@@ -373,10 +373,10 @@ class MemoryRateLimitStore extends RateLimitStore {
 
 @Component()
 @Priority(Interceptor.GUARD - 2)
-@ConditionalOnConfiguration(RateLimitConfig)
+@ConditionalOnConfiguration(RateLimitOptions)
 class RateLimitInterceptor extends Interceptor {
     constructor(
-        private readonly config = injectConfig(RateLimitConfig),
+        private readonly config = injectConfig(RateLimitOptions),
         private readonly store = inject(RateLimitStore),
     ) { super(); }
 
@@ -412,7 +412,7 @@ The cookie is **not** `HttpOnly` — frontend JS must read it to echo in the req
 
 CSRF check applies to all HTTP methods when:
 1. The request matches a controller action that is **not** decorated with `@NoCsrf()`, OR
-2. The request path matches one of `CsrfConfig.includes` (for non-action paths)
+2. The request path matches one of `CsrfOptions.includes` (for non-action paths)
 
 ```ts
 /**
@@ -424,7 +424,7 @@ declare function NoCsrf(): MethodDecorator<{}>;
 
 ```ts
 @Configuration('kavri.web.csrf')
-class CsrfConfig {
+class CsrfOptions {
     /** Cookie name for the CSRF token. Must be JS-readable (not HttpOnly). */
     @IsString({ default: '_csrf' }) cookie!: string;
     /** Header name the client must echo the token in. */
@@ -435,9 +435,9 @@ class CsrfConfig {
 
 @Component()
 @Priority(Interceptor.GUARD - 1)
-@ConditionalOnConfiguration(CsrfConfig)
+@ConditionalOnConfiguration(CsrfOptions)
 class CsrfInterceptor extends Interceptor {
-    constructor(private readonly config = injectConfig(CsrfConfig)) { super(); }
+    constructor(private readonly config = injectConfig(CsrfOptions)) { super(); }
 
     async intercept(next: () => unknown) {
         const req = kRequest.getOrThrow();
@@ -551,7 +551,7 @@ Uses [`expressjs/serve-static`](https://github.com/expressjs/serve-static) (peer
 
 ```ts
 @Configuration('kavri.web.static')
-class StaticConfig {
+class StaticOptions {
     /** Root directory to serve files from. */
     @IsString({ default: './public' }) root!: string;
     /** URL prefix. Empty string means serve from root. */
@@ -593,11 +593,11 @@ class StaticConfig {
 
 @Component()
 @Priority(Interceptor.FALLBACK)
-@ConditionalOnConfiguration(StaticConfig)
+@ConditionalOnConfiguration(StaticOptions)
 class StaticFileInterceptor extends Interceptor {
     private serve!: ReturnType<typeof serveStatic>;
 
-    constructor(private readonly config = injectConfig(StaticConfig)) { super(); }
+    constructor(private readonly config = injectConfig(StaticOptions)) { super(); }
 
     @OnConstruct()
     init() {
@@ -670,7 +670,7 @@ See [13-websocket-design.md](./13-websocket-design.md). `defineWebSocket()`, `@W
 
 ```ts
 @Configuration('kavri.web')
-class WebConfig {
+class WebOptions {
     @IsString({ default: '0.0.0.0' }) host!: string;
     @IsInteger({ default: 3000 }) port!: number;
     /** Global max request body size in bytes. Default 1MB. Endpoint-level limits override this. */
@@ -729,7 +729,7 @@ class WebApplication {
     constructor(
         // Inject all interceptors sorted by priority — all must have @Priority
         private readonly interceptors = injectAll(Interceptor, 'priority'),
-        private readonly config = injectConfig(WebConfig),
+        private readonly config = injectConfig(WebOptions),
     ) {
         // Validate: every Interceptor subclass MUST have @Priority
         for (const interceptor of this.interceptors) {
@@ -981,7 +981,7 @@ class QueryParseInterceptor extends Interceptor {
 @Component()
 @Priority(Interceptor.PARSE + 1)
 class JsonParseInterceptor extends Interceptor {
-    constructor(private readonly config = injectConfig(WebConfig)) { super(); }
+    constructor(private readonly config = injectConfig(WebOptions)) { super(); }
 
     async intercept(next: () => unknown) {
         if (kBody.has()) return next();
@@ -1003,7 +1003,7 @@ class JsonParseInterceptor extends Interceptor {
 @Component()
 @Priority(Interceptor.PARSE + 1)
 class UrlencodedParseInterceptor extends Interceptor {
-    constructor(private readonly config = injectConfig(WebConfig)) { super(); }
+    constructor(private readonly config = injectConfig(WebOptions)) { super(); }
 
     async intercept(next: () => unknown) {
         if (kBody.has()) return next();
@@ -1025,7 +1025,7 @@ class UrlencodedParseInterceptor extends Interceptor {
 @Component()
 @Priority(Interceptor.PARSE + 1)
 class MultipartParseInterceptor extends Interceptor {
-    constructor(private readonly config = injectConfig(WebConfig)) { super(); }
+    constructor(private readonly config = injectConfig(WebOptions)) { super(); }
 
     async intercept(next: () => unknown) {
         if (kBody.has()) return next();

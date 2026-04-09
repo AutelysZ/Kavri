@@ -27,14 +27,14 @@ An inject call is valid **only** as a **default parameter value** in:
 
    ```ts
    const DbUrl = token<string>(
-       (config = injectConfig(DbConfig)) => config.url // ok
+       (config = injectConfig(DbOptions)) => config.url // ok
    );
    ```
 
 3. **`@Provide` factory parameters**
 
    ```ts
-   @Provide(Redis, async (config = injectConfig(RedisConfig)) => { // ok
+   @Provide(Redis, async (config = injectConfig(RedisOptions)) => { // ok
        const r = new Redis();
        await r.connect(config.url);
        return r;

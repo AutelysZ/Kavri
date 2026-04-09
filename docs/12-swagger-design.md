@@ -10,7 +10,7 @@ Serve OpenAPI JSON and Swagger UI from a running `@kavri/web` application. No bu
 
 ```ts
 @Configuration('kavri.swagger')
-class SwaggerConfig {
+class SwaggerOptions {
     /** Enable swagger endpoints. Default: true. */
     @IsBoolean({ default: true }) enabled!: boolean;
     /** Path prefix for swagger endpoints. */
@@ -34,12 +34,12 @@ Serves two endpoints under the configured path prefix:
 ```ts
 @Component()
 @Priority(Interceptor.ROUTE - 2)
-@ConditionalOnConfiguration(SwaggerConfig, 'enabled')
+@ConditionalOnConfiguration(SwaggerOptions, 'enabled')
 class SwaggerInterceptor extends Interceptor {
     private openApiDoc!: object;
     private uiHtml!: string;
 
-    constructor(private readonly config = injectConfig(SwaggerConfig)) { super(); }
+    constructor(private readonly config = injectConfig(SwaggerOptions)) { super(); }
 
     @OnConstruct()
     init(controllers = injectAll(Controller)) {
@@ -159,4 +159,4 @@ kavri:
 
 Or via environment variable: `KAVRI_SWAGGER_ENABLED=false`.
 
-The `@ConditionalOnConfiguration(SwaggerConfig, 'enabled')` ensures the interceptor is never instantiated when disabled — zero overhead.
+The `@ConditionalOnConfiguration(SwaggerOptions, 'enabled')` ensures the interceptor is never instantiated when disabled — zero overhead.

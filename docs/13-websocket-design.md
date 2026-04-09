@@ -513,7 +513,7 @@ HTTP interceptors run on the upgrade request up to `Interceptor.GUARD`. Auth, CO
 
 ```ts
 @Configuration('kavri.web.ws')
-class WebSocketConfig {
+class WebSocketServerOptions {
     /** Max inbound message size in bytes. */
     @IsInteger({ default: 65536 }) maxMessageSize!: number;
     /** Ping interval in ms. 0 to disable. */

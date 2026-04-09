@@ -53,7 +53,7 @@ declare function Configuration(
 
 ```ts
 @Configuration('database')
-class DatabaseConfig {
+class DatabaseOptions {
   @IsString() driver!: string;
   @IsString() host!: string;
   @IsInteger({ default: 5432 }) port!: number;
@@ -137,14 +137,14 @@ Variable substitution (`${key}` / `${key:-default}`) occurs during `bind()` usin
 ```ts
 @Component()
 class UserService {
-  constructor(private readonly config = injectConfig(DatabaseConfig)) {}
+  constructor(private readonly config = injectConfig(DatabaseOptions)) {}
 }
 
 // Conditional injection:
 @Component()
-@Conditional((config = injectConfig(TelemetryConfig, true)) => config?.enabled ?? false)
+@Conditional((config = injectConfig(TelemetryOptions, true)) => config?.enabled ?? false)
 class TelemetryService {
-  constructor(private readonly config = injectConfig(TelemetryConfig)) {}
+  constructor(private readonly config = injectConfig(TelemetryOptions)) {}
 }
 ```
 
@@ -235,11 +235,11 @@ Code-level defaults for a `@Configuration` class. Lowest priority layer -- overr
 @OverrideConfiguration(ConfigFileOptions, () => ({ configFile: './config/app' }))
 @OverrideConfiguration(ProfileOptions, () => ({ profiles: ['prod'] }))
 @OverrideConfiguration(VariantOptions, () => ({ envPrefix: 'MYAPP_' }))
-@OverrideConfiguration(DatabaseConfig, () => ({
+@OverrideConfiguration(DatabaseOptions, () => ({
   port: 5432,
   host: 'localhost',
 }))
-class AppConfigModule {}
+class AppOptionsModule {}
 ```
 
 ## 9. Variable substitution
@@ -315,7 +315,7 @@ class AwsSecretManagerResolver extends Resolver<AwsSecretManagerResolverOptions>
 // --- config schemas ---
 
 @Configuration('database')
-class DatabaseConfig {
+class DatabaseOptions {
   @IsString() driver!: string;
   @IsString() host!: string;
   @IsInteger({ default: 5432 }) port!: number;
@@ -323,13 +323,13 @@ class DatabaseConfig {
 }
 
 @Configuration('app')
-class AppConfig {
+class AppOptions {
   @IsString({ default: 'my-app' }) name!: string;
   @IsString({ in: ['dev', 'staging', 'prod'], default: 'dev' }) env!: string;
 }
 
 @Configuration('telemetry')
-class TelemetryConfig {
+class TelemetryOptions {
   @IsBoolean({ default: false }) enabled!: boolean;
 }
 
@@ -345,15 +345,15 @@ class PsqlDriver extends Driver {
 }
 
 const SelectedDriver = token<Driver>(
-  (cfg = injectConfig(DatabaseConfig), d = inject(Driver, cfg.driver)) => d,
+  (cfg = injectConfig(DatabaseOptions), d = inject(Driver, cfg.driver)) => d,
 );
 
 // --- conditional component ---
 
 @Component()
-@Conditional((config = injectConfig(TelemetryConfig, true)) => config?.enabled ?? false)
+@Conditional((config = injectConfig(TelemetryOptions, true)) => config?.enabled ?? false)
 class TelemetryService {
-  constructor(private readonly config = injectConfig(TelemetryConfig)) {}
+  constructor(private readonly config = injectConfig(TelemetryOptions)) {}
   send(metric: string, value: number): void {}
 }
 
@@ -396,7 +396,7 @@ class TelemetryService {
 }))
 class Application {
   constructor(
-    private readonly app = injectConfig(AppConfig),
+    private readonly app = injectConfig(AppOptions),
     private readonly driver = inject(SelectedDriver),
     private readonly telemetry = inject(TelemetryService, true),
   ) {}
