@@ -5,7 +5,7 @@
 - **Framework-independent.** Core design has no dependency on Express, Fastify, etc. The web module produces a standard `(req, res) => void` handler usable with `node:http`, Bun, Deno, or any adapter.
 - **Parsed input only.** Handlers receive validated, typed data — not raw streams. Body parsing happens before handlers and interceptors see the request (gRPC-style).
 - **Single interception mechanism.** Interceptors replace middleware, guards, pipes, and filters. One abstraction, one chain.
-- **Controllers are singletons.** Per-request data lives in `RequestContext` — a typed key-value store backed by `AsyncLocalStorage`.
+- **Controllers are singletons.** Per-request data lives in `AsyncContext` — a typed key-value store backed by `AsyncLocalStorage` (from `@kavri/basic`).
 - **Route-first.** All endpoints are defined via `defineRoute()` in `@kavri/schema`. Controllers implement routes via `@Controller()` + `createController(route)`.
 
 ## 2. Core HTTP Types
@@ -37,39 +37,9 @@ class RawResponse {
 
 Normal handler return → JSON serialized with 200. Return `Redirect`, `FileResponse`, `StreamResponse`, or `RawResponse` for non-standard responses.
 
-## 3. RequestContext
+## 3. AsyncContext & Request Keys
 
-A typed key-value store for per-request state. Static API backed by `AsyncLocalStorage`. Accessible anywhere during a request — controllers, interceptors, services.
-
-```ts
-/** Typed context key. Public API lives on Key, not on RequestContext. */
-declare class Key<T> {
-    readonly name?: string;
-
-    /** Get value from current request context. Returns undefined if not set. */
-    get(): T | undefined;
-
-    /** Get value or throw if not set. */
-    getOrThrow(): T;
-
-    /** Get value, or insert one computed by fn if not present. */
-    getOrInsertComputed(fn: () => T): T;
-
-    /** Set value in current request context. */
-    set(value: T): void;
-}
-
-declare const RequestContext: {
-    /** Create a typed key. */
-    key<T>(name?: string): Key<T>;
-
-    /** Check if currently inside a request context. */
-    isActive(): boolean;
-
-    /** Run fn inside a new request context. Called by the framework per-request. */
-    run<T>(fn: () => Awaitable<T>): Promise<T>;
-};
-```
+`AsyncContext` and `Key<T>` live in `@kavri/basic` (see [05-metadata-design.md](./05-metadata-design.md#8-asynccontext)). The web module defines keys and uses `AsyncContext.run()`/`AsyncContext.fork()` for per-request scoping.
 
 ### Built-in request keys
 
@@ -81,45 +51,45 @@ import { IncomingMessage, ServerResponse } from 'node:http';
 // --- Set by framework at request start ---
 
 /** The raw Node.js request. */
-const kRequest = RequestContext.key<IncomingMessage>('request');
+const kRequest = AsyncContext.key<IncomingMessage>('request');
 
 /** The raw Node.js response. */
-const kResponse = RequestContext.key<ServerResponse>('response');
+const kResponse = AsyncContext.key<ServerResponse>('response');
 
 /** Parsed URL of the request. */
-const kURL = RequestContext.key<URL>('url');
+const kURL = AsyncContext.key<URL>('url');
 
 // --- Set by ROUTE stage ---
 
 /** The matched endpoint metadata from defineRoute. Null if no route matched. */
-const kEndpoint = RequestContext.key<Endpoint<any, any> | null>('endpoint');
+const kEndpoint = AsyncContext.key<Endpoint<any, any> | null>('endpoint');
 
 /** The matched controller instance. Null if no route matched. */
-const kController = RequestContext.key<object | null>('controller');
+const kController = AsyncContext.key<object | null>('controller');
 
 // --- Set by PARSE stage (raw pieces) ---
 
 /** Path parameters extracted by the router. */
-const kPathParams = RequestContext.key<Record<string, string>>('pathParams');
+const kPathParams = AsyncContext.key<Record<string, string>>('pathParams');
 
 /** Query string parameters. */
-const kQuery = RequestContext.key<Record<string, string>>('query');
+const kQuery = AsyncContext.key<Record<string, string>>('query');
 
 /** Parsed request body (JSON object, string, etc.). */
-const kBody = RequestContext.key<unknown>('body');
+const kBody = AsyncContext.key<unknown>('body');
 
 /** Uploaded files (multipart requests only). */
-const kFiles = RequestContext.key<Record<string, MultipartFile | MultipartFile[]>>('files');
+const kFiles = AsyncContext.key<Record<string, MultipartFile | MultipartFile[]>>('files');
 
 // --- Set by RESOLVE stage (merged) ---
 
 /** Final merged params: path params + query + body + files, shaped to request schema. */
-const kParams = RequestContext.key<unknown>('params');
+const kParams = AsyncContext.key<unknown>('params');
 
 // --- For logging (from @kavri/logging integration) ---
 
 /** Request-scoped logging context. Interceptors append data here. */
-const kLogging = RequestContext.key<Record<string, unknown>>('logging');
+const kLogging = AsyncContext.key<Record<string, unknown>>('logging');
 ```
 
 ### Usage
@@ -130,7 +100,7 @@ const req = kRequest.getOrThrow();
 const params = kParams.get();
 
 // Custom keys for interceptor → handler communication
-const CurrentUser = RequestContext.key<User>('currentUser');
+const CurrentUser = AsyncContext.key<User>('currentUser');
 
 // In interceptor:
 CurrentUser.set(authenticatedUser);
@@ -194,7 +164,7 @@ abstract class Interceptor {
 }
 ```
 
-Interceptors are `@Component()` classes extending `Interceptor`. Discovered via `injectAll(Interceptor, 'priority')`. Sorted by `@Priority` value (smaller first). `next()` invokes the next interceptor or the handler. Use built-in `RequestContext` keys (`Request`, `Endpoint`, `Controller`, `Params`) to access request data.
+Interceptors are `@Component()` classes extending `Interceptor`. Discovered via `injectAll(Interceptor, 'priority')`. Sorted by `@Priority` value (smaller first). `next()` invokes the next interceptor or the handler. Use built-in keys (`kRequest`, `kEndpoint`, `kController`, `kParams`) to access request data.
 
 Use `@Priority(Interceptor.EXCEPTION)` to place an interceptor at the exception-handling stage. Fine-tune with `+1`/`-1` if needed, but avoid unless necessary.
 
@@ -401,7 +371,7 @@ class WebApplication {
     /** Return raw Node.js HTTP handler. */
     toHandler(): (req: IncomingMessage, res: ServerResponse) => void {
         return (req, res) => {
-            RequestContext.run(async () => {
+            AsyncContext.run(async () => {
                 kRequest.set(req);
                 kResponse.set(res);
                 kURL.set(new URL(req.url!, `http://${req.headers.host}`));
@@ -771,7 +741,7 @@ import {
 } from '@kavri/schema';
 import {
     Controller, createController,
-    Interceptor, RequestContext, HttpException, WebApplication,
+    Interceptor, HttpException, WebApplication,
 } from '@kavri/web';
 import { Component, Touch, inject } from '@kavri/container';
 

@@ -272,7 +272,7 @@ class DefaultDataSourceResolver extends DataSourceResolver {
 ### Multi-tenant example
 
 ```ts
-const kTenantId = RequestContext.key<string>('tenantId');
+const kTenantId = AsyncContext.key<string>('tenantId');
 
 @Component()
 @Priority(1000)
@@ -352,10 +352,10 @@ class Transaction {
 
 ## 7. TransactionManager
 
-Manages ALS-based transaction stack. If called outside a `RequestContext`, auto-wraps in `RequestContext.run()`.
+Manages ALS-based transaction stack. If called outside an `AsyncContext`, auto-wraps in `AsyncContext.run()`.
 
 ```ts
-const kTransactionStack = RequestContext.key<TransactionFrame[]>('transactionStack');
+const kTransactionStack = AsyncContext.key<TransactionFrame[]>('transactionStack');
 
 interface TransactionFrame {
     dataSource: Qualifier;
@@ -373,7 +373,7 @@ class TransactionManager {
     ) {}
 
     /**
-     * Begin a transaction. Auto-wraps in RequestContext.run() if not active.
+     * Begin a transaction. Auto-wraps in AsyncContext.run() if not active.
      * Auto-commits on fn success. Auto-rollbacks on fn throw.
      */
     begin<T>(options: TransactionOptions, fn: (tx: Transaction) => Promise<T>): Promise<T>;
@@ -395,9 +395,9 @@ class TransactionManager {
 ```ts
 class TransactionManager {
     async begin<T>(options: TransactionOptions, fn: (tx: Transaction) => Promise<T>): Promise<T> {
-        // Auto-wrap in RequestContext if not active
-        if (!RequestContext.isActive()) {
-            return RequestContext.run(() => this.begin(options, fn));
+        // Auto-wrap in AsyncContext if not active
+        if (!AsyncContext.isActive()) {
+            return AsyncContext.run(() => this.begin(options, fn));
         }
 
         const resolution = this.resolveSource(options);
@@ -818,7 +818,7 @@ kavri:
 
 ## 11. Limitations
 
-**Concurrent transactions in the same ALS context.** `kTransactionStack` is shared across all async operations within a single `RequestContext`. If two `begin()` calls run concurrently (e.g., via `Promise.all`), the second may see the first's frame and reuse it under `Propagation.Required` — even though they are independent.
+**Concurrent transactions in the same ALS context.** `kTransactionStack` is shared across all async operations within a single `AsyncContext`. If two `begin()` calls run concurrently (e.g., via `Promise.all`), the second may see the first's frame and reuse it under `Propagation.Required` — even though they are independent.
 
 ```ts
 // ⚠️ WRONG — concurrent transactions share the stack
@@ -847,7 +847,7 @@ kTransactionStack: Key<TransactionFrame[]>
 
 TransactionManager.begin(options, fn)
   │
-  ├─ if !RequestContext.isActive() → RequestContext.run(() => begin(options, fn))
+  ├─ if !AsyncContext.isActive() → AsyncContext.run(() => begin(options, fn))
   │
   ├─ resolveSource(options) → { dataSource, driver }
   ├─ findCurrentTransaction(dataSource) → existing frame?

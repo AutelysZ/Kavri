@@ -192,7 +192,158 @@ const components = injectAll(Component);
 
 This is how subsystems discover decorated classes without a central registry.
 
-## 8. Full example
+## 8. AsyncContext (`@kavri/basic`)
+
+Async-scoped key-value store backed by `AsyncLocalStorage`. Used by `@kavri/web` for request state, `@kavri/logging` for log context, `@kavri/web` transactions for the transaction stack.
+
+### Key
+
+Each Key has a unique `symbol` internally. State is stored as `Record<symbol, any>`.
+
+```ts
+declare class Key<T> {
+    readonly name?: string;
+
+    /** Get value from current scope. Returns undefined if not set or not in scope. */
+    get(): T | undefined;
+
+    /** Get value or throw if not set. */
+    getOrThrow(): T;
+
+    /** Get value, or insert one computed by fn if not present. */
+    getOrInsertComputed(fn: () => T): T;
+
+    /** Set value in current scope. */
+    set(value: T): void;
+
+    /**
+     * Delete value from current scope.
+     * Uses a sentinel so prototype lookup doesn't find parent scope's value.
+     */
+    delete(): void;
+}
+```
+
+### AsyncContext
+
+```ts
+declare const AsyncContext: {
+    /** Create a typed key. Each key has a unique symbol. */
+    key<T>(name?: string): Key<T>;
+
+    /** Check if currently inside a scope. */
+    isActive(): boolean;
+
+    /**
+     * Enter a root scope. If already in a scope, does nothing.
+     * Uses AsyncLocalStorage.enterWith(Object.create(null)).
+     */
+    enter(): void;
+
+    /**
+     * Run fn inside a scope.
+     * If already active, runs fn directly in the current scope.
+     * If not active, creates a new root scope and runs fn.
+     */
+    run<T>(fn: () => Awaitable<T>): Promise<T>;
+
+    /**
+     * Fork a child scope and run fn inside it.
+     * Always creates a new scope that inherits from the current via
+     * Object.create(currentState). Modifications in the child don't
+     * leak to the parent. Parent values are visible in the child
+     * unless overwritten or deleted.
+     */
+    fork<T>(fn: () => Awaitable<T>): Promise<T>;
+};
+```
+
+### Internals
+
+```ts
+// State is a prototype-chained record keyed by symbols.
+// Each Key<T> has a unique symbol assigned at creation.
+type State = Record<symbol, any>;
+
+const DELETED = Symbol('deleted');
+const als = new AsyncLocalStorage<State>();
+
+// Key implementation:
+class KeyImpl<T> {
+    private readonly sym = Symbol(name);
+
+    get(): T | undefined {
+        const state = als.getStore();
+        if (!state) return undefined;
+        const val = state[this.sym];
+        return val === DELETED ? undefined : val;
+    }
+
+    set(value: T) {
+        const state = als.getStore();
+        if (!state) throw new Error('Not in AsyncContext scope');
+        state[this.sym] = value;
+    }
+
+    delete() {
+        const state = als.getStore();
+        if (!state) throw new Error('Not in AsyncContext scope');
+        state[this.sym] = DELETED;  // sentinel — blocks prototype lookup
+    }
+
+    getOrInsertComputed(fn: () => T): T {
+        let val = this.get();
+        if (val === undefined) {
+            val = fn();
+            this.set(val);
+        }
+        return val;
+    }
+}
+
+// AsyncContext implementation:
+enter() {
+    if (als.getStore()) return;  // already in scope
+    als.enterWith(Object.create(null));
+}
+
+run<T>(fn) {
+    if (als.getStore()) return fn();  // reuse current scope
+    return als.run(Object.create(null), fn);
+}
+
+fork<T>(fn) {
+    const current = als.getStore() ?? Object.create(null);
+    return als.run(Object.create(current), fn);  // prototype-chained child
+}
+```
+
+### Usage
+
+```ts
+const kRequestId = AsyncContext.key<string>('requestId');
+const kUser = AsyncContext.key<User>('user');
+
+// Web framework per-request:
+await AsyncContext.run(async () => {
+    kRequestId.set(crypto.randomUUID());
+    // ... handle request
+});
+
+// Fork a child scope (e.g., per-subrequest):
+await AsyncContext.fork(async () => {
+    kUser.set(overrideUser);  // only visible in this fork
+    // parent's kRequestId still visible via prototype chain
+});
+
+// Delete a key in child scope:
+await AsyncContext.fork(async () => {
+    kUser.delete();           // blocks parent's value
+    kUser.get();              // undefined
+});
+```
+
+## 9. Full example
 
 ```ts
 import {
