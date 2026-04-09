@@ -213,7 +213,7 @@ class BasicAuthConfig {
 
 @Component()
 @Priority(Interceptor.GUARD)
-@Conditional((config = injectConfig(BasicAuthConfig, true)) => config !== undefined)
+@ConditionalOnConfiguration(BasicAuthConfig)
 class BasicAuthInterceptor extends Interceptor {
     constructor(private readonly config = injectConfig(BasicAuthConfig)) { super(); }
 
@@ -242,7 +242,7 @@ class CompressionConfig {
 
 @Component()
 @Priority(Interceptor.RESPONSE + 1)
-@Conditional((config = injectConfig(CompressionConfig, true)) => config !== undefined)
+@ConditionalOnConfiguration(CompressionConfig)
 class CompressionInterceptor extends Interceptor {
     private compress!: ReturnType<typeof compression>;
 
@@ -291,7 +291,7 @@ class CorsConfig {
 
 @Component()
 @Priority(Interceptor.CORS)
-@Conditional((config = injectConfig(CorsConfig, true)) => config !== undefined)
+@ConditionalOnConfiguration(CorsConfig)
 class CorsInterceptor extends Interceptor {
     constructor(private readonly config = injectConfig(CorsConfig)) { super(); }
 
@@ -372,7 +372,7 @@ class MemoryRateLimitStore extends RateLimitStore {
 
 @Component()
 @Priority(Interceptor.GUARD - 2)
-@Conditional((config = injectConfig(RateLimitConfig, true)) => config !== undefined)
+@ConditionalOnConfiguration(RateLimitConfig)
 class RateLimitInterceptor extends Interceptor {
     constructor(
         private readonly config = injectConfig(RateLimitConfig),
@@ -422,7 +422,7 @@ class CsrfConfig {
 
 @Component()
 @Priority(Interceptor.GUARD - 1)
-@Conditional((config = injectConfig(CsrfConfig, true)) => config !== undefined)
+@ConditionalOnConfiguration(CsrfConfig)
 class CsrfInterceptor extends Interceptor {
     constructor(private readonly config = injectConfig(CsrfConfig)) { super(); }
 
@@ -508,7 +508,7 @@ class StaticConfig {
 
 @Component()
 @Priority(Interceptor.ROUTE - 1)
-@Conditional((config = injectConfig(StaticConfig, true)) => config !== undefined)
+@ConditionalOnConfiguration(StaticConfig)
 class StaticFileInterceptor extends Interceptor {
     constructor(private readonly config = injectConfig(StaticConfig)) { super(); }
 

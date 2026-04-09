@@ -63,6 +63,42 @@ declare function Conditional(predicate: () => Awaitable<boolean>): ClassDecorato
 
 `@Conditional` is a separate decorator from `@Component`. Components with `@OverrideConfiguration` must NOT have `@Conditional`. Resolver subclasses must NOT have `@Conditional`.
 
+### @ConditionalOnConfiguration
+
+Shorthand for the common pattern of enabling a component only when a config section exists or a config field is truthy.
+
+```ts
+/**
+ * @ConditionalOnConfiguration(ConfigClass)
+ *   → enabled if config section exists (i.e., injectConfig(ConfigClass, true) !== undefined)
+ *
+ * @ConditionalOnConfiguration(ConfigClass, 'enabled')
+ *   → enabled if config section exists AND !!config[field]
+ */
+declare function ConditionalOnConfiguration<T>(
+    config: AnyConstructor<T>,
+    field?: keyof T,
+): ClassDecorator<ConditionalMetadata>;
+```
+
+Examples:
+
+```ts
+// Enabled when kavri.web.cors config section exists
+@ConditionalOnConfiguration(CorsConfig)
+class CorsInterceptor extends Interceptor { ... }
+
+// Enabled when kavri.web.compression exists AND config.enabled is truthy
+@ConditionalOnConfiguration(CompressionConfig, 'enabled')
+class CompressionInterceptor extends Interceptor { ... }
+```
+
+Equivalent to:
+```ts
+@Conditional((config = injectConfig(CorsConfig, true)) => config !== undefined)
+@Conditional((config = injectConfig(CompressionConfig, true)) => config !== undefined && !!config.enabled)
+```
+
 ## 4. Lifecycle decorators
 
 ```ts

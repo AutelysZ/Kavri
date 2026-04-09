@@ -34,7 +34,7 @@ Serves two endpoints under the configured path prefix:
 ```ts
 @Component()
 @Priority(Interceptor.ROUTE - 2)
-@Conditional((config = injectConfig(SwaggerConfig, true)) => config !== undefined && config.enabled)
+@ConditionalOnConfiguration(SwaggerConfig, 'enabled')
 class SwaggerInterceptor extends Interceptor {
     private openApiDoc!: object;
     private uiHtml!: string;
@@ -159,4 +159,4 @@ kavri:
 
 Or via environment variable: `KAVRI_SWAGGER_ENABLED=false`.
 
-The `@Conditional` on `SwaggerInterceptor` ensures the interceptor is never instantiated when disabled — zero overhead.
+The `@ConditionalOnConfiguration(SwaggerConfig, 'enabled')` ensures the interceptor is never instantiated when disabled — zero overhead.
