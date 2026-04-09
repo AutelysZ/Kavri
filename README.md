@@ -1,132 +1,34 @@
 # Kavri
 
-**TypeScript IoC that doesn't need reflect-metadata.**
-
-Kavri uses default parameters as the injection mechanism. No reflection, no parameter decorators, no `emitDecoratorMetadata`. Works with both TC39 and TypeScript decorators.
-
-## What's different
-
-**Default parameters are the DI wire.** Every other TypeScript DI framework needs reflect-metadata or explicit parameter decorators. Kavri doesn't — constructor defaults are the injection points, and the container evaluates them in a controlled context.
-
-**Async is transparent.** Async providers (`@OnConstruct`, async token factories) work via a Suspense-style throw-and-retry. `inject()` is always synchronous. No `injectAsync`, no `Promise<T>` wrappers, no two-phase init.
-
-**All decorators are metadata.** Every decorator — built-in or custom — carries typed metadata readable via `Metadata.of()`. No reflect-metadata, no `Map<string, any>` side channels.
-
-**Config is just injection.** `@Configuration` class decorator composes `@Schema` — fields use schema decorators. Inject with `injectConfig()`. No separate parser or token creation step.
-
-## Example
+TypeScript IoC framework. No reflect-metadata — uses default parameters as injection points.
 
 ```ts
-import {
-  Container,
-  Component,
-  Conditional,
-  Provide,
-  Touch,
-  Use,
-  inject,
-  token,
-} from '@kavri/container';
-import {
-  Configuration,
-  injectConfig,
-  OverrideConfiguration,
-  ConfigFileOptions,
-} from '@kavri/config';
-import { IsString, IsInteger, IsBoolean } from '@kavri/schema';
+import { Component, Container, inject } from '@kavri/container';
 
-// config
-@Configuration('database')
-class DatabaseConfig {
-  @IsString({ in: ['psql', 'mysql'] }) driver!: string;
-  @IsString() url!: string;
-}
-
-@Configuration('telemetry')
-class TelemetryConfig {
-  @IsBoolean({ default: false }) enabled!: boolean;
-}
-
-// components
-abstract class Driver {
-  abstract query(sql: string): Promise<any>;
-}
-
-@Component('psql')
-class PsqlDriver extends Driver {
-  async query(sql: string) {
-    return `psql:${sql}`;
+@Component()
+class GreetService {
+  greet(name: string) {
+    return `Hello, ${name}!`;
   }
 }
 
-const SelectedDriver = token<Driver>(
-  (cfg = injectConfig(DatabaseConfig), d = inject(Driver, cfg.driver)) => d,
-);
-
-// conditional component
 @Component()
-@Conditional((config = injectConfig(TelemetryConfig, true)) => config?.enabled ?? false)
-class TelemetryService {
-  constructor(private readonly config = injectConfig(TelemetryConfig)) {}
-  send(metric: string, value: number): void {}
-}
-
-// external class via @Provide
-declare class Redis {
-  connect(url: string): Promise<void>;
-  disconnect(): Promise<void>;
-}
-
-@Component()
-@Provide(
-  Redis,
-  async () => {
-    const r = new Redis();
-    await r.connect('redis://localhost');
-    return r;
-  },
-  { onDestroy: 'disconnect' },
-)
-@OverrideConfiguration(ConfigFileOptions, () => ({ configFile: './config/app' }))
-class AppModule {}
-
-// application
-@Component()
-@Touch(PsqlDriver)
-@Use(AppModule)
-class App {
-  constructor(
-    private readonly driver = inject(SelectedDriver),
-    private readonly redis = inject(Redis),
-    private readonly telemetry = inject(TelemetryService, true),
-  ) {}
-
-  async run() {
-    console.log(await this.driver.query('select 1'));
+class Application {
+  constructor(private readonly greet = inject(GreetService)) {}
+  run() {
+    console.log(this.greet.greet('world'));
   }
 }
 
 const container = new Container();
-const app = await container.resolve(App);
-await app.run();
+const app = await container.resolve(Application);
+app.run();
 await container.destroy();
 ```
 
 ## Documentation
 
-- [Container](./docs/01-container-design.md) — components, providers, injection, AOP, container
-- [Modules](./docs/02-modularization-design.md) — @Touch, @Use, @Provide, @OverrideConfiguration
-- [Configuration](./docs/03-configuration-design.md) — @Configuration, injectConfig, multi-source config
-- [Events](./docs/04-event-design.md) — @EventType, @OnEvent, EventBus
-- [Metadata](./docs/05-metadata-design.md) — Metadata.of, createClassDecorator, createFieldDecorator
-- [Web](./docs/06-web-design.md) — Controller, interceptors, WebApplication
-- [ESLint Plugin](./docs/08-eslint-plugin-design.md) — inject-point enforcement, @Conditional rules
-- [Schema](./docs/09-schema-design.md) — @Schema, field decorators, defineRoute, parse, toJsonSchema
-- [API Reference](./docs/draft.ts) — complete type declarations with examples
-
-## Status
-
-Design phase. API surface is defined. Implementation is next.
+See [`docs/`](./docs/00-overview.md) for full design documentation.
 
 ## License
 
