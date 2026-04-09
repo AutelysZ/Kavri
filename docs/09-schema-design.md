@@ -491,15 +491,25 @@ declare function head<TReq, TRes>(request: RequestInput<TReq>, response: Respons
 ### defineRoute
 
 ```ts
+interface RouteOptions {
+    /** Base path for all endpoints. */
+    base: string;
+    /** Route title (for documentation). */
+    title?: string;
+    /** Route description (for documentation). */
+    description?: string;
+}
+
 declare function defineRoute<T extends Record<string, Endpoint>>(
     name: string,
-    basePath: string,
+    baseOrOptions: string | RouteOptions,
     endpoints: T,
 ): RouteDefinition<T>;
 
 interface RouteDefinition<T extends Record<string, Endpoint>> {
     readonly name: string;
-    readonly basePath: string;
+    readonly base: string;
+    readonly options: RouteOptions;
     readonly endpoints: T;
 }
 ```
@@ -573,6 +583,73 @@ const DownloadRoute = defineRoute('DownloadRoute', '/download', {
 // client.putFile({ id: 1, body: stream })                     → Promise<void>
 // client.downloadFile({ id: 1 })                              → Promise<ReadableStream>
 // client.healthCheck()                                        → Promise<void>
+```
+
+### defineWebSocket
+
+WebSocket definitions also live in `@kavri/schema`. See [13-websocket-design.md](./13-websocket-design.md) for full design.
+
+```ts
+/** Message type: a @Schema class, or 'binary' for raw Uint8Array. */
+type MessageType = AnyConstructor<any> | 'binary';
+
+interface WebSocketOptions {
+    /** WebSocket endpoint path. */
+    path: string;
+    /** Request params schema (path + query merged). Validated on upgrade. */
+    request?: AnyConstructor<any>;
+    /** Title (for documentation). */
+    title?: string;
+    /** Description (for documentation). */
+    description?: string;
+    /** Codec name. Default: 'kavri'. */
+    codec?: string;
+}
+
+declare function defineWebSocket<
+    TIn extends Record<string, MessageType>,
+    TOut extends Record<string, MessageType>,
+>(
+    name: string,
+    pathOrOptions: string | WebSocketOptions,
+    messages: { inbound: TIn; outbound: TOut },
+): WebSocketDefinition<TIn, TOut>;
+
+interface WebSocketDefinition<
+    TIn extends Record<string, MessageType> = any,
+    TOut extends Record<string, MessageType> = any,
+> {
+    readonly name: string;
+    readonly path: string;
+    readonly options: WebSocketOptions;
+    readonly inbound: TIn;
+    readonly outbound: TOut;
+}
+```
+
+Example:
+
+```ts
+@Schema()
+class ChatParams {
+    @IsString() roomId!: string;
+    @IsString({ optional: true }) token?: string;
+}
+
+@Schema()
+class SendMessage { @IsString({ minLength: 1 }) text!: string; }
+
+@Schema()
+class ChatMessage {
+    @IsString() from!: string;
+    @IsString() text!: string;
+    @IsInteger() timestamp!: number;
+}
+
+const ChatDef = defineWebSocket('ChatDef', { path: '/chat/:roomId', request: ChatParams }, {
+    inbound: { send: SendMessage, upload: 'binary' },
+    outbound: { message: ChatMessage, file: 'binary' },
+});
 ```
 
 ## 8. Required vs Optional vs Nullable

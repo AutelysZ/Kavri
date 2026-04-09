@@ -6,7 +6,7 @@
 - **Parsed input only.** Handlers receive validated, typed data — not raw streams. Body parsing happens before handlers and interceptors see the request (gRPC-style).
 - **Single interception mechanism.** Interceptors replace middleware, guards, pipes, and filters. One abstraction, one chain.
 - **Controllers are singletons.** Per-request data lives in `AsyncContext` — a typed key-value store backed by `AsyncLocalStorage` (from `@kavri/basic`).
-- **Route-first.** All endpoints are defined via `defineRoute()` in `@kavri/schema`. Controllers implement routes via `@Controller()` + `createController(route)`.
+- **Route-first.** All endpoints are defined via `defineRoute()` in `@kavri/schema`. Controllers implement routes via `@Controller(route)` + `implements ControllerType<typeof route>`.
 
 ## 2. Core HTTP Types
 
@@ -113,35 +113,48 @@ const user = CurrentUser.getOrThrow();
 
 Controllers are the sole mechanism for implementing HTTP endpoints. Every controller implements a route definition from `@kavri/schema`.
 
-### createController + @Controller
+### @Controller(route) + ControllerType
 
 ```ts
-import { createController, Controller } from '@kavri/web';
+/**
+ * ControllerType maps a RouteDefinition's endpoints to handler method signatures.
+ * For each endpoint key K:
+ *   request = 'void' → K(): Awaitable<ResponseType>
+ *   request = class  → K(input: InstanceType<request>): Awaitable<ResponseType>
+ */
+type ControllerType<T extends RouteDefinition<any>> = {
+    [K in keyof T['endpoints']]: /* typed handler method */
+};
+```
+
+```ts
+import { Controller, ControllerType } from '@kavri/web';
 import { UserRoute } from './user-route';
 
-@Controller()
-class UserController extends createController(UserRoute) {
-    constructor(private readonly repo = inject(UserRepository)) { super(); }
+@Controller(UserRoute)
+class UserController implements ControllerType<typeof UserRoute> {
+    constructor(private readonly repo = inject(UserRepository)) {}
 
-    override async getUser(input: GetUserParams): Promise<UserResponse> {
+    async getUser(input: GetUserParams): Promise<UserResponse> {
         return this.repo.findById(input.id);
     }
 
-    override async createUser(input: CreateUserBody): Promise<UserResponse> {
+    async createUser(input: CreateUserBody): Promise<UserResponse> {
         const userId = CurrentUser.getOrThrow().id;
         return this.repo.create({ ...input, createdBy: userId });
     }
 
-    override async deleteUser(input: GetUserParams): Promise<void> {
+    async deleteUser(input: GetUserParams): Promise<void> {
         await this.repo.delete(input.id);
     }
 }
 ```
 
-- `createController(route)` returns an abstract class with abstract methods matching the route definition. Types are inferred from the route's request/response schemas.
-- `@Controller()` composes `@Component()` and registers all routing metadata from the route definition.
+- `@Controller(route)` composes `@Component()` and registers all routing metadata from the route definition.
+- `implements ControllerType<typeof route>` enforces that all endpoint methods are implemented with correct types. No `extends`/`override`/`super()` needed.
 - Handlers receive parsed input. Return typed response or a special response object (`Redirect`, `FileResponse`, etc.).
 - Access per-request data via `Key.get()` / `Key.getOrThrow()`.
+- **Controllers should never be injected by application code.** They are discovered by the framework via `Metadata.entries(Controller)`.
 
 ## 5. Interceptors
 
@@ -529,7 +542,7 @@ See [11-transaction-design.md](./11-transaction-design.md). `@Transactional()`, 
 
 ## 10. WebSocket
 
-See [13-websocket-design.md](./13-websocket-design.md). `defineWebSocket()`, `createWebSocketHandler()`, `@WebSocketHandler()`, `WebSocketConnection`.
+See [13-websocket-design.md](./13-websocket-design.md). `defineWebSocket()`, `@WebSocketHandler(def)`, `WebSocketHandlerBase`, `HandlerType`, `ConnectionHub`, `WebSocketCodec`.
 
 ## 11. Configuration
 
@@ -1108,7 +1121,7 @@ import {
     Schema, IsString, IsInteger, IsEmail, defineRoute, get, post, del,
 } from '@kavri/schema';
 import {
-    Controller, createController,
+    Controller, ControllerType,
     Interceptor, HttpException, WebApplication,
 } from '@kavri/web';
 import { Component, Touch, inject } from '@kavri/container';
@@ -1141,21 +1154,21 @@ const UserRoute = defineRoute('UserRoute', '/user', {
 
 // ---- Controller ----
 
-@Controller()
-class UserController extends createController(UserRoute) {
-    constructor(private readonly repo = inject(UserRepository)) { super(); }
+@Controller(UserRoute)
+class UserController implements ControllerType<typeof UserRoute> {
+    constructor(private readonly repo = inject(UserRepository)) {}
 
-    override async getUser(input: GetUserParams) {
+    async getUser(input: GetUserParams) {
         const user = await this.repo.findById(input.id);
         if (!user) throw new HttpException(404, 'User not found');
         return user;
     }
 
-    override async createUser(input: CreateUserBody) {
+    async createUser(input: CreateUserBody) {
         return this.repo.create(input);
     }
 
-    override async deleteUser(input: GetUserParams) {
+    async deleteUser(input: GetUserParams) {
         await this.repo.delete(input.id);
     }
 }
