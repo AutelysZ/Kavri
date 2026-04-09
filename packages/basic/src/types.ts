@@ -13,7 +13,7 @@ export type AnyConstructor<T> = abstract new (...args: any[]) => T;
  * The `metadata` value is the data passed to the `create*Decorator` factory,
  * accessible without applying the decorator.
  */
-export type DecoratorStatic<T> = { readonly metadata: T | undefined };
+export type DecoratorStatic<T> = { readonly metadata: T };
 
 /**
  * A class decorator that works with both TC39 and legacy TypeScript decorator protocols.

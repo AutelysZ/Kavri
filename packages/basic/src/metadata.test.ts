@@ -1,11 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import {
-  createClassDecorator,
-  createMethodDecorator,
-  createFieldDecorator,
-  Metadata,
-} from './metadata.js';
+import { MetadataStore } from './metadata.js';
 import type { ClassDecorator, MethodDecorator, FieldDecorator } from './types.js';
+
+// Use a fresh store per test file to avoid cross-test pollution
+const Metadata = new MetadataStore();
+
+// -- Bound convenience aliases (same pattern as index.ts) --
+const createClassDecorator = Metadata.createClassDecorator.bind(Metadata);
+const createMethodDecorator = Metadata.createMethodDecorator.bind(Metadata);
+const createFieldDecorator = Metadata.createFieldDecorator.bind(Metadata);
 
 // -- Test decorator factories --
 
@@ -45,7 +48,6 @@ describe('createClassDecorator', () => {
     @Tag('a')
     @Tag('b')
     class Foo {}
-    // TC39: decorators applied bottom-up, so 'b' is stored first
     expect(Metadata.of(Tag, Foo)).toEqual([{ tag: 'b' }, { tag: 'a' }]);
   });
 
@@ -179,7 +181,6 @@ describe('Metadata.entries()', () => {
     function UniqueTag(v: string): ClassDecorator<{ v: string }> {
       return createClassDecorator(UniqueTag, { v });
     }
-
     @UniqueTag('a')
     class A {}
     @UniqueTag('b')
@@ -195,7 +196,6 @@ describe('Metadata.entries()', () => {
     function UniqueMark(v: string): MethodDecorator<{ v: string }> {
       return createMethodDecorator(UniqueMark, { v });
     }
-
     @Tag('cls')
     class A {
       @UniqueMark('x')
@@ -226,7 +226,6 @@ describe('Metadata.lookup()', () => {
     function Level(n: number): ClassDecorator<{ n: number }> {
       return createClassDecorator(Level, { n });
     }
-
     @Level(1)
     class Base {}
     @Level(2)
@@ -243,13 +242,11 @@ describe('Metadata.lookup()', () => {
     function C(): ClassDecorator<object> {
       return createClassDecorator(C, {});
     }
-
     @C()
     class Base {
       @Mark('base')
       run() {}
     }
-
     @C()
     class Child extends Base {
       @Mark('child')
@@ -259,7 +256,7 @@ describe('Metadata.lookup()', () => {
     expect(Metadata.lookup(Mark, Child, 'run')).toEqual([{ v: 'child' }, { v: 'base' }]);
   });
 
-  it('returns empty for undecorated class in lookup', () => {
+  it('returns empty for undecorated class', () => {
     function L(): ClassDecorator<object> {
       return createClassDecorator(L, {});
     }
@@ -268,27 +265,7 @@ describe('Metadata.lookup()', () => {
   });
 });
 
-describe('TC39 lazy flush', () => {
-  it('flushes method metadata via class decorator', () => {
-    @Tag('flush')
-    class Foo {
-      @Marker('lazy')
-      baz() {}
-    }
-    expect(Metadata.of(Marker, Foo, 'baz')).toEqual([{ label: 'lazy' }]);
-  });
-
-  it('flushes field metadata via class decorator', () => {
-    @Tag('flush')
-    class Foo {
-      @FieldType('int')
-      count!: number;
-    }
-    expect(Metadata.of(FieldType, Foo, 'count')).toEqual([{ type: 'int' }]);
-  });
-});
-
-describe('extra method decorators', () => {
+describe('extra method/field decorators', () => {
   it('composes extra method decorators', () => {
     function Log(msg: string): MethodDecorator<{ msg: string }> {
       return createMethodDecorator(Log, { msg });
@@ -296,19 +273,15 @@ describe('extra method decorators', () => {
     function Traced(msg: string): MethodDecorator<{ msg: string }> {
       return createMethodDecorator(Traced, { msg }, [Log(`traced:${msg}`)]);
     }
-
     @Tag('cls')
     class Foo {
       @Traced('hello')
       run() {}
     }
-
     expect(Metadata.of(Traced, Foo, 'run')).toEqual([{ msg: 'hello' }]);
     expect(Metadata.of(Log, Foo, 'run')).toEqual([{ msg: 'traced:hello' }]);
   });
-});
 
-describe('extra field decorators', () => {
   it('composes extra field decorators', () => {
     function Required(): FieldDecorator<{ required: true }> {
       return createFieldDecorator(Required, { required: true as const });
@@ -316,14 +289,29 @@ describe('extra field decorators', () => {
     function TypedField(type: string): FieldDecorator<FieldMeta> {
       return createFieldDecorator(TypedField, { type }, [Required()]);
     }
-
     @Tag('cls')
     class Foo {
       @TypedField('string')
       name!: string;
     }
-
     expect(Metadata.of(TypedField, Foo, 'name')).toEqual([{ type: 'string' }]);
     expect(Metadata.of(Required, Foo, 'name')).toEqual([{ required: true }]);
+  });
+});
+
+describe('MetadataStore isolation', () => {
+  it('separate stores are independent', () => {
+    const store1 = new MetadataStore();
+    const store2 = new MetadataStore();
+
+    function Tag1(v: string): ClassDecorator<{ v: string }> {
+      return store1.createClassDecorator(Tag1, { v });
+    }
+
+    @Tag1('a')
+    class Foo {}
+
+    expect(store1.of(Tag1, Foo)).toEqual([{ v: 'a' }]);
+    expect(store2.of(Tag1, Foo)).toEqual([]);
   });
 });

@@ -8,7 +8,7 @@ All decorators in Kavri are built on a unified metadata system. Every decorator 
 
 ```ts
 // Decorators carry typed metadata via a static metadata field
-type DecoratorStatic<T> = { readonly metadata: T | undefined };
+type DecoratorStatic<T> = { readonly metadata: T };
 
 type ClassDecorator<T> =
   globalThis.ClassDecorator
@@ -198,134 +198,89 @@ Async-scoped key-value store backed by `AsyncLocalStorage`. Used by `@kavri/web`
 
 ### Key
 
-Each Key has a unique `symbol` internally. State is stored as `Record<symbol, any>`.
+A thin typed wrapper around a unique symbol. Keys carry no methods — all operations go through `AsyncContext`.
 
 ```ts
 declare class Key<T> {
-    readonly name?: string;
-
-    /** Check if value is set in current scope. */
-    has(): boolean;
-
-    /** Get value from current scope. Returns undefined if not set or not in scope. */
-    get(): T | undefined;
-
-    /** Get value or throw if not set. */
-    getOrThrow(): T;
-
-    /** Get value, or insert one computed by fn if not present. */
-    getOrInsertComputed(fn: () => T): T;
-
-    /** Set value in current scope. */
-    set(value: T): void;
-
-    /**
-     * Delete value from current scope.
-     * Uses a sentinel so prototype lookup doesn't find parent scope's value.
-     */
-    delete(): void;
+    readonly symbol: symbol;
+    constructor(name?: string);
 }
 ```
 
 ### AsyncContext
 
+Instance of `AsyncContextStore`. The internal `AsyncLocalStorage` is created lazily on first `enter()`/`run()`/`fork()` call.
+
 ```ts
-declare const AsyncContext: {
+declare class AsyncContextStore {
     /** Create a typed key. Each key has a unique symbol. */
     key<T>(name?: string): Key<T>;
 
     /** Check if currently inside a scope. */
     isActive(): boolean;
 
-    /**
-     * Enter a root scope. If already in a scope, does nothing.
-     * Uses AsyncLocalStorage.enterWith(Object.create(null)).
-     */
+    /** Enter a root scope imperatively. No-op if already in a scope. */
     enter(): void;
 
-    /**
-     * Run fn inside a scope.
-     * If already active, runs fn directly in the current scope.
-     * If not active, creates a new root scope and runs fn.
-     */
+    /** Run fn inside a scope. Reuses current scope if active. */
     run<T>(fn: () => Awaitable<T>): Promise<T>;
 
     /**
-     * Fork a child scope and run fn inside it.
-     * Always creates a new scope that inherits from the current via
-     * Object.create(currentState). Modifications in the child don't
-     * leak to the parent. Parent values are visible in the child
-     * unless overwritten or deleted.
+     * Fork a child scope. Always creates a new prototype-chained scope.
+     * Child inherits parent values. Writes in child don't leak to parent.
+     * delete() only removes from current scope's own properties —
+     * parent values remain visible via prototype chain.
      */
     fork<T>(fn: () => Awaitable<T>): Promise<T>;
-};
+
+    /** Check if key has a value in current scope (own or inherited). */
+    has<T>(key: Key<T>): boolean;
+
+    /** Get value. Returns undefined if not in scope or not set. */
+    get<T>(key: Key<T>): T | undefined;
+
+    /** Get value or throw. */
+    getOrThrow<T>(key: Key<T>): T;
+
+    /** Get value, or compute and store if absent. */
+    getOrInsertComputed<T>(key: Key<T>, fn: () => T): T;
+
+    /** Set value in current scope. */
+    set<T>(key: Key<T>, value: T): void;
+
+    /** Delete key from current scope's own properties only. */
+    delete<T>(key: Key<T>): void;
+}
 ```
 
-### Internals
+State is `Record<symbol, any>`. `has()` uses `symbol in state` so `set(key, undefined)` is distinguishable from absence. `delete()` uses `delete state[key.symbol]` on the current scope only — does not affect parent scopes.
+
+### Exported instance
 
 ```ts
-// State is a prototype-chained record keyed by symbols.
-// Each Key<T> has a unique symbol assigned at creation.
-type State = Record<symbol, any>;
+export const AsyncContext: AsyncContextStore;
+```
 
-const DELETED = Symbol('deleted');
-const als = new AsyncLocalStorage<State>();
+### Usage
 
-// Key implementation:
-class KeyImpl<T> {
-    private readonly sym = Symbol(name);
+```ts
+const kRequestId = AsyncContext.key<string>('requestId');
+const kUser = AsyncContext.key<User>('user');
 
-    has(): boolean {
-        const state = als.getStore();
-        if (!state) return false;
-        const val = state[this.sym];
-        return val !== undefined && val !== DELETED;
-    }
+await AsyncContext.run(async () => {
+    AsyncContext.set(kRequestId, crypto.randomUUID());
+    // ... handle request
+});
 
-    get(): T | undefined {
-        const state = als.getStore();
-        if (!state) return undefined;
-        const val = state[this.sym];
-        return val === DELETED ? undefined : val;
-    }
+await AsyncContext.fork(async () => {
+    AsyncContext.set(kUser, overrideUser);  // only visible in this fork
+    // parent's kRequestId still visible via prototype chain
+});
 
-    set(value: T) {
-        const state = als.getStore();
-        if (!state) throw new Error('Not in AsyncContext scope');
-        state[this.sym] = value;
-    }
-
-    delete() {
-        const state = als.getStore();
-        if (!state) throw new Error('Not in AsyncContext scope');
-        state[this.sym] = DELETED;  // sentinel — blocks prototype lookup
-    }
-
-    getOrInsertComputed(fn: () => T): T {
-        let val = this.get();
-        if (val === undefined) {
-            val = fn();
-            this.set(val);
-        }
-        return val;
-    }
-}
-
-// AsyncContext implementation:
-enter() {
-    if (als.getStore()) return;  // already in scope
-    als.enterWith(Object.create(null));
-}
-
-run<T>(fn) {
-    if (als.getStore()) return fn();  // reuse current scope
-    return als.run(Object.create(null), fn);
-}
-
-fork<T>(fn) {
-    const current = als.getStore() ?? Object.create(null);
-    return als.run(Object.create(current), fn);  // prototype-chained child
-}
+await AsyncContext.fork(async () => {
+    AsyncContext.delete(kUser);             // removes own property
+    AsyncContext.get(kUser);                // parent's value still visible
+});
 ```
 
 ### Usage

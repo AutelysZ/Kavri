@@ -1,215 +1,245 @@
 import { describe, it, expect } from 'vitest';
-import { Key, AsyncContext } from './async-context.js';
+import { Key, AsyncContextStore } from './async-context.js';
 
 describe('Key', () => {
+  it('has a unique symbol', () => {
+    const k1 = new Key<string>('a');
+    const k2 = new Key<string>('a');
+    expect(k1.symbol).not.toBe(k2.symbol);
+    expect(k1.symbol.description).toBe('a');
+  });
+
+  it('symbol description is undefined when unnamed', () => {
+    const k = new Key<string>();
+    expect(k.symbol.description).toBeUndefined();
+  });
+});
+
+describe('AsyncContextStore', () => {
+  const ctx = new AsyncContextStore();
+
+  it('isActive reflects scope state', async () => {
+    expect(ctx.isActive()).toBe(false);
+    await ctx.run(() => {
+      expect(ctx.isActive()).toBe(true);
+    });
+    expect(ctx.isActive()).toBe(false);
+  });
+
   it('get/set/has within scope', async () => {
-    const k = AsyncContext.key<string>('test');
-    await AsyncContext.run(() => {
-      expect(k.has()).toBe(false);
-      expect(k.get()).toBeUndefined();
-      k.set('hello');
-      expect(k.has()).toBe(true);
-      expect(k.get()).toBe('hello');
+    const k = ctx.key<string>('test');
+    await ctx.run(() => {
+      expect(ctx.has(k)).toBe(false);
+      expect(ctx.get(k)).toBeUndefined();
+      ctx.set(k, 'hello');
+      expect(ctx.has(k)).toBe(true);
+      expect(ctx.get(k)).toBe('hello');
+    });
+  });
+
+  it('set(key, undefined) is distinguishable from absence', async () => {
+    const k = ctx.key<string | undefined>('undef');
+    await ctx.run(() => {
+      expect(ctx.has(k)).toBe(false);
+      ctx.set(k, undefined);
+      expect(ctx.has(k)).toBe(true);
+      expect(ctx.get(k)).toBeUndefined();
+    });
+  });
+
+  it('getOrThrow returns value when set', async () => {
+    const k = ctx.key<number>('v');
+    await ctx.run(() => {
+      ctx.set(k, 42);
+      expect(ctx.getOrThrow(k)).toBe(42);
     });
   });
 
   it('getOrThrow throws when not in scope', () => {
-    const k = new Key<string>('x');
-    expect(() => k.getOrThrow()).toThrow('"x" is not set');
+    const k = ctx.key<string>('x');
+    expect(() => ctx.getOrThrow(k)).toThrow('"x" is not set');
   });
 
   it('getOrThrow throws for unnamed key', () => {
-    const k = new Key<string>();
-    expect(() => k.getOrThrow()).toThrow('"(unnamed)" is not set');
-  });
-
-  it('getOrThrow returns value when set', async () => {
-    const k = AsyncContext.key<number>('v');
-    await AsyncContext.run(() => {
-      k.set(42);
-      expect(k.getOrThrow()).toBe(42);
-    });
+    const k = ctx.key<string>();
+    expect(() => ctx.getOrThrow(k)).toThrow('"(unnamed)" is not set');
   });
 
   it('getOrInsertComputed inserts on miss', async () => {
-    const k = AsyncContext.key<number>('lazy');
-    await AsyncContext.run(() => {
-      const v = k.getOrInsertComputed(() => 42);
-      expect(v).toBe(42);
-      expect(k.get()).toBe(42);
+    const k = ctx.key<number>('lazy');
+    await ctx.run(() => {
+      expect(ctx.getOrInsertComputed(k, () => 42)).toBe(42);
+      expect(ctx.get(k)).toBe(42);
       // Second call returns cached
-      const v2 = k.getOrInsertComputed(() => 99);
-      expect(v2).toBe(42);
+      expect(ctx.getOrInsertComputed(k, () => 99)).toBe(42);
     });
   });
 
-  it('delete blocks value', async () => {
-    const k = AsyncContext.key<string>('del');
-    await AsyncContext.run(() => {
-      k.set('value');
-      expect(k.has()).toBe(true);
-      k.delete();
-      expect(k.has()).toBe(false);
-      expect(k.get()).toBeUndefined();
+  it('delete removes own property only', async () => {
+    const k = ctx.key<string>('del');
+    await ctx.run(() => {
+      ctx.set(k, 'value');
+      expect(ctx.has(k)).toBe(true);
+      ctx.delete(k);
+      // Root scope has no parent, so key is gone
+      expect(ctx.has(k)).toBe(false);
     });
   });
 
   it('throws on set outside scope', () => {
-    const k = new Key<string>('no-scope');
-    expect(() => k.set('x')).toThrow('Not in AsyncContext scope');
+    const freshCtx = new AsyncContextStore();
+    const k = freshCtx.key<string>('no-scope');
+    expect(() => freshCtx.set(k, 'x')).toThrow('Not in AsyncContext scope');
   });
 
   it('throws on delete outside scope', () => {
-    const k = new Key<string>('no-scope');
-    expect(() => k.delete()).toThrow('Not in AsyncContext scope');
+    const freshCtx = new AsyncContextStore();
+    const k = freshCtx.key<string>('no-scope');
+    expect(() => freshCtx.delete(k)).toThrow('Not in AsyncContext scope');
   });
 
   it('get returns undefined outside scope', () => {
-    const k = new Key<string>('outside');
-    expect(k.get()).toBeUndefined();
+    const freshCtx = new AsyncContextStore();
+    const k = freshCtx.key<string>('outside');
+    expect(freshCtx.get(k)).toBeUndefined();
   });
 
   it('has returns false outside scope', () => {
-    const k = new Key<string>('outside');
-    expect(k.has()).toBe(false);
-  });
-
-  it('name property is set', () => {
-    const k = new Key<string>('mykey');
-    expect(k.name).toBe('mykey');
-  });
-
-  it('name property is undefined when not provided', () => {
-    const k = new Key<string>();
-    expect(k.name).toBeUndefined();
-  });
-});
-
-describe('AsyncContext', () => {
-  it('isActive reflects scope state', async () => {
-    expect(AsyncContext.isActive()).toBe(false);
-    await AsyncContext.run(() => {
-      expect(AsyncContext.isActive()).toBe(true);
-    });
-    expect(AsyncContext.isActive()).toBe(false);
+    const freshCtx = new AsyncContextStore();
+    const k = freshCtx.key<string>('outside');
+    expect(freshCtx.has(k)).toBe(false);
   });
 
   it('run reuses existing scope', async () => {
-    const k = AsyncContext.key<string>('reuse');
-    await AsyncContext.run(async () => {
-      k.set('outer');
-      await AsyncContext.run(() => {
-        // Same scope — sees outer value
-        expect(k.get()).toBe('outer');
-        k.set('inner');
+    const k = ctx.key<string>('reuse');
+    await ctx.run(async () => {
+      ctx.set(k, 'outer');
+      await ctx.run(() => {
+        expect(ctx.get(k)).toBe('outer');
+        ctx.set(k, 'inner');
       });
-      // Mutation visible — same scope
-      expect(k.get()).toBe('inner');
+      expect(ctx.get(k)).toBe('inner');
     });
   });
 
   it('fork creates isolated child scope', async () => {
-    const k = AsyncContext.key<string>('fork');
-    await AsyncContext.run(async () => {
-      k.set('parent');
-      await AsyncContext.fork(() => {
-        // Inherits from parent via prototype chain
-        expect(k.get()).toBe('parent');
-        k.set('child');
-        expect(k.get()).toBe('child');
+    const k = ctx.key<string>('fork');
+    await ctx.run(async () => {
+      ctx.set(k, 'parent');
+      await ctx.fork(() => {
+        expect(ctx.get(k)).toBe('parent');
+        ctx.set(k, 'child');
+        expect(ctx.get(k)).toBe('child');
       });
-      // Parent unaffected
-      expect(k.get()).toBe('parent');
+      expect(ctx.get(k)).toBe('parent');
     });
   });
 
-  it('fork delete blocks parent value', async () => {
-    const k = AsyncContext.key<string>('fork-del');
-    await AsyncContext.run(async () => {
-      k.set('parent');
-      await AsyncContext.fork(() => {
-        expect(k.get()).toBe('parent');
-        k.delete();
-        expect(k.has()).toBe(false);
-        expect(k.get()).toBeUndefined();
+  it('fork delete only removes own property — parent visible', async () => {
+    const k = ctx.key<string>('fork-del');
+    await ctx.run(async () => {
+      ctx.set(k, 'parent');
+      await ctx.fork(() => {
+        // Inherited from parent
+        expect(ctx.has(k)).toBe(true);
+        expect(ctx.get(k)).toBe('parent');
+        // Delete own property — parent still visible via prototype
+        ctx.delete(k);
+        expect(ctx.has(k)).toBe(true);
+        expect(ctx.get(k)).toBe('parent');
       });
-      // Parent still has value
-      expect(k.get()).toBe('parent');
+      expect(ctx.get(k)).toBe('parent');
     });
   });
 
-  it('enter is a no-op when already in scope', async () => {
-    await AsyncContext.run(() => {
-      const k = AsyncContext.key<number>('enter');
-      AsyncContext.enter();
-      k.set(1);
-      expect(k.get()).toBe(1);
+  it('fork set then delete restores parent visibility', async () => {
+    const k = ctx.key<string>('fork-set-del');
+    await ctx.run(async () => {
+      ctx.set(k, 'parent');
+      await ctx.fork(() => {
+        ctx.set(k, 'child');
+        expect(ctx.get(k)).toBe('child');
+        ctx.delete(k);
+        // Own property removed, parent visible again
+        expect(ctx.get(k)).toBe('parent');
+      });
+    });
+  });
+
+  it('enter is no-op when already in scope', async () => {
+    await ctx.run(() => {
+      const k = ctx.key<number>('enter');
+      ctx.enter();
+      ctx.set(k, 1);
+      expect(ctx.get(k)).toBe(1);
     });
   });
 
   it('enter creates scope when not active', () => {
-    // enter() uses enterWith — persists for the current async context
-    // We can test it doesn't throw
-    expect(AsyncContext.isActive()).toBe(false);
-    AsyncContext.enter();
-    expect(AsyncContext.isActive()).toBe(true);
-    const k = AsyncContext.key<number>('entered');
-    k.set(99);
-    expect(k.get()).toBe(99);
+    const freshCtx = new AsyncContextStore();
+    expect(freshCtx.isActive()).toBe(false);
+    freshCtx.enter();
+    expect(freshCtx.isActive()).toBe(true);
+    const k = freshCtx.key<number>('entered');
+    freshCtx.set(k, 99);
+    expect(freshCtx.get(k)).toBe(99);
   });
 
   it('run returns the value from fn', async () => {
-    const result = await AsyncContext.run(() => 42);
-    expect(result).toBe(42);
+    expect(await ctx.run(() => 42)).toBe(42);
   });
 
   it('run handles async fn', async () => {
-    const result = await AsyncContext.run(async () => 'async-result');
-    expect(result).toBe('async-result');
+    expect(await ctx.run(async () => 'async')).toBe('async');
   });
 
   it('fork returns the value from fn', async () => {
-    const result = await AsyncContext.run(async () => {
-      return AsyncContext.fork(() => 'forked');
-    });
+    const result = await ctx.run(async () => ctx.fork(() => 'forked'));
     expect(result).toBe('forked');
   });
 
   it('fork outside scope creates child of empty root', async () => {
-    // fork() when not in a scope creates a child of Object.create(null)
-    const k = AsyncContext.key<string>('fork-root');
-    const result = await AsyncContext.fork(() => {
-      k.set('value');
-      return k.get();
+    const freshCtx = new AsyncContextStore();
+    const k = freshCtx.key<string>('fork-root');
+    const result = await freshCtx.fork(() => {
+      freshCtx.set(k, 'value');
+      return freshCtx.get(k);
     });
     expect(result).toBe('value');
   });
 
   it('nested forks create prototype chain', async () => {
-    const k1 = AsyncContext.key<string>('k1');
-    const k2 = AsyncContext.key<string>('k2');
-
-    await AsyncContext.run(async () => {
-      k1.set('root');
-      await AsyncContext.fork(async () => {
-        k2.set('mid');
-        await AsyncContext.fork(() => {
-          // Sees both parent and grandparent
-          expect(k1.get()).toBe('root');
-          expect(k2.get()).toBe('mid');
+    const k1 = ctx.key<string>('k1');
+    const k2 = ctx.key<string>('k2');
+    await ctx.run(async () => {
+      ctx.set(k1, 'root');
+      await ctx.fork(async () => {
+        ctx.set(k2, 'mid');
+        await ctx.fork(() => {
+          expect(ctx.get(k1)).toBe('root');
+          expect(ctx.get(k2)).toBe('mid');
         });
       });
     });
   });
 
-  it('key() creates distinct keys with same name', async () => {
-    const k1 = AsyncContext.key<string>('same');
-    const k2 = AsyncContext.key<string>('same');
-    await AsyncContext.run(() => {
-      k1.set('a');
-      k2.set('b');
-      expect(k1.get()).toBe('a');
-      expect(k2.get()).toBe('b');
+  it('distinct keys with same name are independent', async () => {
+    const k1 = ctx.key<string>('same');
+    const k2 = ctx.key<string>('same');
+    await ctx.run(() => {
+      ctx.set(k1, 'a');
+      ctx.set(k2, 'b');
+      expect(ctx.get(k1)).toBe('a');
+      expect(ctx.get(k2)).toBe('b');
     });
+  });
+
+  it('lazy ALS initialization', () => {
+    const freshCtx = new AsyncContextStore();
+    // isActive/has/get should work without throwing before any scope is created
+    expect(freshCtx.isActive()).toBe(false);
+    const k = freshCtx.key<string>('lazy');
+    expect(freshCtx.has(k)).toBe(false);
+    expect(freshCtx.get(k)).toBeUndefined();
   });
 });

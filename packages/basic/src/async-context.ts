@@ -2,74 +2,153 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import type { Awaitable } from './types.js';
 
 type State = Record<symbol, unknown>;
-const DELETED: unique symbol = Symbol('DELETED');
-const als = new AsyncLocalStorage<State>();
 
 /**
  * A typed key for storing values in an {@link AsyncContext} scope.
  *
- * Each key has a unique internal symbol. Values are stored in a prototype-chained
- * record managed by `AsyncContext`. Keys are type-safe: `Key<string>` only accepts
- * and returns `string` values.
+ * Keys are thin wrappers around a unique symbol. They carry no methods —
+ * all operations go through the `AsyncContext` instance.
  *
  * @example
  * ```ts
  * const kUser = AsyncContext.key<User>('user');
  * await AsyncContext.run(() => {
- *   kUser.set(currentUser);
- *   console.log(kUser.get()); // User
+ *   AsyncContext.set(kUser, currentUser);
+ *   console.log(AsyncContext.get(kUser));
  * });
  * ```
  */
 export class Key<T> {
-  /** Optional name for debugging/error messages. */
-  readonly name?: string;
-  private readonly sym: symbol;
+  /** The unique symbol used as the property key in scope state. */
+  readonly symbol: symbol;
+
+  /** Phantom field for type-level tracking. Never set at runtime. */
+  declare readonly __type: T;
 
   constructor(name?: string) {
-    this.name = name;
-    this.sym = Symbol(name);
+    this.symbol = Symbol(name);
+  }
+}
+
+/**
+ * Async-scoped key-value store backed by `AsyncLocalStorage`.
+ *
+ * State is stored as `Record<symbol, unknown>`, prototype-chained via
+ * `Object.create()` for fork isolation. The internal `AsyncLocalStorage`
+ * is created lazily on first scope entry to avoid overhead when unused.
+ *
+ * `has(key)` uses `symbol in state` so `set(key, undefined)` is distinguishable
+ * from absence. `delete(key)` only removes the key from the current scope's own
+ * properties — parent values remain visible via the prototype chain.
+ *
+ * Exported as singleton `AsyncContext` from `@kavri/basic`.
+ *
+ * @example
+ * ```ts
+ * import { AsyncContext } from '@kavri/basic';
+ * const kId = AsyncContext.key<string>('requestId');
+ * await AsyncContext.run(async () => {
+ *   AsyncContext.set(kId, crypto.randomUUID());
+ *   await AsyncContext.fork(async () => {
+ *     console.log(AsyncContext.get(kId)); // parent's value visible
+ *     AsyncContext.set(kId, 'override');  // only in this fork
+ *   });
+ *   console.log(AsyncContext.get(kId));   // unchanged
+ * });
+ * ```
+ */
+export class AsyncContextStore {
+  private als: AsyncLocalStorage<State> | undefined;
+
+  /** Ensure the ALS is initialized. Lazy to avoid overhead when unused. */
+  private ensureAls(): AsyncLocalStorage<State> {
+    if (!this.als) {
+      this.als = new AsyncLocalStorage<State>();
+    }
+    return this.als;
   }
 
-  /** Returns `true` if a value is set in the current scope (not deleted, not absent). */
-  has(): boolean {
-    const state = als.getStore();
-    if (!state) return false;
-    const val = state[this.sym];
-    return val !== undefined && val !== DELETED;
+  /** Create a typed key. Each key has a unique internal symbol. */
+  key<T>(name?: string): Key<T> {
+    return new Key<T>(name);
+  }
+
+  /** Returns `true` if currently inside a scope. */
+  isActive(): boolean {
+    return this.als?.getStore() !== undefined;
   }
 
   /**
-   * Get the value from the current scope.
-   * Returns `undefined` if not in a scope, not set, or deleted.
+   * Enter a root scope imperatively (no callback).
+   * If already in a scope, does nothing.
    */
-  get(): T | undefined {
-    const state = als.getStore();
-    if (!state) return undefined;
-    const val = state[this.sym];
-    return val === DELETED ? undefined : (val as T);
+  enter(): void {
+    const als = this.ensureAls();
+    if (als.getStore()) return;
+    als.enterWith(Object.create(null) as State);
   }
 
   /**
-   * Get the value or throw if not set.
+   * Run `fn` inside a scope. If already in a scope, reuses the current one.
+   * @returns The return value of `fn`, wrapped in a Promise.
+   */
+  async run<T>(fn: () => Awaitable<T>): Promise<T> {
+    const als = this.ensureAls();
+    if (als.getStore()) return fn();
+    return als.run(Object.create(null) as State, fn);
+  }
+
+  /**
+   * Fork a child scope and run `fn` inside it.
+   * Always creates a new scope that inherits from the current via `Object.create()`.
+   * Writes in the child don't leak to the parent.
+   */
+  async fork<T>(fn: () => Awaitable<T>): Promise<T> {
+    const als = this.ensureAls();
+    const current = als.getStore() ?? (Object.create(null) as State);
+    return als.run(Object.create(current) as State, fn);
+  }
+
+  /**
+   * Check if a key has a value in the current scope (own or inherited).
+   * Uses `symbol in state` so `set(key, undefined)` counts as present.
+   * Returns `false` if not in a scope.
+   */
+  has<T>(key: Key<T>): boolean {
+    const state = this.als?.getStore();
+    if (!state) return false;
+    return key.symbol in state;
+  }
+
+  /**
+   * Get the value for a key from the current scope.
+   * Returns `undefined` if not in a scope or key is absent.
+   */
+  get<T>(key: Key<T>): T | undefined {
+    const state = this.als?.getStore();
+    if (!state) return undefined;
+    return state[key.symbol] as T | undefined;
+  }
+
+  /**
+   * Get the value or throw if the key is absent.
    * @throws Error if not in a scope or the key has no value.
    */
-  getOrThrow(): T {
-    if (!this.has()) {
-      throw new Error(`Key "${this.name ?? '(unnamed)'}" is not set`);
+  getOrThrow<T>(key: Key<T>): T {
+    if (!this.has(key)) {
+      throw new Error(`Key "${key.symbol.description ?? '(unnamed)'}" is not set`);
     }
-    return this.get() as T;
+    return this.get(key) as T;
   }
 
   /**
    * Get the value, or compute and store it if absent.
-   * Uses {@link has} to check presence, so explicitly set `undefined` values
-   * won't trigger recomputation if `T` includes `undefined`.
+   * Uses {@link has} to check presence.
    */
-  getOrInsertComputed(fn: () => T): T {
-    if (this.has()) return this.get() as T;
+  getOrInsertComputed<T>(key: Key<T>, fn: () => T): T {
+    if (this.has(key)) return this.get(key) as T;
     const val = fn();
-    this.set(val);
+    this.set(key, val);
     return val;
   }
 
@@ -77,84 +156,20 @@ export class Key<T> {
    * Set a value in the current scope.
    * @throws Error if not in an AsyncContext scope.
    */
-  set(value: T): void {
-    const state = als.getStore();
+  set<T>(key: Key<T>, value: T): void {
+    const state = this.als?.getStore();
     if (!state) throw new Error('Not in AsyncContext scope');
-    state[this.sym] = value;
+    state[key.symbol] = value;
   }
 
   /**
-   * Delete the value from the current scope.
-   * Uses a sentinel value so prototype lookup doesn't find a parent scope's value.
+   * Delete a key from the current scope's own properties only.
+   * Parent scope values remain accessible via the prototype chain.
    * @throws Error if not in an AsyncContext scope.
    */
-  delete(): void {
-    const state = als.getStore();
+  delete<T>(key: Key<T>): void {
+    const state = this.als?.getStore();
     if (!state) throw new Error('Not in AsyncContext scope');
-    state[this.sym] = DELETED;
+    delete state[key.symbol];
   }
 }
-
-/**
- * Async-scoped key-value store backed by `AsyncLocalStorage`.
- *
- * Provides `run()` for root scopes and `fork()` for child scopes with
- * prototype-chained isolation. Used by `@kavri/web` for per-request state,
- * `@kavri/logging` for log context, and transactions for the transaction stack.
- *
- * @example
- * ```ts
- * const kId = AsyncContext.key<string>('requestId');
- * await AsyncContext.run(async () => {
- *   kId.set(crypto.randomUUID());
- *   await AsyncContext.fork(async () => {
- *     console.log(kId.get()); // parent's value visible
- *     kId.set('override');    // only in this fork
- *   });
- *   console.log(kId.get());   // unchanged
- * });
- * ```
- */
-export const AsyncContext = {
-  /** Create a typed key. Each key has a unique internal symbol. */
-  key<T>(name?: string): Key<T> {
-    return new Key<T>(name);
-  },
-
-  /** Returns `true` if currently inside an AsyncContext scope. */
-  isActive(): boolean {
-    return als.getStore() !== undefined;
-  },
-
-  /**
-   * Enter a root scope imperatively (no callback).
-   * If already in a scope, does nothing.
-   * Uses `AsyncLocalStorage.enterWith()`.
-   */
-  enter(): void {
-    if (als.getStore()) return;
-    als.enterWith(Object.create(null) as State);
-  },
-
-  /**
-   * Run `fn` inside a scope. If already in a scope, reuses the current one.
-   * If not, creates a new root scope.
-   * @returns The return value of `fn`, wrapped in a Promise.
-   */
-  async run<T>(fn: () => Awaitable<T>): Promise<T> {
-    if (als.getStore()) return fn();
-    return als.run(Object.create(null) as State, fn);
-  },
-
-  /**
-   * Fork a child scope and run `fn` inside it.
-   * Always creates a new scope that inherits from the current via `Object.create()`.
-   * Modifications in the child don't leak to the parent. Parent values are visible
-   * in the child unless overwritten or deleted.
-   * @returns The return value of `fn`, wrapped in a Promise.
-   */
-  async fork<T>(fn: () => Awaitable<T>): Promise<T> {
-    const current = als.getStore() ?? (Object.create(null) as State);
-    return als.run(Object.create(current) as State, fn);
-  },
-};
