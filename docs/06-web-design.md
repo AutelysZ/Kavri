@@ -227,58 +227,45 @@ class BasicAuthInterceptor extends Interceptor {
 
 ### Built-in: CompressionInterceptor
 
-Compresses responses based on `Accept-Encoding`. Sits just inside ResponseInterceptor so the compressed body is what gets written.
+Uses [`expressjs/compression`](https://github.com/expressjs/compression) (peer dependency) to transparently compress responses. Works by wrapping the raw `res` before downstream interceptors write to it — compression happens at the stream level, handling all response types (JSON, streams, files) automatically.
 
 ```ts
 @Configuration('kavri.web.compression')
 class CompressionConfig {
-    /** Enable compression. */
-    @IsBoolean({ default: true }) enabled!: boolean;
-    /** Minimum response size in bytes to compress. */
+    /** Minimum response size in bytes to compress. Default 1KB. */
     @IsInteger({ default: 1024 }) threshold!: number;
-    /** MIME types to compress. */
-    @IsArray(IsString(), { default: ['application/json', 'text/html', 'text/plain', 'text/css', 'application/javascript'] })
-    mimeTypes!: string[];
+    /** Compression level (zlib). -1 = default, 0 = none, 9 = best. */
+    @IsInteger({ default: -1 }) level!: number;
+    /** Custom filter: return true to compress. Default: compression's built-in filter. */
+    // filter?: (req, res) => boolean;  — set programmatically, not via config
 }
 
 @Component()
 @Priority(Interceptor.RESPONSE + 1)
-@Conditional((config = injectConfig(CompressionConfig, true)) => config !== undefined && config.enabled)
+@Conditional((config = injectConfig(CompressionConfig, true)) => config !== undefined)
 class CompressionInterceptor extends Interceptor {
+    private compress!: ReturnType<typeof compression>;
+
     constructor(private readonly config = injectConfig(CompressionConfig)) { super(); }
+
+    @OnConstruct()
+    init() {
+        this.compress = compression({
+            threshold: this.config.threshold,
+            level: this.config.level,
+        });
+    }
 
     async intercept(next: () => unknown) {
         const req = kRequest.getOrThrow();
         const res = kResponse.getOrThrow();
-        const accept = req.headers['accept-encoding'] ?? '';
 
-        const result = await next();
-        if (res.headersSent) return result;
+        // Wrap res with compression before downstream writes to it
+        await new Promise<void>((resolve, reject) => {
+            this.compress(req, res, (err?: Error) => err ? reject(err) : resolve());
+        });
 
-        // Only compress JSON/text results above threshold
-        if (result === undefined || result instanceof StreamResponse || result instanceof FileResponse) {
-            return result;
-        }
-
-        const body = result instanceof RawResponse ? result.body : result;
-        const encoded = typeof body === 'string' ? body : JSON.stringify(body);
-        if (encoded.length < this.config.threshold) return result;
-
-        const encoding = accept.includes('br') ? 'br'
-            : accept.includes('gzip') ? 'gzip'
-            : accept.includes('deflate') ? 'deflate'
-            : null;
-
-        if (!encoding) return result;
-
-        // Compress and return as RawResponse with Content-Encoding header
-        const compressed = await compress(Buffer.from(encoded), encoding);
-        const headers = result instanceof RawResponse
-            ? { ...result.headers, 'Content-Encoding': encoding, 'Vary': 'Accept-Encoding' }
-            : { 'Content-Type': 'application/json', 'Content-Encoding': encoding, 'Vary': 'Accept-Encoding' };
-        const status = result instanceof RawResponse ? result.status : 200;
-
-        return new RawResponse(status, headers, compressed);
+        return next();
     }
 }
 ```
