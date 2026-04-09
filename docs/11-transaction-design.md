@@ -176,12 +176,15 @@ abstract class DataSourceDriver<TOptions, TConnection> {
     /** Rollback. Can be called multiple times (idempotent after first). */
     abstract rollback(connection: TConnection, error: any): Awaitable<void>;
 
-    /** Close all data sources. Called on container destroy. */
+    /** Close a single pool connection. Called by shutdown(). */
+    abstract close(connection: TConnection): Awaitable<void>;
+
+    /** Close all data sources. Calls close() for each pool. Called on container destroy. */
     shutdown(): Promise<void>;
 }
 ```
 
-`connect`/`has`/`get`/`begin`/`child`/`shutdown`/`getSources` are implemented by the base class. Subclasses implement `doConnect`/`doBegin`/`commit`/`rollback`.
+`connect`/`has`/`get`/`begin`/`child`/`shutdown`/`getSources` are implemented by the base class. Subclasses implement `doConnect`/`doBegin`/`commit`/`rollback`/`close`.
 
 Base class internals:
 ```ts
@@ -202,11 +205,18 @@ get(name) {
 }
 
 begin(name, options) {
-    return this.doBegin(this.get(name), options);
+    return this.doBegin(this._pools.get(name)!, options); // internal pool, not public get()
 }
 
 child(connection, options) {
     return this.doBegin(connection, options);
+}
+
+async shutdown() {
+    for (const conn of this._pools.values()) {
+        await this.close(conn);
+    }
+    this._pools.clear();
 }
 ```
 
@@ -301,10 +311,31 @@ Manual `commit()`/`rollback()` can be called inside the callback. They are idemp
 
 ```ts
 class Transaction {
-    /** Manual commit. Idempotent. */
-    commit(): Promise<void>;
-    /** Manual rollback. Idempotent. */
-    rollback(error?: any): Promise<void>;
+    static readonly NOOP = new Transaction(null!, {
+        dataSource: '', driver: '', connection: null,
+        committed: true, rolledBack: false,
+    });
+
+    constructor(
+        private readonly driver: DataSourceDriver<any, any>,
+        private readonly frame: TransactionFrame,
+    ) {}
+
+    /** Manual commit. Idempotent — safe to call multiple times. */
+    async commit(): Promise<void> {
+        if (!this.frame.committed && !this.frame.rolledBack) {
+            await this.driver.commit(this.frame.connection);
+            this.frame.committed = true;
+        }
+    }
+
+    /** Manual rollback. Idempotent — safe to call multiple times. */
+    async rollback(error?: any): Promise<void> {
+        if (!this.frame.committed && !this.frame.rolledBack) {
+            await this.driver.rollback(this.frame.connection, error);
+            this.frame.rolledBack = true;
+        }
+    }
 }
 ```
 
@@ -367,7 +398,7 @@ class TransactionManager {
 
         switch (propagation) {
             case Propagation.Required:
-                if (current) return fn(new Transaction(current));
+                if (current) return fn(new Transaction(driver, current));
                 return this.executeNew(driver, resolution, options, fn);
 
             case Propagation.RequiresNew:
@@ -378,14 +409,14 @@ class TransactionManager {
                 return this.executeNew(driver, resolution, options, fn);
 
             case Propagation.Supports:
-                return fn(current ? new Transaction(current) : Transaction.NOOP);
+                return fn(current ? new Transaction(driver, current) : Transaction.NOOP);
 
             case Propagation.Mandatory:
                 if (!current) throw new TransactionError('No existing transaction');
-                return fn(new Transaction(current));
+                return fn(new Transaction(driver, current));
 
             case Propagation.NotSupported:
-                return fn(Transaction.NOOP);
+                return this.executeSuspended(resolution.dataSource, fn);
 
             case Propagation.Never:
                 if (current) throw new TransactionError('Transaction not allowed');
@@ -404,7 +435,8 @@ class TransactionManager {
         };
         this.pushFrame(frame);
         try {
-            const result = await fn(new Transaction(frame));
+            const result = await this.withTimeout(options.timeout,
+                fn(new Transaction(driver, frame)));
             if (!frame.committed && !frame.rolledBack) {
                 await driver.commit(conn);
                 frame.committed = true;
@@ -432,7 +464,8 @@ class TransactionManager {
         };
         this.pushFrame(frame);
         try {
-            const result = await fn(new Transaction(frame));
+            const result = await this.withTimeout(options.timeout,
+                fn(new Transaction(driver, frame)));
             if (!frame.committed && !frame.rolledBack) {
                 await driver.commit(childConn);
                 frame.committed = true;
@@ -447,6 +480,27 @@ class TransactionManager {
         } finally {
             this.popFrame(frame);
         }
+    }
+
+    private async executeSuspended<T>(dataSource: Qualifier, fn: (tx: Transaction) => Promise<T>): Promise<T> {
+        const stack = kTransactionStack.get() ?? [];
+        const suspended = stack.filter(f => f.dataSource === dataSource);
+        const remaining = stack.filter(f => f.dataSource !== dataSource);
+        kTransactionStack.set(remaining);
+        try {
+            return await fn(Transaction.NOOP);
+        } finally {
+            kTransactionStack.set([...remaining, ...suspended]);
+        }
+    }
+
+    private withTimeout<T>(timeout: number | undefined, promise: Promise<T>): Promise<T> {
+        if (!timeout) return promise;
+        return Promise.race([
+            promise,
+            new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new TransactionError('Transaction timeout')), timeout)),
+        ]);
     }
 
     getConnection<T>(options: DataSourceResolveOptions = {}): T {
@@ -541,8 +595,9 @@ class DrizzleDataSourceDriver extends DataSourceDriver<NamedClusterOptions, Driz
         if (ctrl) { ctrl.reject(error); await (connection as any).__promise.catch(() => {}); }
     }
 
-    // shutdown() is handled by the base class — iterates _pools and could call
-    // a close method. For Drizzle, pool cleanup depends on the underlying driver.
+    async close(connection: DrizzleConnection) {
+        // Close the underlying pool/connection
+    }
 }
 ```
 
@@ -582,10 +637,17 @@ abstract class DrizzleRepository<TRecord> {
 
 ## 9. Sequelize Driver (`@kavri/sequelize`)
 
-Sequelize uses a `Sequelize` instance for pool and `Transaction` as an option. The driver returns `Transaction | undefined` as the connection — `undefined` means non-transactional.
+Sequelize uses a `Sequelize` instance for pool and `SequelizeTransaction` as an option.
+`SequelizeConnection` wraps both — `sequelize` is always present, `transaction` is null when non-transactional.
 
 ```ts
-type SequelizeConnection = SequelizeTransaction | undefined;
+declare class Sequelize {}
+declare class SequelizeTransaction {}
+
+interface SequelizeConnection {
+    sequelize: Sequelize;
+    transaction: SequelizeTransaction | null;
+}
 
 @Component('sequelize')
 class SequelizeDataSourceDriver extends DataSourceDriver<NamedClusterOptions, SequelizeConnection> {
@@ -608,41 +670,34 @@ class SequelizeDataSourceDriver extends DataSourceDriver<NamedClusterOptions, Se
             },
         });
         await seq.authenticate();
-        // Store Sequelize instance — base class stores this as the "pool connection".
-        // get() returns this. For Sequelize, the transaction (or undefined) is the
-        // meaningful connection — repos use .transaction getter instead of get().
-        return seq as any;
+        return { sequelize: seq, transaction: null };
     }
 
-    // doBegin: called with pool (Sequelize instance) for begin(),
-    // or with parent tx (SequelizeTransaction) for child().
-    // Sequelize handles both — pass { transaction: parent } for savepoints.
     protected async doBegin(connection: SequelizeConnection, options: TransactionOptions): Promise<SequelizeConnection> {
-        const seq = (connection as any).sequelize ?? connection;
-        return seq.transaction({
+        const tx = await connection.sequelize.transaction({
             isolationLevel: options.isolation,
-            transaction: connection instanceof Sequelize ? undefined : connection,
+            transaction: connection.transaction ?? undefined,  // parent tx for savepoints
         });
+        return { sequelize: connection.sequelize, transaction: tx };
     }
 
     async commit(connection: SequelizeConnection) {
-        if (connection) await connection.commit();
+        if (connection.transaction) await connection.transaction.commit();
     }
 
     async rollback(connection: SequelizeConnection, error: any) {
-        if (connection) await connection.rollback();
+        if (connection.transaction) await connection.transaction.rollback();
     }
 
-    /** Get the Sequelize instance (stored by base class via doConnect). */
-    getInstance(name: Qualifier): Sequelize {
-        return this.get(name) as any as Sequelize;
+    async close(connection: SequelizeConnection) {
+        await connection.sequelize.close();
     }
 }
 ```
 
 ### Sequelize Repository (`@kavri/sequelize`)
 
-The connection is `Transaction | undefined` — passed as `{ transaction }` option to model queries.
+`SequelizeConnection.transaction` is `null` when not in a transaction, `SequelizeTransaction` when inside one.
 
 ```ts
 abstract class SequelizeRepository<TRecord> {
@@ -652,10 +707,15 @@ abstract class SequelizeRepository<TRecord> {
         protected readonly dataSource: Qualifier = 'default',
     ) {}
 
-    protected get transaction(): SequelizeTransaction | undefined {
+    protected get conn(): SequelizeConnection {
         return this.tm.getConnection<SequelizeConnection>({
             driver: 'sequelize', target: this, dataSource: this.dataSource,
         });
+    }
+
+    /** Returns the active transaction or undefined (for Sequelize model options). */
+    protected get transaction(): SequelizeTransaction | undefined {
+        return this.conn.transaction ?? undefined;
     }
 
     async findOne(id: any): Promise<TRecord | undefined> {

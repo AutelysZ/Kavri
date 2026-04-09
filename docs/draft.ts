@@ -353,7 +353,7 @@ interface ConfigurationMetadata {
  *     @IsInteger({ default: 3000 }) port!: number;
  * }
  */
-declare function Configuration(prefix: string, options?: ConfigurationOptions): ClassDecorator<ConfigurationMetadata>;
+export declare function Configuration(prefix: string, options?: ConfigurationOptions): ClassDecorator<ConfigurationMetadata>;
 
 // --- Built-in configuration classes ---
 

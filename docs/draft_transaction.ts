@@ -3,7 +3,7 @@
  * @author acrazing <joking.young@gmail.com>
  */
 
-import {Qualifier, Awaitable, AnyConstructor, Priority, Component, OnConstruct, inject} from './draft'
+import {Qualifier, Awaitable, AnyConstructor, Configuration, Priority, Component, OnConstruct, inject} from './draft'
 
 enum Isolation {
     // ...
@@ -28,7 +28,10 @@ interface TransactionOptions extends DataSourceResolveOptions {
 // DataSourceDriver helps manage the multiple/dnyamic data sources, but don't help with
 // manage the connection pool. the driver need to acquire/release the connection when
 // doBegin/commit/rollback.
-declare abstract class DataSourceDriver<TOptions, TConnection, TPool extends TConnection = TConnection> {
+abstract class DataSourceDriver<TOptions, TConnection, TPool extends TConnection = TConnection> {
+    constructor(private readonly options = inject(DataSourceOptions, true)) {}
+    // automatically filter current driver's data sources
+    protected getSources(): NamedClusterOptions[];
     connect(name: Qualifier, options: TOptions): Promise<void>;
     protected abstract doConnect(name: Qualifier, options: TOptions): Awaitable<TPool>;
     has(name: Qualifier): boolean;
@@ -98,8 +101,8 @@ declare class TransactionManager {
 // example driver
 
 @Component('my')
-class MyDriver extends DataSourceDriver<string, {query(sql: string): any}> {
-    protected doConnect(name: Qualifier, options: string): Awaitable<{query(sql: string): any}> {
+class MyDriver extends DataSourceDriver<DataSourceOptions, {query(sql: string): any}> {
+    protected doConnect(name: Qualifier, options: DataSourceOptions): Awaitable<{query(sql: string): any}> {
         return {query(sql: string) {return 'my:' + sql}}
     }
 
@@ -118,11 +121,11 @@ class MyDriver extends DataSourceDriver<string, {query(sql: string): any}> {
     }
     close(connection: { query(): any; }): Awaitable<void> {
     }
-    private dataSources: Record<string, string> = {} // from config
+
     @OnConstruct()
     async init() {
-        for(const [k, v] of Object.entries(this.dataSources)) {
-            await this.connect(k, v);
+        for(const v of this.getSources()) {
+            await this.connect(v.name, v);
         }
     }
 }
@@ -150,4 +153,37 @@ class UserRepository extends MyRepository {
     async createUser(name: string) {
         return this.conn.query(`insert into user (name) values (${name})`)
     }
+}
+
+// standardize data source configuration
+
+class InstanceOptions {
+    host?: string;
+    port?: number;
+    username?: string;
+    password?: string;
+    database?: string;
+    schema?: string;
+    dialectOptions?: any;
+}
+
+class ClusterOptions extends InstanceOptions {
+    name?: string;
+    dialect: string;
+    driver: string;
+    readReplicas?: InstanceOptions[];
+    maxConnections?: number;
+    minConnections?: number;
+    connectionTimeout?: number;
+    idleTimeout?: number;
+    maxLifetime?: number;
+}
+
+class NamedClusterOptions extends ClusterOptions {
+    name: string;
+}
+
+@Configuration("kavri.datasource")
+class DataSourceOptions extends ClusterOptions {
+    multiSources?: NamedClusterOptions[];
 }
