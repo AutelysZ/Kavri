@@ -393,22 +393,22 @@ export class MetadataManager {
  * The global metadata manager. All decorator metadata in the application
  * is stored and queried through this instance.
  */
-export const Metadata = new MetadataManager();
+export const Metadata = /* @__PURE__ */ new MetadataManager();
 
 /**
  * Create a class decorator that stores typed metadata in the global {@link Metadata} store.
  * @see {@link MetadataManager.createClassDecorator}
  */
-export const createClassDecorator = Metadata.createClassDecorator.bind(Metadata);
+export const createClassDecorator = /* @__PURE__ */ Metadata.createClassDecorator.bind(Metadata);
 
 /**
  * Create a method decorator that stores typed metadata in the global {@link Metadata} store.
  * @see {@link MetadataManager.createMethodDecorator}
  */
-export const createMethodDecorator = Metadata.createMethodDecorator.bind(Metadata);
+export const createMethodDecorator = /* @__PURE__ */ Metadata.createMethodDecorator.bind(Metadata);
 
 /**
  * Create a field decorator that stores typed metadata in the global {@link Metadata} store.
  * @see {@link MetadataManager.createFieldDecorator}
  */
-export const createFieldDecorator = Metadata.createFieldDecorator.bind(Metadata);
+export const createFieldDecorator = /* @__PURE__ */ Metadata.createFieldDecorator.bind(Metadata);
