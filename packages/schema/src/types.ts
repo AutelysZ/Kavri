@@ -46,7 +46,19 @@ export interface JsonSchema {
   oneOf?: JsonSchema[];
   allOf?: JsonSchema[];
   not?: JsonSchema;
+  if?: JsonSchema;
+  then?: JsonSchema;
+  else?: JsonSchema;
+  dependentRequired?: Record<string, string[]>;
+  dependentSchemas?: Record<string, JsonSchema>;
+  contentEncoding?: string;
+  contentMediaType?: string;
+  contentSchema?: JsonSchema;
+  $id?: string;
+  $schema?: string;
+  $anchor?: string;
   $ref?: string;
+  $defs?: Record<string, JsonSchema>;
 }
 
 // ---------------------------------------------------------------------------
@@ -103,6 +115,9 @@ export interface StringSchema<V = string> extends BaseSchema<string, V> {
   minLength?: ValidateField<number>;
   pattern?: ValidateField<string>;
   format?: string;
+  contentEncoding?: string;
+  contentMediaType?: string;
+  contentSchema?: SchemaFieldDecorator;
 }
 
 /** Schema options for numeric fields (integer, number, bigint). */
@@ -124,6 +139,8 @@ export interface ObjectSchema<T = object> extends BaseSchema<T> {
   maxProperties?: ValidateField<number>;
   minProperties?: ValidateField<number>;
   required?: ValidateField<Array<keyof T>>;
+  dependentRequired?: Partial<Record<keyof T, Array<keyof T>>>;
+  dependentSchemas?: Partial<Record<keyof T, SchemaFieldDecorator>>;
 }
 
 /** Schema options for array fields. */
