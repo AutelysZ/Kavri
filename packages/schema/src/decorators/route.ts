@@ -2,6 +2,7 @@
  * Route-specific field decorators: IsFile, IsBody, IsFilename.
  * These are exclusive to route request schemas.
  */
+import { lookup } from 'mime-types';
 import type { StringSchema, ValidateOptions, SchemaFieldDecorator } from '../types.js';
 import { createSchemaFieldDecoratorFactory, SchemaField } from '../field.js';
 import { IsString } from './primitives.js';
@@ -122,13 +123,10 @@ export const IsFilename = createSchemaFieldDecoratorFactory(
     rule: 'IsFilename',
     validate: (p, v) => {
       if (typeof v !== 'string' || !p.accept?.length) return true;
+      const mimeType = lookup(v) || '';
       return p.accept.some((pattern) => {
         if (pattern.startsWith('.')) return v.endsWith(pattern);
-        if (pattern.includes('*')) {
-          const [type] = pattern.split('/');
-          return v.includes(type ?? '');
-        }
-        return false;
+        return matchAccept([pattern], mimeType);
       });
     },
     toJsonSchema: () => ({ type: 'string' }),
