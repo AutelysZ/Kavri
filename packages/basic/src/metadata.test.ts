@@ -391,7 +391,7 @@ describe('legacy decorator protocol', () => {
         name!: string;
       }
       LTag('cls')(Foo);
-      LField('string')(Foo.prototype, 'name');
+      (LField('string') as Function)(Foo.prototype, 'name');
       expect(LM.of(LField, Foo, 'name')).toEqual([{ type: 'string' }]);
     });
   });
@@ -433,7 +433,7 @@ describe('legacy decorator protocol', () => {
       class Foo {
         name!: string;
       }
-      LTyped('string')(Foo.prototype, 'name');
+      (LTyped('string') as Function)(Foo.prototype, 'name');
       expect(LM.of(LTyped, Foo, 'name')).toEqual([{ type: 'string' }]);
       expect(LM.of(LRequired, Foo, 'name')).toEqual([{ required: true }]);
     });
