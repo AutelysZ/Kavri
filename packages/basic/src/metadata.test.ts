@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { MetadataStore } from './metadata.js';
+import { MetadataManager } from './metadata.js';
 import type { ClassDecorator, MethodDecorator, FieldDecorator } from './types.js';
 
 // Use a fresh store per test file to avoid cross-test pollution
-const Metadata = new MetadataStore();
+const Metadata = new MetadataManager();
 
 // -- Bound convenience aliases (same pattern as index.ts) --
 const createClassDecorator = Metadata.createClassDecorator.bind(Metadata);
@@ -299,10 +299,10 @@ describe('extra method/field decorators', () => {
   });
 });
 
-describe('MetadataStore isolation', () => {
+describe('MetadataManager isolation', () => {
   it('separate stores are independent', () => {
-    const store1 = new MetadataStore();
-    const store2 = new MetadataStore();
+    const store1 = new MetadataManager();
+    const store2 = new MetadataManager();
 
     function Tag1(v: string): ClassDecorator<{ v: string }> {
       return store1.createClassDecorator(Tag1, { v });

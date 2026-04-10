@@ -63,7 +63,7 @@ function isTC39MemberContext(
 }
 
 // ---------------------------------------------------------------------------
-// MetadataStore
+// MetadataManager
 // ---------------------------------------------------------------------------
 
 /**
@@ -74,9 +74,9 @@ function isTC39MemberContext(
  * this API. The decorator factory function itself serves as the metadata key.
  *
  * Metadata is stored in instance-level maps (not global state), so multiple
- * `MetadataStore` instances are isolated from each other.
+ * `MetadataManager` instances are isolated from each other.
  */
-export class MetadataStore {
+export class MetadataManager {
   /** Class-level: factory → Map<constructor, metadata[]> */
   readonly #classStore = new WeakMap<Function, Map<Function, unknown[]>>();
   /** Member-level: factory → Map<constructor, Map<key, metadata[]>> */
@@ -388,3 +388,27 @@ export class MetadataStore {
     return result;
   }
 }
+
+/**
+ * The global metadata manager. All decorator metadata in the application
+ * is stored and queried through this instance.
+ */
+export const Metadata = new MetadataManager();
+
+/**
+ * Create a class decorator that stores typed metadata in the global {@link Metadata} store.
+ * @see {@link MetadataManager.createClassDecorator}
+ */
+export const createClassDecorator = Metadata.createClassDecorator.bind(Metadata);
+
+/**
+ * Create a method decorator that stores typed metadata in the global {@link Metadata} store.
+ * @see {@link MetadataManager.createMethodDecorator}
+ */
+export const createMethodDecorator = Metadata.createMethodDecorator.bind(Metadata);
+
+/**
+ * Create a field decorator that stores typed metadata in the global {@link Metadata} store.
+ * @see {@link MetadataManager.createFieldDecorator}
+ */
+export const createFieldDecorator = Metadata.createFieldDecorator.bind(Metadata);
