@@ -137,7 +137,8 @@ export const ToString: ((schema?: StringSchema) => SchemaFieldDecorator<StringSc
 
 /**
  * Coerce string to number (float). Adds IsNumber(schema) as child.
- * parse: `parseFloat(value)`
+ * Rejects strings that are not exact numeric representations (e.g., '1abc').
+ * Uses `Number(value)` which returns NaN for non-numeric strings.
  */
 export const ToNumber: ((schema?: NumericSchema) => SchemaFieldDecorator<NumericSchema>) &
   SchemaFieldDecoratorFactoryStatic<NumericSchema> = (() => {
@@ -147,7 +148,11 @@ export const ToNumber: ((schema?: NumericSchema) => SchemaFieldDecorator<Numeric
     },
     {
       rule: 'ToNumber',
-      parse: (_: any, v: unknown) => (typeof v === 'string' ? parseFloat(v) : v),
+      parse: (_: any, v: unknown) => {
+        if (typeof v !== 'string') return v;
+        const n = Number(v);
+        return Number.isFinite(n) ? n : v; // return original string if invalid — IsNumber child will reject
+      },
     },
   );
   return factory;
@@ -155,7 +160,8 @@ export const ToNumber: ((schema?: NumericSchema) => SchemaFieldDecorator<Numeric
 
 /**
  * Coerce string to integer. Adds IsInteger(schema) as child.
- * parse: `parseInt(value, 10)`
+ * Rejects strings that are not exact integer representations (e.g., '1abc', '1.5').
+ * Uses `Number(value)` + `Number.isInteger()` check.
  */
 export const ToInteger: ((schema?: NumericSchema) => SchemaFieldDecorator<NumericSchema>) &
   SchemaFieldDecoratorFactoryStatic<NumericSchema> = (() => {
@@ -165,7 +171,11 @@ export const ToInteger: ((schema?: NumericSchema) => SchemaFieldDecorator<Numeri
     },
     {
       rule: 'ToInteger',
-      parse: (_: any, v: unknown) => (typeof v === 'string' ? parseInt(v, 10) : v),
+      parse: (_: any, v: unknown) => {
+        if (typeof v !== 'string') return v;
+        const n = Number(v);
+        return Number.isInteger(n) ? n : v; // return original string if invalid — IsInteger child will reject
+      },
     },
   );
   return factory;
