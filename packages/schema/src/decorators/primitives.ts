@@ -80,6 +80,7 @@ export const IsString = createSchemaFieldDecoratorFactory(
     ) as any;
   },
   {
+    rule: 'IsString',
     validate: (_, v) => typeof v === 'string',
     toJsonSchema: (p) => ({
       type: 'string',
@@ -100,6 +101,7 @@ export const IsInteger = createSchemaFieldDecoratorFactory(
     return SchemaField(IsInteger, (schema ?? {}) as NumericSchema, numericConstraints(schema));
   },
   {
+    rule: 'IsInteger',
     validate: (_, v) => typeof v === 'number' && Number.isInteger(v),
     toJsonSchema: () => ({ type: 'integer' }),
   },
@@ -111,6 +113,7 @@ export const IsNumber = createSchemaFieldDecoratorFactory(
     return SchemaField(IsNumber, (schema ?? {}) as NumericSchema, numericConstraints(schema));
   },
   {
+    rule: 'IsNumber',
     validate: (_, v) => typeof v === 'number' && Number.isFinite(v),
     toJsonSchema: () => ({ type: 'number' }),
   },
@@ -133,6 +136,7 @@ export const IsBigInt = createSchemaFieldDecoratorFactory(
     );
   },
   {
+    rule: 'IsBigInt',
     validate: (_, v) => typeof v === 'bigint' || (typeof v === 'string' && /^-?\d+$/.test(v)),
     parse: (_, v) => (typeof v === 'string' ? BigInt(v) : v),
     serialize: (_, v) => (typeof v === 'bigint' ? v.toString() : v),
@@ -150,6 +154,7 @@ export const IsBoolean = createSchemaFieldDecoratorFactory(
     return SchemaField(IsBoolean, (schema ?? {}) as BaseSchema<boolean>);
   },
   {
+    rule: 'IsBoolean',
     validate: (_, v) => typeof v === 'boolean',
     toJsonSchema: () => ({ type: 'boolean' }),
   },
@@ -185,6 +190,7 @@ export const IsDate = createSchemaFieldDecoratorFactory(
     return SchemaField(IsDate, (options ?? {}) as DateOptions, children, [IsString(schema)]);
   },
   {
+    rule: 'IsDate',
     validate: (_, v) => {
       if (typeof v === 'string') return !isNaN(new Date(v).getTime());
       return v instanceof Date && !isNaN(v.getTime());

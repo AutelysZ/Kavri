@@ -49,25 +49,25 @@ describe('toValidateSchema', () => {
 
 describe('createSchemaFieldDecoratorFactory', () => {
   it('attaches statics to factory function', () => {
-    const validate = (_params: ValidateSchema<number>, value: unknown) =>
-      typeof value === 'string' && value.length >= (_params as ValidateSchema<number>).value;
-    const toJsonSchema = (params: ValidateSchema<number>) => ({
-      minLength: params.value,
-    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const validate = (_params: any, value: unknown) =>
+      typeof value === 'string' && value.length >= _params.value;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const toJsonSchema = (params: any) => ({ minLength: params.value });
 
     const MinLength = createSchemaFieldDecoratorFactory(
-      function MinLength(
-        options: ValidateSchema<number>,
-      ): SchemaFieldDecorator<ValidateSchema<number>> {
+      (options: ValidateSchema<number>): SchemaFieldDecorator<ValidateSchema<number>> => {
         return SchemaField(MinLength, options);
       },
       {
+        rule: 'MinLength',
         message: '.label must be at least .value characters',
         validate,
         toJsonSchema,
       },
     );
 
+    expect(MinLength.rule).toBe('MinLength');
     expect(MinLength.message).toBe('.label must be at least .value characters');
     expect(MinLength.validate).toBe(validate);
     expect(MinLength.toJsonSchema).toBe(toJsonSchema);
@@ -76,12 +76,11 @@ describe('createSchemaFieldDecoratorFactory', () => {
 
   it('factory returns a working decorator', () => {
     const MinLength = createSchemaFieldDecoratorFactory(
-      function MinLength(
-        options: ValidateSchema<number>,
-      ): SchemaFieldDecorator<ValidateSchema<number>> {
+      (options: ValidateSchema<number>): SchemaFieldDecorator<ValidateSchema<number>> => {
         return SchemaField(MinLength, options);
       },
       {
+        rule: 'MinLength',
         validate: (params, value) => typeof value !== 'string' || value.length >= params.value,
       },
     );
@@ -96,6 +95,7 @@ describe('createSchemaFieldDecoratorFactory', () => {
       ValidateSchema<number>
     >[];
     expect(meta).toHaveLength(1);
+    expect(meta[0].rule).toBe('MinLength');
     expect(meta[0].factory).toBe(MinLength);
     expect(meta[0].params).toEqual({ value: 3 });
     expect(meta[0].children).toEqual([]);
@@ -106,12 +106,11 @@ describe('createSchemaFieldDecoratorFactory', () => {
 describe('SchemaField', () => {
   it('creates a decorator with metadata', () => {
     const IsString = createSchemaFieldDecoratorFactory(
-      function IsString(
-        options: ValidateSchema<string>,
-      ): SchemaFieldDecorator<ValidateSchema<string>> {
+      (options: ValidateSchema<string>): SchemaFieldDecorator<ValidateSchema<string>> => {
         return SchemaField(IsString, options);
       },
       {
+        rule: 'IsString',
         validate: (_, value) => typeof value === 'string',
         toJsonSchema: () => ({ type: 'string' }),
       },
@@ -119,37 +118,35 @@ describe('SchemaField', () => {
 
     const decorator = IsString({ value: 'test' });
     expect(decorator.metadata).toBeDefined();
+    expect(decorator.metadata.rule).toBe('IsString');
     expect(decorator.metadata.factory).toBe(IsString);
     expect(decorator.metadata.params).toEqual({ value: 'test' });
   });
 
   it('collects children', () => {
     const MinLength = createSchemaFieldDecoratorFactory(
-      function MinLength(
-        options: ValidateSchema<number>,
-      ): SchemaFieldDecorator<ValidateSchema<number>> {
+      (options: ValidateSchema<number>): SchemaFieldDecorator<ValidateSchema<number>> => {
         return SchemaField(MinLength, options);
       },
-      { validate: (p, v) => typeof v !== 'string' || v.length >= p.value },
+      { rule: 'MinLength', validate: (p, v) => typeof v !== 'string' || v.length >= p.value },
     );
 
     const MaxLength = createSchemaFieldDecoratorFactory(
-      function MaxLength(
-        options: ValidateSchema<number>,
-      ): SchemaFieldDecorator<ValidateSchema<number>> {
+      (options: ValidateSchema<number>): SchemaFieldDecorator<ValidateSchema<number>> => {
         return SchemaField(MaxLength, options);
       },
-      { validate: (p, v) => typeof v !== 'string' || v.length <= p.value },
+      { rule: 'MaxLength', validate: (p, v) => typeof v !== 'string' || v.length <= p.value },
     );
 
     const IsString = createSchemaFieldDecoratorFactory(
-      function IsString(options: { minLength?: number; maxLength?: number }): SchemaFieldDecorator {
+      (options: { minLength?: number; maxLength?: number }): SchemaFieldDecorator => {
         const children: SchemaFieldDecorator[] = [];
         if (options.minLength !== undefined) children.push(MinLength({ value: options.minLength }));
         if (options.maxLength !== undefined) children.push(MaxLength({ value: options.maxLength }));
         return SchemaField(IsString, options, children);
       },
       {
+        rule: 'IsString',
         validate: (_, value) => typeof value === 'string',
         toJsonSchema: () => ({ type: 'string' }),
       },
@@ -166,45 +163,35 @@ describe('SchemaField', () => {
     expect(meta[0].children).toHaveLength(2);
 
     const [min, max] = meta[0].children;
-    expect((min.metadata as SchemaFieldDecoratorMetadata<ValidateSchema<number>>).factory).toBe(
-      MinLength,
-    );
-    expect(
-      (min.metadata as SchemaFieldDecoratorMetadata<ValidateSchema<number>>).params.value,
-    ).toBe(1);
-    expect((max.metadata as SchemaFieldDecoratorMetadata<ValidateSchema<number>>).factory).toBe(
-      MaxLength,
-    );
-    expect(
-      (max.metadata as SchemaFieldDecoratorMetadata<ValidateSchema<number>>).params.value,
-    ).toBe(100);
+    expect(min.metadata.rule).toBe('MinLength');
+    expect(min.metadata.params.value).toBe(1);
+    expect(max.metadata.rule).toBe('MaxLength');
+    expect(max.metadata.params.value).toBe(100);
   });
 
   it('merges params.decorators with explicit children', () => {
-    const A = createSchemaFieldDecoratorFactory(function A(): SchemaFieldDecorator {
-      return SchemaField(A, {});
-    }, {});
-    const B = createSchemaFieldDecoratorFactory(function B(): SchemaFieldDecorator {
-      return SchemaField(B, {});
-    }, {});
-    const C = createSchemaFieldDecoratorFactory(function C(): SchemaFieldDecorator {
-      // params.decorators = [A()], explicit decorators = [B()]
-      return SchemaField(C, { decorators: [A()] }, [B()]);
-    }, {});
+    const A = createSchemaFieldDecoratorFactory((): SchemaFieldDecorator => SchemaField(A, {}), {
+      rule: 'A',
+    });
+    const B = createSchemaFieldDecoratorFactory((): SchemaFieldDecorator => SchemaField(B, {}), {
+      rule: 'B',
+    });
+    const C = createSchemaFieldDecoratorFactory(
+      (): SchemaFieldDecorator => SchemaField(C, { decorators: [A()] }, [B()]),
+      { rule: 'C' },
+    );
 
     const dec = C();
-    // params.decorators come first, then explicit
     expect(dec.metadata.children).toHaveLength(2);
-    expect(dec.metadata.children[0].metadata.factory).toBe(A);
-    expect(dec.metadata.children[1].metadata.factory).toBe(B);
+    expect(dec.metadata.children[0].metadata.rule).toBe('A');
+    expect(dec.metadata.children[1].metadata.rule).toBe('B');
   });
 
   it('statics are callable on the factory', () => {
     const IsEmail = createSchemaFieldDecoratorFactory(
-      function IsEmail(): SchemaFieldDecorator {
-        return SchemaField(IsEmail, {});
-      },
+      (): SchemaFieldDecorator => SchemaField(IsEmail, {}),
       {
+        rule: 'IsEmail',
         message: 'must be a valid email',
         validate: (_, value) => typeof value === 'string' && value.includes('@'),
         toJsonSchema: () => ({ type: 'string', format: 'email' }),

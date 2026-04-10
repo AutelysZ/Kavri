@@ -152,12 +152,13 @@ import { IsString } from './primitives.js';
 type SV0 = ((schema?: StringSchema) => SchemaFieldDecorator<ValidateOptions>) &
   SchemaFieldDecoratorFactoryStatic<ValidateOptions>;
 
-function sv0(validateFn: (value: string) => boolean, format?: string): SV0 {
+function sv0(rule: string, validateFn: (value: string) => boolean, format?: string): SV0 {
   const factory = createSchemaFieldDecoratorFactory(
     (schema?: StringSchema): any => {
       return SchemaField(factory, (schema ?? {}) as any, undefined, [IsString(schema)]);
     },
     {
+      rule,
       validate: (_: any, v: unknown) => typeof v !== 'string' || validateFn(v),
       toJsonSchema: format ? () => ({ type: 'string', format }) : undefined,
     },
@@ -176,6 +177,7 @@ type SVO<P> = ((
   SchemaFieldDecoratorFactoryStatic<ValidateSchema<P | undefined>>;
 
 function svo<P>(
+  rule: string,
   validateFn: (value: string, param: P | undefined) => boolean,
   format?: string,
 ): SVO<P> {
@@ -186,6 +188,7 @@ function svo<P>(
       ]);
     },
     {
+      rule,
       validate: (_: any, v: unknown) => typeof v !== 'string' || validateFn(v, _.value),
       toJsonSchema: format ? () => ({ type: 'string', format }) : undefined,
     },
@@ -200,7 +203,11 @@ function svo<P>(
 type SVR<P> = ((param: P, schema?: StringSchema) => SchemaFieldDecorator<ValidateSchema<P>>) &
   SchemaFieldDecoratorFactoryStatic<ValidateSchema<P>>;
 
-function svr<P>(validateFn: (value: string, param: P) => boolean, format?: string): SVR<P> {
+function svr<P>(
+  rule: string,
+  validateFn: (value: string, param: P) => boolean,
+  format?: string,
+): SVR<P> {
   const factory = createSchemaFieldDecoratorFactory<any>(
     (param: P, schema?: StringSchema): any => {
       return SchemaField(factory, { value: param, ...(schema ?? {}) } as any, undefined, [
@@ -208,6 +215,7 @@ function svr<P>(validateFn: (value: string, param: P) => boolean, format?: strin
       ]);
     },
     {
+      rule,
       validate: (_: any, v: unknown) => typeof v !== 'string' || validateFn(v, _.value),
       toJsonSchema: format ? () => ({ type: 'string', format }) : undefined,
     },
@@ -239,102 +247,104 @@ interface StrongPasswordOptions extends StrongPasswordOptions_ {
 // Validators: no params
 // ---------------------------------------------------------------------------
 
-export const IsAscii = sv0(isAsciiFn);
-export const IsMultibyte = sv0(isMultibyteFn);
-export const IsFullWidth = sv0(isFullWidthFn);
-export const IsHalfWidth = sv0(isHalfWidthFn);
-export const IsVariableWidth = sv0(isVariableWidthFn);
-export const IsSurrogatePair = sv0(isSurrogatePairFn);
-export const IsLowercase = sv0(isLowercaseFn);
-export const IsUppercase = sv0(isUppercaseFn);
-export const IsSlug = sv0(isSlugFn);
-export const IsLocale = sv0(isLocaleFn);
-export const IsBase58 = sv0(isBase58Fn);
-export const IsDataURI = sv0(isDataURIFn);
-export const IsMagnetURI = sv0(isMagnetURIFn);
-export const IsMailtoURI = sv0(isMailtoURIFn);
-export const IsMimeType = sv0(isMimeTypeFn);
-export const IsJWT = sv0(isJWTFn);
-export const IsOctal = sv0(isOctalFn);
-export const IsHexColor = sv0(isHexColorFn);
-export const IsHexadecimal = sv0(isHexadecimalFn);
-export const IsHSL = sv0(isHSLFn);
-export const IsMD5 = sv0(isMD5Fn);
-export const IsEAN = sv0(isEANFn);
-export const IsISIN = sv0(isISINFn);
-export const IsEthereumAddress = sv0(isEthereumAddressFn);
-export const IsBtcAddress = sv0(isBtcAddressFn);
-export const IsBIC = sv0(isBICFn);
-export const IsAbaRouting = sv0(isAbaRoutingFn);
-export const IsLuhnNumber = sv0(isLuhnNumberFn);
-export const IsPort = sv0(isPortFn);
-export const IsMongoId = sv0(isMongoIdFn);
-export const IsRFC3339 = sv0(isRFC3339Fn, 'date-time');
-export const IsISO4217 = sv0(isISO4217Fn);
-export const IsISO6346 = sv0(isISO6346Fn);
-export const IsISO6391 = sv0(isISO6391Fn);
-export const IsISO15924 = sv0(isISO15924Fn);
-export const IsISO31661Alpha2 = sv0(isISO31661Alpha2Fn);
-export const IsISO31661Alpha3 = sv0(isISO31661Alpha3Fn);
-export const IsISO31661Numeric = sv0(isISO31661NumericFn);
-export const IsISRC = sv0(isISRCFn);
-export const IsFreightContainerID = sv0(isFreightContainerIDFn);
-export const IsULID = sv0(isULIDFn);
-export const IsSemVer = sv0(isSemVerFn);
-export const IsLatLong = sv0(isLatLongFn);
+export const IsAscii = sv0('IsAscii', isAsciiFn);
+export const IsMultibyte = sv0('IsMultibyte', isMultibyteFn);
+export const IsFullWidth = sv0('IsFullWidth', isFullWidthFn);
+export const IsHalfWidth = sv0('IsHalfWidth', isHalfWidthFn);
+export const IsVariableWidth = sv0('IsVariableWidth', isVariableWidthFn);
+export const IsSurrogatePair = sv0('IsSurrogatePair', isSurrogatePairFn);
+export const IsLowercase = sv0('IsLowercase', isLowercaseFn);
+export const IsUppercase = sv0('IsUppercase', isUppercaseFn);
+export const IsSlug = sv0('IsSlug', isSlugFn);
+export const IsLocale = sv0('IsLocale', isLocaleFn);
+export const IsBase58 = sv0('IsBase58', isBase58Fn);
+export const IsDataURI = sv0('IsDataURI', isDataURIFn);
+export const IsMagnetURI = sv0('IsMagnetURI', isMagnetURIFn);
+export const IsMailtoURI = sv0('IsMailtoURI', isMailtoURIFn);
+export const IsMimeType = sv0('IsMimeType', isMimeTypeFn);
+export const IsJWT = sv0('IsJWT', isJWTFn);
+export const IsOctal = sv0('IsOctal', isOctalFn);
+export const IsHexColor = sv0('IsHexColor', isHexColorFn);
+export const IsHexadecimal = sv0('IsHexadecimal', isHexadecimalFn);
+export const IsHSL = sv0('IsHSL', isHSLFn);
+export const IsMD5 = sv0('IsMD5', isMD5Fn);
+export const IsEAN = sv0('IsEAN', isEANFn);
+export const IsISIN = sv0('IsISIN', isISINFn);
+export const IsEthereumAddress = sv0('IsEthereumAddress', isEthereumAddressFn);
+export const IsBtcAddress = sv0('IsBtcAddress', isBtcAddressFn);
+export const IsBIC = sv0('IsBIC', isBICFn);
+export const IsAbaRouting = sv0('IsAbaRouting', isAbaRoutingFn);
+export const IsLuhnNumber = sv0('IsLuhnNumber', isLuhnNumberFn);
+export const IsPort = sv0('IsPort', isPortFn);
+export const IsMongoId = sv0('IsMongoId', isMongoIdFn);
+export const IsRFC3339 = sv0('IsRFC3339', isRFC3339Fn, 'date-time');
+export const IsISO4217 = sv0('IsISO4217', isISO4217Fn);
+export const IsISO6346 = sv0('IsISO6346', isISO6346Fn);
+export const IsISO6391 = sv0('IsISO6391', isISO6391Fn);
+export const IsISO15924 = sv0('IsISO15924', isISO15924Fn);
+export const IsISO31661Alpha2 = sv0('IsISO31661Alpha2', isISO31661Alpha2Fn);
+export const IsISO31661Alpha3 = sv0('IsISO31661Alpha3', isISO31661Alpha3Fn);
+export const IsISO31661Numeric = sv0('IsISO31661Numeric', isISO31661NumericFn);
+export const IsISRC = sv0('IsISRC', isISRCFn);
+export const IsFreightContainerID = sv0('IsFreightContainerID', isFreightContainerIDFn);
+export const IsULID = sv0('IsULID', isULIDFn);
+export const IsSemVer = sv0('IsSemVer', isSemVerFn);
+export const IsLatLong = sv0('IsLatLong', isLatLongFn);
 
 // ---------------------------------------------------------------------------
 // Validators: required primitive param
 // ---------------------------------------------------------------------------
 
-export const IsHash = svr<HashAlgorithm>(isHashFn);
-export const IsPostalCode = svr<PostalCodeLocale>(isPostalCodeFn);
-export const IsVAT = svr<VATCountryCode>(isVATFn);
-export const IsTaxID = svr<string>(isTaxIDFn);
-export const IsLicensePlate = svr<string>((v, p) => !!isLicensePlateFn(v, p));
-export const IsDivisibleBy = svr<number>(isDivisibleByFn);
+export const IsHash = svr<HashAlgorithm>('IsHash', isHashFn);
+export const IsPostalCode = svr<PostalCodeLocale>('IsPostalCode', isPostalCodeFn);
+export const IsVAT = svr<VATCountryCode>('IsVAT', isVATFn);
+export const IsTaxID = svr<string>('IsTaxID', isTaxIDFn);
+export const IsLicensePlate = svr<string>('IsLicensePlate', (v, p) => !!isLicensePlateFn(v, p));
+export const IsDivisibleBy = svr<number>('IsDivisibleBy', isDivisibleByFn);
 
 // ---------------------------------------------------------------------------
 // Validators: optional primitive param
 // ---------------------------------------------------------------------------
 
-export const IsUUID = svo<UUIDVersion>(isUUIDFn, 'uuid');
-export const IsISBN = svo<ISBNVersion>(isISBNFn);
-export const IsPassportNumber = svo<string>(isPassportNumberFn);
-export const IsIdentityCard = svo<IdentityCardLocale>(isIdentityCardFn);
-export const IsRgbColor = svo<boolean>(isRgbColorFn);
+export const IsUUID = svo<UUIDVersion>('IsUUID', isUUIDFn, 'uuid');
+export const IsISBN = svo<ISBNVersion>('IsISBN', isISBNFn);
+export const IsPassportNumber = svo<string>('IsPassportNumber', isPassportNumberFn);
+export const IsIdentityCard = svo<IdentityCardLocale>('IsIdentityCard', isIdentityCardFn);
+export const IsRgbColor = svo<boolean>('IsRgbColor', isRgbColorFn);
 
 // ---------------------------------------------------------------------------
 // Validators: object options param
 // ---------------------------------------------------------------------------
 
-export const IsEmail = svo<IsEmailOptions>(isEmailFn, 'email');
-export const IsURL = svo<IsURLOptions>(isURLFn, 'uri');
-export const IsIP = svo<IsIPOptions>(isIPFn, 'ipv4');
-export const IsIPRange = svo<IPVersion>(isIPRangeFn);
-export const IsAlpha = svo<IsAlphaOptions>((v, p) => isAlphaFn(v, p?.locale, p));
-export const IsAlphanumeric = svo<IsAlphanumericOptions>((v, p) =>
+export const IsEmail = svo<IsEmailOptions>('IsEmail', isEmailFn, 'email');
+export const IsURL = svo<IsURLOptions>('IsURL', isURLFn, 'uri');
+export const IsIP = svo<IsIPOptions>('IsIP', isIPFn, 'ipv4');
+export const IsIPRange = svo<IPVersion>('IsIPRange', isIPRangeFn);
+export const IsAlpha = svo<IsAlphaOptions>('IsAlpha', (v, p) => isAlphaFn(v, p?.locale, p));
+export const IsAlphanumeric = svo<IsAlphanumericOptions>('IsAlphanumeric', (v, p) =>
   isAlphanumericFn(v, p?.locale, p),
 );
-export const IsNumericString = svo<IsNumericOptions>(isNumericFn);
-export const IsEmpty = svo<IsEmptyOptions>(isEmptyFn);
-export const IsBase32 = svo<IsBase32Options>(isBase32Fn);
-export const IsBase64 = svo<IsBase64Options>(isBase64Fn);
-export const IsJSON = svo<IsJSONOptions>(isJSONFn);
-export const IsCreditCard = svo<IsCreditCardOptions>(isCreditCardFn);
-export const IsCurrency = svo<IsCurrencyOptions>(isCurrencyFn);
-export const IsIBAN = svo<IsIBANOptions>(isIBANFn);
-export const IsMobilePhone = svr<IsMobilePhoneOptions>((v, p) => isMobilePhoneFn(v, p.locale, p));
-export const IsIMEI = svo<IsIMEIOptions>(isIMEIFn);
-export const IsFQDN = svo<IsFQDNOptions>(isFQDNFn, 'hostname');
-export const IsMACAddress = svo<IsMACAddressOptions>(isMACAddressFn);
-export const IsISO8601 = svo<IsISO8601Options>(isISO8601Fn, 'date-time');
-export const IsTime = svo<IsTimeOptions>(isTimeFn, 'time');
-export const IsISSN = svo<IsISSNOptions>(isISSNFn);
-export const IsStrongPassword = svo<StrongPasswordOptions>(isStrongPasswordFn);
-export const IsFloatString = svo<IsFloatOptions>(isFloatFn);
-export const IsIntString = svo<IsIntOptions>(isIntFn);
-export const IsDecimal = svo<IsDecimalOptions>(isDecimalFn);
-export const IsByteLength = svo<IsByteLengthOptions>(isByteLengthFn);
-export const IsWhitelisted = svr<string | string[]>(isWhitelistedFn);
-export const IsDateString = svo<IsDateOptions>(isDateFn);
+export const IsNumericString = svo<IsNumericOptions>('IsNumericString', isNumericFn);
+export const IsEmpty = svo<IsEmptyOptions>('IsEmpty', isEmptyFn);
+export const IsBase32 = svo<IsBase32Options>('IsBase32', isBase32Fn);
+export const IsBase64 = svo<IsBase64Options>('IsBase64', isBase64Fn);
+export const IsJSON = svo<IsJSONOptions>('IsJSON', isJSONFn);
+export const IsCreditCard = svo<IsCreditCardOptions>('IsCreditCard', isCreditCardFn);
+export const IsCurrency = svo<IsCurrencyOptions>('IsCurrency', isCurrencyFn);
+export const IsIBAN = svo<IsIBANOptions>('IsIBAN', isIBANFn);
+export const IsMobilePhone = svr<IsMobilePhoneOptions>('IsMobilePhone', (v, p) =>
+  isMobilePhoneFn(v, p.locale, p),
+);
+export const IsIMEI = svo<IsIMEIOptions>('IsIMEI', isIMEIFn);
+export const IsFQDN = svo<IsFQDNOptions>('IsFQDN', isFQDNFn, 'hostname');
+export const IsMACAddress = svo<IsMACAddressOptions>('IsMACAddress', isMACAddressFn);
+export const IsISO8601 = svo<IsISO8601Options>('IsISO8601', isISO8601Fn, 'date-time');
+export const IsTime = svo<IsTimeOptions>('IsTime', isTimeFn, 'time');
+export const IsISSN = svo<IsISSNOptions>('IsISSN', isISSNFn);
+export const IsStrongPassword = svo<StrongPasswordOptions>('IsStrongPassword', isStrongPasswordFn);
+export const IsFloatString = svo<IsFloatOptions>('IsFloatString', isFloatFn);
+export const IsIntString = svo<IsIntOptions>('IsIntString', isIntFn);
+export const IsDecimal = svo<IsDecimalOptions>('IsDecimal', isDecimalFn);
+export const IsByteLength = svo<IsByteLengthOptions>('IsByteLength', isByteLengthFn);
+export const IsWhitelisted = svr<string | string[]>('IsWhitelisted', isWhitelistedFn);
+export const IsDateString = svo<IsDateOptions>('IsDateString', isDateFn);

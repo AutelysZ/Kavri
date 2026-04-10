@@ -29,6 +29,7 @@ export const IsFile = createSchemaFieldDecoratorFactory(
     return SchemaField(IsFile, (options ?? {}) as IsFileOptions);
   },
   {
+    rule: 'IsFile',
     // File validation handled by the multipart parser, not the schema validator
   },
 );
@@ -47,6 +48,7 @@ export const IsBody = createSchemaFieldDecoratorFactory(
     return SchemaField(IsBody, (options ?? {}) as ValidateOptions);
   },
   {
+    rule: 'IsBody',
     // Body validation handled by the binary parser, not the schema validator
   },
 );
@@ -73,6 +75,7 @@ export const IsFilename = createSchemaFieldDecoratorFactory(
     ]);
   },
   {
+    rule: 'IsFilename',
     validate: (p, v) => {
       if (typeof v !== 'string' || !p.accept?.length) return true;
       return p.accept.some((pattern) => {

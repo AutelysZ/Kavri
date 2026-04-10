@@ -185,6 +185,8 @@ export interface AllOfSchema<T = unknown> extends BaseSchema<T> {
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export interface SchemaFieldDecoratorMetadata<P = any> {
+  /** Decorator rule name for validation error messages. */
+  rule: string;
   /** The factory function that created this decorator. */
   factory: SchemaFieldDecoratorFactory<P>;
   /** Parameters passed to the factory. */
@@ -204,6 +206,8 @@ export type SchemaFieldDecorator<P = any> = FieldDecorator<SchemaFieldDecoratorM
  * Used by the schema pipeline for validation, parsing, serialization, and JSON Schema generation.
  */
 export interface SchemaFieldDecoratorFactoryStatic<P> {
+  /** Decorator rule name for validation error messages. */
+  rule: string;
   /** Default validation error message template. */
   message?: string;
   /** Parse raw input into the target type. */

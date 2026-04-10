@@ -16,6 +16,7 @@ export const MinLength = createSchemaFieldDecoratorFactory(
     return SchemaField(MinLength, toValidateSchema(options));
   },
   {
+    rule: 'MinLength',
     message: '.label must be at least .value characters',
     validate: (p, v) => typeof v !== 'string' || v.length >= p.value,
     toJsonSchema: (p) => ({ minLength: p.value }),
@@ -28,6 +29,7 @@ export const MaxLength = createSchemaFieldDecoratorFactory(
     return SchemaField(MaxLength, toValidateSchema(options));
   },
   {
+    rule: 'MaxLength',
     message: '.label must be at most .value characters',
     validate: (p, v) => typeof v !== 'string' || v.length <= p.value,
     toJsonSchema: (p) => ({ maxLength: p.value }),
@@ -40,6 +42,7 @@ export const Pattern = createSchemaFieldDecoratorFactory(
     return SchemaField(Pattern, toValidateSchema(options));
   },
   {
+    rule: 'Pattern',
     message: '.label must match pattern .value',
     validate: (p, v) => typeof v !== 'string' || new RegExp(p.value).test(v),
     toJsonSchema: (p) => ({ pattern: p.value }),
@@ -56,6 +59,7 @@ export const Min = createSchemaFieldDecoratorFactory(
     return SchemaField(Min, toValidateSchema(options));
   },
   {
+    rule: 'Min',
     message: '.label must be at least .value',
     validate: (p, v) => typeof v !== 'number' || v >= p.value,
     toJsonSchema: (p) => ({ minimum: p.value }),
@@ -68,6 +72,7 @@ export const Max = createSchemaFieldDecoratorFactory(
     return SchemaField(Max, toValidateSchema(options));
   },
   {
+    rule: 'Max',
     message: '.label must be at most .value',
     validate: (p, v) => typeof v !== 'number' || v <= p.value,
     toJsonSchema: (p) => ({ maximum: p.value }),
@@ -80,6 +85,7 @@ export const ExclusiveMin = createSchemaFieldDecoratorFactory(
     return SchemaField(ExclusiveMin, toValidateSchema(options));
   },
   {
+    rule: 'ExclusiveMin',
     message: '.label must be greater than .value',
     validate: (p, v) => typeof v !== 'number' || v > p.value,
     toJsonSchema: (p) => ({ exclusiveMinimum: p.value }),
@@ -92,6 +98,7 @@ export const ExclusiveMax = createSchemaFieldDecoratorFactory(
     return SchemaField(ExclusiveMax, toValidateSchema(options));
   },
   {
+    rule: 'ExclusiveMax',
     message: '.label must be less than .value',
     validate: (p, v) => typeof v !== 'number' || v < p.value,
     toJsonSchema: (p) => ({ exclusiveMaximum: p.value }),
@@ -104,6 +111,7 @@ export const MultipleOf = createSchemaFieldDecoratorFactory(
     return SchemaField(MultipleOf, toValidateSchema(options));
   },
   {
+    rule: 'MultipleOf',
     message: '.label must be a multiple of .value',
     validate: (p, v) => typeof v !== 'number' || v % p.value === 0,
     toJsonSchema: (p) => ({ multipleOf: p.value }),
@@ -120,6 +128,7 @@ export const MinItems = createSchemaFieldDecoratorFactory(
     return SchemaField(MinItems, toValidateSchema(options));
   },
   {
+    rule: 'MinItems',
     message: '.label must have at least .value items',
     validate: (p, v) => !Array.isArray(v) || v.length >= p.value,
     toJsonSchema: (p) => ({ minItems: p.value }),
@@ -132,6 +141,7 @@ export const MaxItems = createSchemaFieldDecoratorFactory(
     return SchemaField(MaxItems, toValidateSchema(options));
   },
   {
+    rule: 'MaxItems',
     message: '.label must have at most .value items',
     validate: (p, v) => !Array.isArray(v) || v.length <= p.value,
     toJsonSchema: (p) => ({ maxItems: p.value }),
@@ -144,6 +154,7 @@ export const UniqueItems = createSchemaFieldDecoratorFactory(
     return SchemaField(UniqueItems, toValidateSchema(options ?? true));
   },
   {
+    rule: 'UniqueItems',
     message: '.label must have unique items',
     validate: (p, v) => !p.value || !Array.isArray(v) || new Set(v).size === v.length,
     toJsonSchema: (p) => ({ uniqueItems: p.value }),
@@ -160,6 +171,7 @@ export const MinProperties = createSchemaFieldDecoratorFactory(
     return SchemaField(MinProperties, toValidateSchema(options));
   },
   {
+    rule: 'MinProperties',
     message: '.label must have at least .value properties',
     validate: (p, v) =>
       typeof v !== 'object' || v === null || Object.keys(v as object).length >= p.value,
@@ -173,6 +185,7 @@ export const MaxProperties = createSchemaFieldDecoratorFactory(
     return SchemaField(MaxProperties, toValidateSchema(options));
   },
   {
+    rule: 'MaxProperties',
     message: '.label must have at most .value properties',
     validate: (p, v) =>
       typeof v !== 'object' || v === null || Object.keys(v as object).length <= p.value,
@@ -210,6 +223,7 @@ export const IsBefore = createSchemaFieldDecoratorFactory(
     return SchemaField(IsBefore, toValidateSchema(options));
   },
   {
+    rule: 'IsBefore',
     message: '.label must be before .value',
     validate: (p, v) => {
       const d = toDate(v);
@@ -224,6 +238,7 @@ export const IsAfter = createSchemaFieldDecoratorFactory(
     return SchemaField(IsAfter, toValidateSchema(options));
   },
   {
+    rule: 'IsAfter',
     message: '.label must be after .value',
     validate: (p, v) => {
       const d = toDate(v);

@@ -81,6 +81,7 @@ export function SchemaField<P extends ValidateOptions>(
     ...(children ?? []),
   ];
   const metadata: SchemaFieldDecoratorMetadata<P> = {
+    rule: factory.rule,
     factory,
     params,
     deps: deps ?? [],
