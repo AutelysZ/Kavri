@@ -11,6 +11,7 @@ import type {
   SchemaFieldDecorator,
 } from '../types.js';
 import { createSchemaFieldDecoratorFactory, SchemaField, toValidateSchema } from '../field.js';
+import type { ValidateField } from '../types.js';
 import {
   MinLength,
   MaxLength,
@@ -20,6 +21,8 @@ import {
   ExclusiveMin,
   ExclusiveMax,
   MultipleOf,
+  IsBefore,
+  IsAfter,
 } from './constraints.js';
 
 // ---------------------------------------------------------------------------
@@ -156,40 +159,35 @@ export const IsBoolean = createSchemaFieldDecoratorFactory(
 // IsDate
 // ---------------------------------------------------------------------------
 
+/** Input for date constraints: Date, parseable string, or undefined (= now). */
+type DateInput = Date | string | undefined;
+
 /** Options for date validation. */
 export interface DateOptions extends ValidateOptions {
   /** Date format: 'iso' (date-time) or 'date' (date only). Default: 'iso'. */
   format?: 'iso' | 'date';
-  /** Value must be before this date. */
-  before?: Date;
-  /** Value must be after this date. */
-  after?: Date;
+  /** Value must be before this date. Date, parseable string, or undefined (now). */
+  before?: ValidateField<DateInput>;
+  /** Value must be after this date. Date, parseable string, or undefined (now). */
+  after?: ValidateField<DateInput>;
 }
 
 /**
- * Date field. Composes IsString internally.
+ * Date field. Composes IsString, IsBefore, IsAfter internally.
  * Parse: `new Date(value)`. Serialize: `.toISOString()` or date portion.
  * JSON Schema: `{ type: 'string', format: 'date-time' | 'date' }`.
  */
 export const IsDate = createSchemaFieldDecoratorFactory(
   (options?: DateOptions, schema?: StringSchema<Date>): SchemaFieldDecorator<DateOptions> => {
-    return SchemaField(IsDate, (options ?? {}) as DateOptions, [IsString(schema)]);
+    const children: SchemaFieldDecorator[] = [IsString(schema)];
+    if (options?.before !== undefined) children.push(IsBefore(options.before));
+    if (options?.after !== undefined) children.push(IsAfter(options.after));
+    return SchemaField(IsDate, (options ?? {}) as DateOptions, children);
   },
   {
-    validate: (p, v) => {
-      if (typeof v === 'string') {
-        const d = new Date(v);
-        if (isNaN(d.getTime())) return false;
-        if (p.before && d >= p.before) return false;
-        if (p.after && d <= p.after) return false;
-        return true;
-      }
-      if (v instanceof Date) {
-        if (p.before && v >= p.before) return false;
-        if (p.after && v <= p.after) return false;
-        return true;
-      }
-      return false;
+    validate: (_, v) => {
+      if (typeof v === 'string') return !isNaN(new Date(v).getTime());
+      return v instanceof Date && !isNaN(v.getTime());
     },
     parse: (_, v) => (typeof v === 'string' ? new Date(v) : v),
     serialize: (p, v) =>

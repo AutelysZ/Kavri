@@ -179,3 +179,55 @@ export const MaxProperties = createSchemaFieldDecoratorFactory(
     toJsonSchema: (p) => ({ maxProperties: p.value }),
   },
 );
+
+// ---------------------------------------------------------------------------
+// Date constraints
+// ---------------------------------------------------------------------------
+
+/** Input for date constraints: Date, parseable string, or undefined (= now). */
+type DateInput = Date | string | undefined;
+
+/** Resolve a DateInput to a Date. undefined = now. */
+function resolveDate(input: DateInput): Date {
+  if (input === undefined) return new Date();
+  if (input instanceof Date) return input;
+  return new Date(input);
+}
+
+/** Resolve a value to a Date for comparison. */
+function toDate(v: unknown): Date | null {
+  if (v instanceof Date) return v;
+  if (typeof v === 'string') {
+    const d = new Date(v);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  return null;
+}
+
+/** Value must be before the given date. undefined = now. */
+export const IsBefore = createSchemaFieldDecoratorFactory(
+  (options: ValidateField<DateInput>): SchemaFieldDecorator<ValidateSchema<DateInput>> => {
+    return SchemaField(IsBefore, toValidateSchema(options));
+  },
+  {
+    message: '.label must be before .value',
+    validate: (p, v) => {
+      const d = toDate(v);
+      return d === null || d < resolveDate(p.value);
+    },
+  },
+);
+
+/** Value must be after the given date. undefined = now. */
+export const IsAfter = createSchemaFieldDecoratorFactory(
+  (options: ValidateField<DateInput>): SchemaFieldDecorator<ValidateSchema<DateInput>> => {
+    return SchemaField(IsAfter, toValidateSchema(options));
+  },
+  {
+    message: '.label must be after .value',
+    validate: (p, v) => {
+      const d = toDate(v);
+      return d === null || d > resolveDate(p.value);
+    },
+  },
+);

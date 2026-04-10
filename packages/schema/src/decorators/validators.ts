@@ -91,8 +91,6 @@ import isDecimalFn from 'validator/es/lib/isDecimal';
 import isDivisibleByFn from 'validator/es/lib/isDivisibleBy';
 import isByteLengthFn from 'validator/es/lib/isByteLength';
 import isWhitelistedFn from 'validator/es/lib/isWhitelisted';
-import isAfterFn from 'validator/es/lib/isAfter';
-import isBeforeFn from 'validator/es/lib/isBefore';
 import isDateFn from 'validator/es/lib/isDate';
 
 import {
@@ -123,8 +121,6 @@ import {
   type IsIntOptions,
   type IsDecimalOptions,
   type IsByteLengthOptions,
-  type IsAfterOptions,
-  type IsBeforeOptions,
   type IsDateOptions,
   type StrongPasswordOptions as StrongPasswordOptions_,
   type ISBNVersion,
@@ -337,6 +333,4 @@ export const IsIntString = svo<IsIntOptions>(isIntFn);
 export const IsDecimal = svo<IsDecimalOptions>(isDecimalFn);
 export const IsByteLength = svo<IsByteLengthOptions>(isByteLengthFn);
 export const IsWhitelisted = svr<string | string[]>(isWhitelistedFn);
-export const IsAfter = svo<IsAfterOptions>(isAfterFn);
-export const IsBefore = svo<IsBeforeOptions>(isBeforeFn);
 export const IsDateString = svo<IsDateOptions>(isDateFn);
