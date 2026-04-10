@@ -5,6 +5,23 @@
 import type { StringSchema, ValidateOptions, SchemaFieldDecorator } from '../types.js';
 import { createSchemaFieldDecoratorFactory, SchemaField } from '../field.js';
 import { IsString } from './primitives.js';
+import { IsArray, Ref } from './composite.js';
+
+// ---------------------------------------------------------------------------
+// MultipartFile
+// ---------------------------------------------------------------------------
+
+/** Represents an uploaded file in a multipart request. */
+export class MultipartFile {
+  /** Original uploaded filename. */
+  readonly name!: string;
+  /** File size in bytes. */
+  readonly size!: number;
+  /** MIME type. */
+  readonly type!: string;
+  /** Temp file path on disk. */
+  readonly path!: string;
+}
 
 // ---------------------------------------------------------------------------
 // IsFile
@@ -22,15 +39,17 @@ export interface IsFileOptions extends ValidateOptions {
 
 /**
  * Marks a field as a file upload. Use in multipart request schemas only.
+ * Composes Ref(() => MultipartFile) or IsArray(Ref(() => MultipartFile)) as dep.
  * Do NOT combine with other schema decorators.
  */
 export const IsFile = createSchemaFieldDecoratorFactory(
   (options?: IsFileOptions): SchemaFieldDecorator<IsFileOptions> => {
-    return SchemaField(IsFile, (options ?? {}) as IsFileOptions);
+    const fileRef = Ref(() => MultipartFile);
+    const dep = options?.array ? IsArray(fileRef) : fileRef;
+    return SchemaField(IsFile, (options ?? {}) as IsFileOptions, undefined, [dep]);
   },
   {
     rule: 'IsFile',
-    // File validation handled by the multipart parser, not the schema validator
   },
 );
 
@@ -49,7 +68,6 @@ export const IsBody = createSchemaFieldDecoratorFactory(
   },
   {
     rule: 'IsBody',
-    // Body validation handled by the binary parser, not the schema validator
   },
 );
 
@@ -82,7 +100,6 @@ export const IsFilename = createSchemaFieldDecoratorFactory(
         if (pattern.startsWith('.')) return v.endsWith(pattern);
         if (pattern.includes('*')) {
           const [type] = pattern.split('/');
-          // Simple MIME wildcard check — full impl in web module
           return v.includes(type ?? '');
         }
         return false;
