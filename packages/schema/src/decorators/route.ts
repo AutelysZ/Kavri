@@ -3,7 +3,7 @@
  * These are exclusive to route request schemas.
  */
 import { lookup } from 'mime-types';
-import type { StringSchema, ValidateOptions, SchemaFieldDecorator } from '../types.js';
+import type { BaseSchema, StringSchema, ValidateOptions, SchemaFieldDecorator } from '../types.js';
 import { createSchemaFieldDecoratorFactory, SchemaField } from '../field.js';
 import { IsString } from './primitives.js';
 import { IsArray, Ref } from './composite.js';
@@ -87,11 +87,10 @@ function matchAccept(accept: string[], mimeType: string): boolean {
 /**
  * Marks a field as the raw binary request body stream.
  * Use in binary request schemas only. At most one @IsBody per schema.
- * Do NOT combine with other schema decorators.
  */
 export const IsBody = createSchemaFieldDecoratorFactory(
-  (options?: ValidateOptions): SchemaFieldDecorator<ValidateOptions> => {
-    return SchemaField(IsBody, (options ?? {}) as ValidateOptions);
+  (schema?: BaseSchema<ReadableStream>): SchemaFieldDecorator<BaseSchema<ReadableStream>> => {
+    return SchemaField(IsBody, (schema ?? {}) as BaseSchema<ReadableStream>);
   },
   {
     rule: 'IsBody',
