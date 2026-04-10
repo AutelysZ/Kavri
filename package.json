@@ -23,7 +23,7 @@
     "husky": "^9.1.7",
     "lint-staged": "^15.5.2",
     "prettier": "^3.5.3",
-    "tsdown": "^0.21.7",
+    "tsup": "^8.5.1",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.33.0",
     "unplugin-swc": "^1.5.9",

@@ -24,7 +24,7 @@ export default tseslint.config(
     ignores: [
       'node_modules/',
       'packages/*/dist/',
-      'packages/*/tsdown.config.ts',
+      'packages/*/tsup.config.ts',
       'docs/',
       'coverage/',
       '*.js',
