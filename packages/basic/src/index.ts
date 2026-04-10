@@ -12,7 +12,7 @@ export type {
 } from './types.js';
 
 export { MetadataStore } from './metadata.js';
-export { Key, Context, AsyncScope } from './context.js';
+export { Key, type Context, AsyncScope } from './context.js';
 
 import { MetadataStore } from './metadata.js';
 

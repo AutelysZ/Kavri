@@ -43,30 +43,77 @@ export class Key<T> {
  * Scope methods (`isActive`, `run`, `fork`, `enter`) delegate to the owning
  * {@link AsyncScope}, passing this context as the state parameter.
  */
-export class Context {
+export interface Context {
+  /** Check if a key has a value (own or inherited from parent). */
+  has(key: Key<unknown>): boolean;
+
+  /** Get value. Checks own Map first, then parent chain. */
+  get<V>(key: Key<V>): V | undefined;
+
+  /** Get value or throw if absent in the entire chain. */
+  getOrThrow<V>(key: Key<V>): V;
+
+  /** Get value if present, otherwise set and return the provided value. */
+  getOrInsert<V>(key: Key<V>, value: V): V;
+
+  /** Get value if present, otherwise compute, set, and return. */
+  getOrInsertComputed<V>(key: Key<V>, callback: (key: Key<V>) => V): V;
+
+  /** Set a value in this context's own Map. Returns `this` for chaining. */
+  set<V>(key: Key<V>, value: V): this;
+
+  /** Delete a key from this context's own Map only. Parent values become visible again. */
+  delete(key: Key<unknown>): boolean;
+
+  /** Whether the owning AsyncScope currently has an active ALS scope. */
+  isActive(): boolean;
+
+  /**
+   * Enter ALS scope with this context and run `fn`.
+   * If ALS is already active, verifies this context is the current one (throws otherwise).
+   */
+  run<T>(fn: (ctx: Context) => Awaitable<T>): Promise<T>;
+
+  /**
+   * Create a child context and run `fn` in an ALS scope with it.
+   * If ALS is already active, verifies this context is the current one (throws otherwise).
+   */
+  fork<T>(fn: (ctx: Context) => Awaitable<T>): Promise<T>;
+
+  /**
+   * Enter ALS scope imperatively with this context.
+   * If ALS is already active, verifies this context is the current one (throws otherwise).
+   */
+  enter(): void;
+
+  /** Create a child context that inherits from this one. */
+  extend(): Context;
+}
+
+/**
+ * Internal implementation of {@link Context}.
+ * Not exported — users receive Context instances from AsyncScope methods.
+ */
+class ContextImpl implements Context {
   readonly #store = new Map<Key<unknown>, unknown>();
-  readonly #parent: Context | undefined;
+  readonly #parent: ContextImpl | undefined;
   readonly #scope: AsyncScope;
 
-  /** @internal */
-  constructor(scope: AsyncScope, parent?: Context) {
+  constructor(scope: AsyncScope, parent?: ContextImpl) {
     this.#scope = scope;
     this.#parent = parent;
   }
 
-  /** Check if a key has a value (own or inherited from parent). */
   has(key: Key<unknown>): boolean {
     if (this.#store.has(key)) return true;
     return this.#parent?.has(key) ?? false;
   }
 
-  /** Get value. Checks own Map first, then parent chain. */
   get<V>(key: Key<V>): V | undefined {
     if (this.#store.has(key)) return this.#store.get(key) as V;
     return this.#parent?.get(key);
   }
 
-  /** Get value or throw if absent in the entire chain. */
   getOrThrow<V>(key: Key<V>): V {
     if (!this.has(key)) {
       throw new Error(`Key "${key.name ?? '(unnamed)'}" is not set`);
@@ -74,14 +121,12 @@ export class Context {
     return this.get(key) as V;
   }
 
-  /** Get value if present, otherwise set and return the provided value. */
   getOrInsert<V>(key: Key<V>, value: V): V {
     if (this.has(key)) return this.get(key) as V;
     this.#store.set(key, value);
     return value;
   }
 
-  /** Get value if present, otherwise compute, set, and return. */
   getOrInsertComputed<V>(key: Key<V>, callback: (key: Key<V>) => V): V {
     if (this.has(key)) return this.get(key) as V;
     const value = callback(key);
@@ -89,49 +134,33 @@ export class Context {
     return value;
   }
 
-  /** Set a value in this context's own Map. Returns `this` for chaining. */
   set<V>(key: Key<V>, value: V): this {
     this.#store.set(key, value);
     return this;
   }
 
-  /** Delete a key from this context's own Map only. Parent values become visible again. */
   delete(key: Key<unknown>): boolean {
     return this.#store.delete(key);
   }
 
-  /** Whether the owning AsyncScope currently has an active ALS scope. */
   isActive(): boolean {
     return this.#scope.isActive();
   }
 
-  /**
-   * Enter ALS scope with this context and run `fn`.
-   * If ALS is already active, verifies this context is the current one (throws otherwise).
-   */
   run<T>(fn: (ctx: Context) => Awaitable<T>): Promise<T> {
     return this.#scope.run(fn, this);
   }
 
-  /**
-   * Create a child context and run `fn` in an ALS scope with it.
-   * If ALS is already active, verifies this context is the current one (throws otherwise).
-   */
   fork<T>(fn: (ctx: Context) => Awaitable<T>): Promise<T> {
     return this.#scope.fork(fn, this);
   }
 
-  /**
-   * Enter ALS scope imperatively with this context.
-   * If ALS is already active, verifies this context is the current one (throws otherwise).
-   */
   enter(): void {
     this.#scope.enter(this);
   }
 
-  /** @internal Create a child context that inherits from this one. */
   extend(): Context {
-    return new Context(this.#scope, this);
+    return new ContextImpl(this.#scope, this);
   }
 }
 
@@ -163,11 +192,11 @@ export class Context {
  * ```
  */
 export class AsyncScope {
-  #als: AsyncLocalStorage<Context> | undefined;
+  #als: AsyncLocalStorage<ContextImpl> | undefined;
 
-  #ensureAls(): AsyncLocalStorage<Context> {
+  #ensureAls(): AsyncLocalStorage<ContextImpl> {
     if (!this.#als) {
-      this.#als = new AsyncLocalStorage<Context>();
+      this.#als = new AsyncLocalStorage<ContextImpl>();
     }
     return this.#als;
   }
@@ -176,7 +205,7 @@ export class AsyncScope {
    * Get the current ALS context, or throw if not in a scope.
    * Used by delegated state methods.
    */
-  #current(): Context {
+  #current(): ContextImpl {
     const ctx = this.#als?.getStore();
     if (!ctx) throw new Error('Not in AsyncScope');
     return ctx;
@@ -186,7 +215,7 @@ export class AsyncScope {
    * Verify that `state` (if provided) matches the current ALS context.
    * Throws if ALS is active with a different context.
    */
-  #checkState(current: Context | undefined, state: Context | undefined): void {
+  #checkState(current: ContextImpl | undefined, state: Context | undefined): void {
     if (current && state && state !== current) {
       throw new Error('Provided context does not match active scope');
     }
@@ -251,7 +280,7 @@ export class AsyncScope {
     const current = als.getStore();
     this.#checkState(current, state);
     if (current) return fn(current);
-    const ctx = state ?? new Context(this);
+    const ctx = (state as ContextImpl | undefined) ?? new ContextImpl(this);
     return als.run(ctx, () => fn(ctx));
   }
 
@@ -268,8 +297,8 @@ export class AsyncScope {
     const als = this.#ensureAls();
     const current = als.getStore();
     this.#checkState(current, state);
-    const parent = state ?? current ?? new Context(this);
-    const child = new Context(this, parent);
+    const parent = (state as ContextImpl | undefined) ?? current ?? new ContextImpl(this);
+    const child = new ContextImpl(this, parent);
     return als.run(child, () => fn(child));
   }
 
@@ -286,12 +315,12 @@ export class AsyncScope {
     const current = als.getStore();
     this.#checkState(current, state);
     if (current) return;
-    const ctx = state ?? new Context(this);
+    const ctx = (state as ContextImpl | undefined) ?? new ContextImpl(this);
     als.enterWith(ctx);
   }
 
   /** Create a detached {@link Context} without entering an ALS scope. */
   create(): Context {
-    return new Context(this);
+    return new ContextImpl(this);
   }
 }
