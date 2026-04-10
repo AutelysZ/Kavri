@@ -69,7 +69,8 @@ When multiple designs are possible:
 
 ## Working Style
 
-1. Verify the request doesn't conflict with Kavri's design — if it does, explain and propose alternatives
-2. Find the smallest correct implementation
-3. Implement with tests and documentation
-4. After completing a task, summarize: what changed, what tests were added, what docs were updated, any remaining risks
+1. **If a request seems unreasonable, point it out and ask for confirmation before proceeding.** Do not silently follow instructions that may be mistakes, oversights, or technically problematic.
+2. Verify the request doesn't conflict with Kavri's design — if it does, explain and propose alternatives
+3. Find the smallest correct implementation
+4. Implement with tests and documentation
+5. After completing a task, summarize: what changed, what tests were added, what docs were updated, any remaining risks
