@@ -18,4 +18,4 @@ export type {
   InferredSchema,
 } from './types.js';
 
-export { toValidateSchema, createSchemaFieldDecoratorFactory, SchemaField } from './field.js';
+export { createSchemaFieldDecoratorFactory, SchemaField } from './field.js';
