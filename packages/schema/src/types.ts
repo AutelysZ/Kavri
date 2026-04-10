@@ -26,12 +26,18 @@ export interface JsonSchema {
   readOnly?: boolean;
   writeOnly?: boolean;
   items?: JsonSchema;
+  prefixItems?: JsonSchema[];
+  contains?: JsonSchema;
+  minContains?: number;
+  maxContains?: number;
   minItems?: number;
   maxItems?: number;
   uniqueItems?: boolean;
+  unevaluatedItems?: JsonSchema | boolean;
   properties?: Record<string, JsonSchema>;
   patternProperties?: Record<string, JsonSchema>;
   additionalProperties?: JsonSchema | boolean;
+  unevaluatedProperties?: JsonSchema | boolean;
   propertyNames?: JsonSchema;
   minProperties?: number;
   maxProperties?: number;
@@ -112,7 +118,8 @@ export interface NumericSchema<V = number> extends BaseSchema<number, V> {
 export interface ObjectSchema<T = object> extends BaseSchema<T> {
   properties?: { [K in keyof T]?: SchemaFieldDecorator };
   patternProperties?: Record<string, SchemaFieldDecorator>;
-  additionalProperties?: SchemaFieldDecorator;
+  additionalProperties?: SchemaFieldDecorator | false;
+  unevaluatedProperties?: SchemaFieldDecorator | false;
   propertyNames?: SchemaFieldDecorator;
   maxProperties?: ValidateField<number>;
   minProperties?: ValidateField<number>;
@@ -122,9 +129,14 @@ export interface ObjectSchema<T = object> extends BaseSchema<T> {
 /** Schema options for array fields. */
 export interface ArraySchema<T = unknown> extends BaseSchema<T[]> {
   items?: SchemaFieldDecorator;
+  prefixItems?: SchemaFieldDecorator[];
+  contains?: SchemaFieldDecorator;
+  minContains?: ValidateField<number>;
+  maxContains?: ValidateField<number>;
   minItems?: ValidateField<number>;
   maxItems?: ValidateField<number>;
   uniqueItems?: ValidateField<boolean>;
+  unevaluatedItems?: SchemaFieldDecorator | false;
 }
 
 /** Schema options for union (anyOf) fields. */
