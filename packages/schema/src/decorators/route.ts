@@ -25,7 +25,7 @@ export interface IsFileOptions extends ValidateOptions {
  * Do NOT combine with other schema decorators.
  */
 export const IsFile = createSchemaFieldDecoratorFactory(
-  function IsFile(options?: IsFileOptions): SchemaFieldDecorator<IsFileOptions> {
+  (options?: IsFileOptions): SchemaFieldDecorator<IsFileOptions> => {
     return SchemaField(IsFile, (options ?? {}) as IsFileOptions);
   },
   {
@@ -43,7 +43,7 @@ export const IsFile = createSchemaFieldDecoratorFactory(
  * Do NOT combine with other schema decorators.
  */
 export const IsBody = createSchemaFieldDecoratorFactory(
-  function IsBody(options?: ValidateOptions): SchemaFieldDecorator<ValidateOptions> {
+  (options?: ValidateOptions): SchemaFieldDecorator<ValidateOptions> => {
     return SchemaField(IsBody, (options ?? {}) as ValidateOptions);
   },
   {
@@ -67,10 +67,7 @@ export interface IsFilenameOptions extends ValidateOptions {
  * Use in binary request schemas alongside @IsBody.
  */
 export const IsFilename = createSchemaFieldDecoratorFactory(
-  function IsFilename(
-    options?: IsFilenameOptions,
-    schema?: StringSchema,
-  ): SchemaFieldDecorator<IsFilenameOptions> {
+  (options?: IsFilenameOptions, schema?: StringSchema): SchemaFieldDecorator<IsFilenameOptions> => {
     return SchemaField(IsFilename, (options ?? {}) as IsFilenameOptions, [IsString(schema)]);
   },
   {

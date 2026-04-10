@@ -12,7 +12,7 @@ import { createSchemaFieldDecoratorFactory, SchemaField, toValidateSchema } from
 
 /** Minimum string length. */
 export const MinLength = createSchemaFieldDecoratorFactory(
-  function MinLength(options: ValidateField<number>): SchemaFieldDecorator<ValidateSchema<number>> {
+  (options: ValidateField<number>): SchemaFieldDecorator<ValidateSchema<number>> => {
     return SchemaField(MinLength, toValidateSchema(options));
   },
   {
@@ -24,7 +24,7 @@ export const MinLength = createSchemaFieldDecoratorFactory(
 
 /** Maximum string length. */
 export const MaxLength = createSchemaFieldDecoratorFactory(
-  function MaxLength(options: ValidateField<number>): SchemaFieldDecorator<ValidateSchema<number>> {
+  (options: ValidateField<number>): SchemaFieldDecorator<ValidateSchema<number>> => {
     return SchemaField(MaxLength, toValidateSchema(options));
   },
   {
@@ -36,7 +36,7 @@ export const MaxLength = createSchemaFieldDecoratorFactory(
 
 /** String must match a regular expression pattern. */
 export const Pattern = createSchemaFieldDecoratorFactory(
-  function Pattern(options: ValidateField<string>): SchemaFieldDecorator<ValidateSchema<string>> {
+  (options: ValidateField<string>): SchemaFieldDecorator<ValidateSchema<string>> => {
     return SchemaField(Pattern, toValidateSchema(options));
   },
   {
@@ -52,7 +52,7 @@ export const Pattern = createSchemaFieldDecoratorFactory(
 
 /** Minimum value (inclusive). */
 export const Min = createSchemaFieldDecoratorFactory(
-  function Min(options: ValidateField<number>): SchemaFieldDecorator<ValidateSchema<number>> {
+  (options: ValidateField<number>): SchemaFieldDecorator<ValidateSchema<number>> => {
     return SchemaField(Min, toValidateSchema(options));
   },
   {
@@ -64,7 +64,7 @@ export const Min = createSchemaFieldDecoratorFactory(
 
 /** Maximum value (inclusive). */
 export const Max = createSchemaFieldDecoratorFactory(
-  function Max(options: ValidateField<number>): SchemaFieldDecorator<ValidateSchema<number>> {
+  (options: ValidateField<number>): SchemaFieldDecorator<ValidateSchema<number>> => {
     return SchemaField(Max, toValidateSchema(options));
   },
   {
@@ -76,9 +76,7 @@ export const Max = createSchemaFieldDecoratorFactory(
 
 /** Exclusive minimum value. */
 export const ExclusiveMin = createSchemaFieldDecoratorFactory(
-  function ExclusiveMin(
-    options: ValidateField<number>,
-  ): SchemaFieldDecorator<ValidateSchema<number>> {
+  (options: ValidateField<number>): SchemaFieldDecorator<ValidateSchema<number>> => {
     return SchemaField(ExclusiveMin, toValidateSchema(options));
   },
   {
@@ -90,9 +88,7 @@ export const ExclusiveMin = createSchemaFieldDecoratorFactory(
 
 /** Exclusive maximum value. */
 export const ExclusiveMax = createSchemaFieldDecoratorFactory(
-  function ExclusiveMax(
-    options: ValidateField<number>,
-  ): SchemaFieldDecorator<ValidateSchema<number>> {
+  (options: ValidateField<number>): SchemaFieldDecorator<ValidateSchema<number>> => {
     return SchemaField(ExclusiveMax, toValidateSchema(options));
   },
   {
@@ -104,9 +100,7 @@ export const ExclusiveMax = createSchemaFieldDecoratorFactory(
 
 /** Value must be a multiple of the given number. */
 export const MultipleOf = createSchemaFieldDecoratorFactory(
-  function MultipleOf(
-    options: ValidateField<number>,
-  ): SchemaFieldDecorator<ValidateSchema<number>> {
+  (options: ValidateField<number>): SchemaFieldDecorator<ValidateSchema<number>> => {
     return SchemaField(MultipleOf, toValidateSchema(options));
   },
   {
@@ -122,7 +116,7 @@ export const MultipleOf = createSchemaFieldDecoratorFactory(
 
 /** Minimum array length. */
 export const MinItems = createSchemaFieldDecoratorFactory(
-  function MinItems(options: ValidateField<number>): SchemaFieldDecorator<ValidateSchema<number>> {
+  (options: ValidateField<number>): SchemaFieldDecorator<ValidateSchema<number>> => {
     return SchemaField(MinItems, toValidateSchema(options));
   },
   {
@@ -134,7 +128,7 @@ export const MinItems = createSchemaFieldDecoratorFactory(
 
 /** Maximum array length. */
 export const MaxItems = createSchemaFieldDecoratorFactory(
-  function MaxItems(options: ValidateField<number>): SchemaFieldDecorator<ValidateSchema<number>> {
+  (options: ValidateField<number>): SchemaFieldDecorator<ValidateSchema<number>> => {
     return SchemaField(MaxItems, toValidateSchema(options));
   },
   {
@@ -146,9 +140,7 @@ export const MaxItems = createSchemaFieldDecoratorFactory(
 
 /** Array items must be unique. */
 export const UniqueItems = createSchemaFieldDecoratorFactory(
-  function UniqueItems(
-    options?: ValidateField<boolean>,
-  ): SchemaFieldDecorator<ValidateSchema<boolean>> {
+  (options?: ValidateField<boolean>): SchemaFieldDecorator<ValidateSchema<boolean>> => {
     return SchemaField(UniqueItems, toValidateSchema(options ?? true));
   },
   {
@@ -164,9 +156,7 @@ export const UniqueItems = createSchemaFieldDecoratorFactory(
 
 /** Minimum number of properties. */
 export const MinProperties = createSchemaFieldDecoratorFactory(
-  function MinProperties(
-    options: ValidateField<number>,
-  ): SchemaFieldDecorator<ValidateSchema<number>> {
+  (options: ValidateField<number>): SchemaFieldDecorator<ValidateSchema<number>> => {
     return SchemaField(MinProperties, toValidateSchema(options));
   },
   {
@@ -179,9 +169,7 @@ export const MinProperties = createSchemaFieldDecoratorFactory(
 
 /** Maximum number of properties. */
 export const MaxProperties = createSchemaFieldDecoratorFactory(
-  function MaxProperties(
-    options: ValidateField<number>,
-  ): SchemaFieldDecorator<ValidateSchema<number>> {
+  (options: ValidateField<number>): SchemaFieldDecorator<ValidateSchema<number>> => {
     return SchemaField(MaxProperties, toValidateSchema(options));
   },
   {

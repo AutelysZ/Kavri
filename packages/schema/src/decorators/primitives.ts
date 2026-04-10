@@ -69,9 +69,9 @@ function numericConstraints<V extends number | bigint>(
 
 /** String field. Composes MinLength, MaxLength, Pattern from schema options. */
 export const IsString = createSchemaFieldDecoratorFactory(
-  function IsString<V = string>(schema?: StringSchema<V>): SchemaFieldDecorator<StringSchema<V>> {
-    return SchemaField(
-      IsString,
+  <V = string>(schema?: StringSchema<V>): SchemaFieldDecorator<StringSchema<V>> => {
+    return SchemaField<StringSchema<V>>(
+      IsString as any,
       (schema ?? {}) as StringSchema<V>,
       stringConstraints(schema as StringSchema),
     ) as any;
@@ -93,7 +93,7 @@ export const IsString = createSchemaFieldDecoratorFactory(
 
 /** Integer field. Composes Min, Max, ExclusiveMin, ExclusiveMax, MultipleOf. */
 export const IsInteger = createSchemaFieldDecoratorFactory(
-  function IsInteger(schema?: NumericSchema): SchemaFieldDecorator<NumericSchema> {
+  (schema?: NumericSchema): SchemaFieldDecorator<NumericSchema> => {
     return SchemaField(IsInteger, (schema ?? {}) as NumericSchema, numericConstraints(schema));
   },
   {
@@ -104,7 +104,7 @@ export const IsInteger = createSchemaFieldDecoratorFactory(
 
 /** Number (float) field. Composes Min, Max, ExclusiveMin, ExclusiveMax, MultipleOf. */
 export const IsNumber = createSchemaFieldDecoratorFactory(
-  function IsNumber(schema?: NumericSchema): SchemaFieldDecorator<NumericSchema> {
+  (schema?: NumericSchema): SchemaFieldDecorator<NumericSchema> => {
     return SchemaField(IsNumber, (schema ?? {}) as NumericSchema, numericConstraints(schema));
   },
   {
@@ -122,7 +122,7 @@ export const IsNumber = createSchemaFieldDecoratorFactory(
  * Parsed from string, serialized to string.
  */
 export const IsBigInt = createSchemaFieldDecoratorFactory(
-  function IsBigInt(schema?: NumericSchema<bigint>): SchemaFieldDecorator<NumericSchema<bigint>> {
+  (schema?: NumericSchema<bigint>): SchemaFieldDecorator<NumericSchema<bigint>> => {
     return SchemaField(
       IsBigInt,
       (schema ?? {}) as NumericSchema<bigint>,
@@ -143,7 +143,7 @@ export const IsBigInt = createSchemaFieldDecoratorFactory(
 
 /** Boolean field. */
 export const IsBoolean = createSchemaFieldDecoratorFactory(
-  function IsBoolean(schema?: BaseSchema<boolean>): SchemaFieldDecorator<BaseSchema<boolean>> {
+  (schema?: BaseSchema<boolean>): SchemaFieldDecorator<BaseSchema<boolean>> => {
     return SchemaField(IsBoolean, (schema ?? {}) as BaseSchema<boolean>);
   },
   {
@@ -172,10 +172,7 @@ export interface DateOptions extends ValidateOptions {
  * JSON Schema: `{ type: 'string', format: 'date-time' | 'date' }`.
  */
 export const IsDate = createSchemaFieldDecoratorFactory(
-  function IsDate(
-    options?: DateOptions,
-    schema?: StringSchema<Date>,
-  ): SchemaFieldDecorator<DateOptions> {
+  (options?: DateOptions, schema?: StringSchema<Date>): SchemaFieldDecorator<DateOptions> => {
     return SchemaField(IsDate, (options ?? {}) as DateOptions, [IsString(schema)]);
   },
   {
