@@ -193,20 +193,20 @@ class MsgpackCodec extends WebSocketCodec {
 
 ```ts
 /** The current WebSocketProtocol. Set at connection open. */
-const PROTOCOL = new Key<WebSocketProtocol>('protocol');
+const PROTOCOL = Key.of<WebSocketProtocol>('protocol');
 
 /** The current controller instance handling this connection. */
-const HANDLER = new Key<WebSocketHandlerBase>('handler');
+const HANDLER = Key.of<WebSocketHandlerBase>('handler');
 
 /** The current WebSocketConnection. Set at connection open. */
-const CONNECTION = new Key<WebSocketConnection>('connection');
+const CONNECTION = Key.of<WebSocketConnection>('connection');
 ```
 
-Available in `onOpen`, all message handlers, and `onClose` via the per-connection AsyncContext scope.
+Available in `onOpen`, all message handlers, and `onClose` via the per-connection Context scope.
 
 ## 5. WebSocketConnection
 
-State and indexes use `Key<T>` from `@kavri/basic` — same typed key pattern as `AsyncContext`.
+State and indexes use `Key<T>` from `@kavri/basic` — same typed key pattern as `AsyncScope`.
 
 ```ts
 interface WebSocketConnection<T extends WebSocketProtocol = any> {
@@ -304,8 +304,8 @@ Usage:
 
 ```ts
 // Define typed keys for state and indexes
-const USERNAME = new Key<string>('username');
-const ROOM = new Key<string>('room');  // used as index
+const USERNAME = Key.of<string>('username');
+const ROOM = Key.of<string>('room');  // used as index
 
 @Component()
 class NotificationService {
@@ -336,7 +336,7 @@ class NotificationService {
  */
 type HandlerType<T extends WebSocketProtocol> = {
     [K in keyof T['inbound'] as `on${Capitalize<string & K>}`]:
-        /* (data: ..., conn: WebSocketConnection<T>) => Awaitable<void> */
+        /* (data: ..., conn: WebSocketConnection<T>, ctx: Context) => Awaitable<void> */
 };
 
 /**
@@ -378,13 +378,13 @@ abstract class WebSocketHandlerBase<T extends WebSocketProtocol> {
     }
 
     /** Called when a connection opens. Runs in RequestContext.run(). */
-    onOpen?(conn: WebSocketConnection<T>): Awaitable<void>;
+    onOpen?(conn: WebSocketConnection<T>, ctx: Context): Awaitable<void>;
 
     /** Called when a connection closes. */
-    onClose?(conn: WebSocketConnection<T>, code: number, reason: string): Awaitable<void>;
+    onClose?(conn: WebSocketConnection<T>, code: number, reason: string, ctx: Context): Awaitable<void>;
 
     /** Called on connection error. */
-    onError?(conn: WebSocketConnection<T>, error: Error): Awaitable<void>;
+    onError?(conn: WebSocketConnection<T>, error: Error, ctx: Context): Awaitable<void>;
 }
 
 /**
@@ -400,8 +400,8 @@ Example:
 
 ```ts
 // Typed keys for state and indexes
-const USERNAME = new Key<string>('username');
-const ROOM = new Key<string>('room');  // used as index
+const USERNAME = Key.of<string>('username');
+const ROOM = Key.of<string>('room');  // used as index
 
 @WebSocketHandler(ChatProtocol)
 class ChatHandler
@@ -415,7 +415,7 @@ class ChatHandler
 
     // --- Lifecycle ---
 
-    onOpen(conn: WebSocketConnection<typeof ChatProtocol>) {
+    onOpen(conn: WebSocketConnection<typeof ChatProtocol>, ctx: Context) {
         const user = RequestContext.getOrThrow(CURRENT_USER);
         conn.setState(USERNAME, user.name);
 
@@ -425,7 +425,7 @@ class ChatHandler
         this.logger.info('user %s joined room %s', user.name, conn.params.roomId);
     }
 
-    onClose(conn: WebSocketConnection<typeof ChatProtocol>) {
+    onClose(conn: WebSocketConnection<typeof ChatProtocol>, ctx: Context) {
         // O(1) — broadcast to same room via index
         this.broadcastByIndex(ROOM, conn.params.roomId,
             'presence',
@@ -436,7 +436,7 @@ class ChatHandler
 
     // --- Inbound message handlers (required by HandlerType) ---
 
-    onSend(data: SendMessage, conn: WebSocketConnection<typeof ChatProtocol>) {
+    onSend(data: SendMessage, conn: WebSocketConnection<typeof ChatProtocol>, ctx: Context) {
         const username = conn.getState(USERNAME)!;
         const msg = { from: username, text: data.text, timestamp: Date.now() };
         this.repo.save(conn.params.roomId, msg);
@@ -445,12 +445,12 @@ class ChatHandler
         this.broadcastByIndex(ROOM, conn.params.roomId, 'message', msg);
     }
 
-    onTyping(data: TypingEvent, conn: WebSocketConnection<typeof ChatProtocol>) {
+    onTyping(data: TypingEvent, conn: WebSocketConnection<typeof ChatProtocol>, ctx: Context) {
         this.broadcastByIndex(ROOM, conn.params.roomId, 'presence',
             { userId: conn.getState(USERNAME)!, online: true });
     }
 
-    onUpload(data: Uint8Array, conn: WebSocketConnection<typeof ChatProtocol>) {
+    onUpload(data: Uint8Array, conn: WebSocketConnection<typeof ChatProtocol>, ctx: Context) {
         // handle binary upload
     }
 }
@@ -460,7 +460,7 @@ Method naming: inbound key `send` → method `onSend`, key `typing` → method `
 
 ## 8. Per-connection AsyncContext
 
-Each connection gets its own `AsyncContext` scope:
+Each connection gets its own `AsyncScope` scope:
 
 ```
 Connection established
@@ -596,8 +596,8 @@ const LobbyProtocol = defineWebSocket('LobbyProtocol', '/lobby', {
 
 // --- Typed keys ---
 
-const LOBBY_USER = new Key<string>('lobbyUser');
-const LOBBY_ROOM = new Key<string>('lobbyRoom');  // index — one per room via composite key
+const LOBBY_USER = Key.of<string>('lobbyUser');
+const LOBBY_ROOM = Key.of<string>('lobbyRoom');  // index — one per room via composite key
 
 // --- Controller ---
 // Note: a connection can join multiple rooms. Use composite index keys per room.
@@ -610,13 +610,13 @@ class LobbyHandler
     constructor(private readonly logger = injectLogger(LobbyHandler)) { super(); }
 
     // Per-room index key. Each room gets its own Key so one connection can be in many rooms.
-    private roomKey(room: string) { return new Key<boolean>(`room:${room}`); }
+    private roomKey(room: string) { return Key.of<boolean>(`room:${room}`); }
 
-    onOpen(conn: WebSocketConnection<typeof LobbyProtocol>) {
+    onOpen(conn: WebSocketConnection<typeof LobbyProtocol>, ctx: Context) {
         conn.setState(LOBBY_USER, RequestContext.getOrThrow(CURRENT_USER).name);
     }
 
-    onJoin(data: JoinRoom, conn: WebSocketConnection<typeof LobbyProtocol>) {
+    onJoin(data: JoinRoom, conn: WebSocketConnection<typeof LobbyProtocol>, ctx: Context) {
         const key = this.roomKey(data.room);
         conn.setIndex(key, true);
 
@@ -626,11 +626,11 @@ class LobbyHandler
         );
     }
 
-    onLeave(data: LeaveRoom, conn: WebSocketConnection<typeof LobbyProtocol>) {
+    onLeave(data: LeaveRoom, conn: WebSocketConnection<typeof LobbyProtocol>, ctx: Context) {
         conn.deleteIndex(this.roomKey(data.room));
     }
 
-    onSend(data: SendMsg, conn: WebSocketConnection<typeof LobbyProtocol>) {
+    onSend(data: SendMsg, conn: WebSocketConnection<typeof LobbyProtocol>, ctx: Context) {
         // broadcast to all rooms — predicate fallback for multi-room
         this.broadcastTo(
             c => true, // simplified; real impl would track rooms in state
@@ -639,7 +639,7 @@ class LobbyHandler
         );
     }
 
-    onClose(conn: WebSocketConnection<typeof LobbyProtocol>) {
+    onClose(conn: WebSocketConnection<typeof LobbyProtocol>, ctx: Context) {
         // state and indexes auto-cleaned on close
     }
 }
@@ -652,7 +652,7 @@ class AnnouncementService {
 
     /** O(1) broadcast to a room via index */
     announce(room: string, text: string) {
-        const key = new Key<boolean>(`room:${room}`);
+        const key = Key.of<boolean>(`room:${room}`);
         this.hub.broadcastByIndex(LobbyProtocol, key, true,
             'message',
             { from: 'system', text, room, ts: Date.now() },

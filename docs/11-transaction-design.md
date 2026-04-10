@@ -272,7 +272,7 @@ class DefaultDataSourceResolver extends DataSourceResolver {
 ### Multi-tenant example
 
 ```ts
-const TENANT_ID = new Key<string>('tenantId');
+const TENANT_ID = Key.of<string>('tenantId');
 
 @Component()
 @Priority(1000)
@@ -355,8 +355,8 @@ class Transaction {
 Manages ALS-based transaction stack. If called outside a `TransactionContext` scope, auto-wraps in `TransactionContext.run()`.
 
 ```ts
-export const TransactionContext = new AsyncContext();
-const TRANSACTION_STACK = new Key<TransactionFrame[]>('transactionStack');
+export const TransactionContext = new AsyncScope();
+const TRANSACTION_STACK = Key.of<TransactionFrame[]>('transactionStack');
 
 interface TransactionFrame {
     dataSource: Qualifier;
@@ -816,7 +816,7 @@ kavri:
 
 ## 11. Limitations
 
-**Concurrent transactions in the same ALS context.** `TRANSACTION_STACK` is shared across all async operations within a single `AsyncContext`. If two `begin()` calls run concurrently (e.g., via `Promise.all`), the second may see the first's frame and reuse it under `Propagation.Required` — even though they are independent.
+**Concurrent transactions in the same ALS context.** `TRANSACTION_STACK` is shared across all async operations within a single `AsyncScope`. If two `begin()` calls run concurrently (e.g., via `Promise.all`), the second may see the first's frame and reuse it under `Propagation.Required` — even though they are independent.
 
 ```ts
 // ⚠️ WRONG — concurrent transactions share the stack

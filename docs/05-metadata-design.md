@@ -192,16 +192,16 @@ const components = injectAll(Component);
 
 This is how subsystems discover decorated classes without a central registry.
 
-## 8. AsyncContext (`@kavri/basic`)
+## 8. AsyncScope (`@kavri/basic`)
 
-Async-scoped key-value store backed by `AsyncLocalStorage`. Each usage scenario creates its own `AsyncContext` instance — there is no global singleton.
+Async-scoped key-value store backed by `AsyncLocalStorage`. Each usage scenario creates its own `AsyncScope` instance — there is no global singleton.
 
 - `@kavri/web` creates `RequestContext` for HTTP/WebSocket request state
 - `@kavri/web` creates `TransactionContext` for the transaction stack
 
 ### Key
 
-A thin typed wrapper around a unique symbol. Keys carry no methods — all operations go through the `AsyncContext` instance.
+A thin typed wrapper around a unique symbol. Keys carry no methods — all operations go through the `AsyncScope` instance.
 
 ```ts
 declare class Key<T> {
@@ -210,10 +210,10 @@ declare class Key<T> {
 }
 ```
 
-### AsyncContext
+### AsyncScope
 
 ```ts
-declare class AsyncContext {
+declare class AsyncScope {
     /** Check if currently inside a scope. */
     isActive(): boolean;
 
@@ -256,13 +256,13 @@ The internal `AsyncLocalStorage` is created lazily on first `enter()`/`run()`/`f
 ### Usage
 
 ```ts
-import { AsyncContext, Key } from '@kavri/basic';
+import { AsyncScope, Key } from '@kavri/basic';
 
 // Each module creates its own context
-const MyContext = new AsyncContext();
+const MyContext = new AsyncScope();
 
-const REQUEST_ID = new Key<string>('requestId');
-const USER = new Key<User>('user');
+const REQUEST_ID = Key.of<string>('requestId');
+const USER = Key.of<User>('user');
 
 // Run in a scope:
 await MyContext.run(async () => {

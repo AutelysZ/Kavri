@@ -67,7 +67,7 @@ export declare class AsyncScope {
 
 // interceptor
 declare abstract class Interceptor {
-  abstract intercept(ctx: Context, next: () => unknown): unknown;
+  abstract intercept(ctx: Context, next: (ctx: Context) => unknown): unknown;
 }
 
 // controller

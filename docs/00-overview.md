@@ -17,7 +17,7 @@ Kavri is a TypeScript IoC framework focused on explicit dependency wiring with o
 ## Package structure
 
 ```
-@kavri/basic   → Metadata, AsyncContext, Key, createClassDecorator, createFieldDecorator
+@kavri/basic   → Metadata, AsyncScope, Key, Context, createClassDecorator, createFieldDecorator
 @kavri/schema  → Schema, field decorators, parse, validate, toJsonSchema (no @kavri/container dependency)
 @kavri/container    → Component, Container, inject, Token, etc.
 @kavri/event   → EventType, EventBus, OnEvent, defineEvent

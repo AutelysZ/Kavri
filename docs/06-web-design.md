@@ -5,7 +5,7 @@
 - **Framework-independent.** Core design has no dependency on Express, Fastify, etc. The web module produces a standard `(req, res) => void` handler usable with `node:http`, Bun, Deno, or any adapter.
 - **Parsed input only.** Handlers receive validated, typed data — not raw streams. Body parsing happens before handlers and interceptors see the request (gRPC-style).
 - **Single interception mechanism.** Interceptors replace middleware, guards, pipes, and filters. One abstraction, one chain.
-- **Controllers are singletons.** Per-request data lives in `AsyncContext` — a typed key-value store backed by `AsyncLocalStorage` (from `@kavri/basic`).
+- **Controllers are singletons.** Per-request data lives in `Context` — a typed key-value store from `@kavri/basic`.
 - **Route-first.** All endpoints are defined via `defineRoute()` in `@kavri/schema`. Controllers implement routes via `@Controller(route)` + `implements ControllerType<typeof route>`.
 
 ## 2. Core HTTP Types
@@ -39,13 +39,13 @@ Normal handler return → JSON serialized with 200. Return `Redirect`, `FileResp
 
 ## 3. RequestContext & Request Keys
 
-`AsyncContext` and `Key<T>` live in `@kavri/basic`. The web module creates its own `RequestContext` instance and defines typed keys for request-scoped state. WebSocket connections also use `RequestContext` since upgrades are HTTP requests.
+`AsyncScope` and `Key<T>` live in `@kavri/basic`. The web module creates its own `RequestContext` instance and defines typed keys for request-scoped state. WebSocket connections also use `RequestContext` since upgrades are HTTP requests.
 
 ```ts
-import { AsyncContext, Key } from '@kavri/basic';
+import { AsyncScope, Key } from '@kavri/basic';
 
 /** Request-scoped async context for HTTP and WebSocket. */
-export const RequestContext = new AsyncContext();
+export const RequestContext = new AsyncScope();
 ```
 
 ### Built-in request keys
@@ -55,46 +55,46 @@ import { IncomingMessage, ServerResponse } from 'node:http';
 
 // --- Set by framework at request start ---
 
-const REQUEST = new Key<IncomingMessage>('request');
-const RESPONSE = new Key<ServerResponse>('response');
-const URL = new Key<URL>('url');
+const REQUEST = Key.of<IncomingMessage>('request');
+const RESPONSE = Key.of<ServerResponse>('response');
+const URL = Key.of<URL>('url');
 
 // --- Set by ROUTE stage ---
 
-const ENDPOINT = new Key<Endpoint<any, any> | null>('endpoint');
-const CONTROLLER = new Key<object | null>('controller');
+const ENDPOINT = Key.of<Endpoint<any, any> | null>('endpoint');
+const CONTROLLER = Key.of<object | null>('controller');
 
 // --- Set by PARSE stage (raw pieces) ---
 
-const PATH_PARAMS = new Key<Record<string, string>>('pathParams');
-const QUERY = new Key<Record<string, string>>('query');
-const BODY = new Key<unknown>('body');
-const FILES = new Key<Record<string, MultipartFile | MultipartFile[]>>('files');
+const PATH_PARAMS = Key.of<Record<string, string>>('pathParams');
+const QUERY = Key.of<Record<string, string>>('query');
+const BODY = Key.of<unknown>('body');
+const FILES = Key.of<Record<string, MultipartFile | MultipartFile[]>>('files');
 
 // --- Set by RESOLVE stage (merged) ---
 
-const PARAMS = new Key<unknown>('params');
+const PARAMS = Key.of<unknown>('params');
 
 // --- For logging (from @kavri/logging integration) ---
 
-const LOGGING = new Key<Record<string, unknown>>('logging');
+const LOGGING = Key.of<Record<string, unknown>>('logging');
 ```
 
 ### Usage
 
 ```ts
 // Read built-in request data
-const req = RequestContext.getOrThrow(REQUEST);
-const params = RequestContext.get(PARAMS);
+const req = ctx.getOrThrow(REQUEST);
+const params = ctx.get(PARAMS);
 
 // Custom keys for interceptor → handler communication
-const CURRENT_USER = new Key<User>('currentUser');
+const CURRENT_USER = Key.of<User>('currentUser');
 
 // In interceptor:
-RequestContext.set(CURRENT_USER, authenticatedUser);
+ctx.set(CURRENT_USER, authenticatedUser);
 
 // In handler:
-const user = RequestContext.getOrThrow(CURRENT_USER);
+const user = ctx.getOrThrow(CURRENT_USER);
 ```
 
 ## 4. Controllers
@@ -107,8 +107,8 @@ Controllers are the sole mechanism for implementing HTTP endpoints. Every contro
 /**
  * ControllerType maps a RouteDefinition's endpoints to handler method signatures.
  * For each endpoint key K:
- *   request = 'void' → K(): Awaitable<ResponseType>
- *   request = class  → K(input: InstanceType<request>): Awaitable<ResponseType>
+ *   request = 'void' → K(ctx: Context): Awaitable<ResponseType>
+ *   request = class  → K(input: InstanceType<request>, ctx: Context): Awaitable<ResponseType>
  */
 type ControllerType<T extends RouteDefinition<any>> = {
     [K in keyof T['endpoints']]: /* typed handler method */
@@ -123,16 +123,16 @@ import { UserRoute } from './user-route';
 class UserController implements ControllerType<typeof UserRoute> {
     constructor(private readonly repo = inject(UserRepository)) {}
 
-    async getUser(input: GetUserParams): Promise<UserResponse> {
+    async getUser(input: GetUserParams, ctx: Context): Promise<UserResponse> {
         return this.repo.findById(input.id);
     }
 
-    async createUser(input: CreateUserBody): Promise<UserResponse> {
-        const userId = RequestContext.getOrThrow(CURRENT_USER).id;
+    async createUser(input: CreateUserBody, ctx: Context): Promise<UserResponse> {
+        const userId = ctx.getOrThrow(CURRENT_USER).id;
         return this.repo.create({ ...input, createdBy: userId });
     }
 
-    async deleteUser(input: GetUserParams): Promise<void> {
+    async deleteUser(input: GetUserParams, ctx: Context): Promise<void> {
         await this.repo.delete(input.id);
     }
 }
@@ -141,14 +141,14 @@ class UserController implements ControllerType<typeof UserRoute> {
 - `@Controller(route)` composes `@Component()` and registers all routing metadata from the route definition.
 - `implements ControllerType<typeof route>` enforces that all endpoint methods are implemented with correct types. No `extends`/`override`/`super()` needed.
 - Handlers receive parsed input. Return typed response or a special response object (`Redirect`, `FileResponse`, etc.).
-- Access per-request data via `RequestContext.get(key)` / `RequestContext.getOrThrow(key)`.
+- Access per-request data via `ctx.get(key)` / `ctx.getOrThrow(key)`.
 - **Controllers should never be injected by application code.** They are discovered by the framework via `Metadata.entries(Controller)`.
 
 ## 5. Interceptors
 
 ```ts
 abstract class Interceptor {
-    abstract intercept(next: () => unknown): Awaitable<unknown>;
+    abstract intercept(ctx: Context, next: (ctx: Context) => unknown): Awaitable<unknown>;
 
     /** Priority anchors. Use with @Priority() to order interceptors.
      *  All Interceptor subclasses MUST have @Priority(). Enforced at startup. */
@@ -172,19 +172,19 @@ Use `@Priority(Interceptor.EXCEPTION)` to place an interceptor at the exception-
 
 Interceptors can:
 - Short-circuit: `throw new HttpException(401)` or return without calling `next()`
-- Modify request state: `RequestContext.set(CURRENT_USER, authUser)`
-- Transform response: `const res = await next(); return transform(res);`
+- Modify request state: `ctx.set(CURRENT_USER, authUser)`
+- Transform response: `const res = await next(ctx); return transform(res);`
 
 ```ts
 @Component()
 @Priority(Interceptor.BOOTSTRAP)
 class LoggingInterceptor extends Interceptor {
-    async intercept(next: () => unknown) {
+    async intercept(ctx: Context, next: (ctx: Context) => unknown) {
         const start = Date.now();
         try {
-            return await next();
+            return await next(ctx);
         } finally {
-            console.log(`${RequestContext.getOrThrow(REQUEST).method} ${RequestContext.getOrThrow(REQUEST).url} ${Date.now() - start}ms`);
+            console.log(`${ctx.getOrThrow(REQUEST).method} ${ctx.getOrThrow(REQUEST).url} ${Date.now() - start}ms`);
         }
     }
 }
@@ -206,10 +206,10 @@ class BasicAuthOptions {
 class BasicAuthInterceptor extends Interceptor {
     constructor(private readonly config = injectConfig(BasicAuthOptions)) { super(); }
 
-    async intercept(next: () => unknown) {
-        const auth = RequestContext.getOrThrow(REQUEST).headers['authorization'];
+    async intercept(ctx: Context, next: (ctx: Context) => unknown) {
+        const auth = ctx.getOrThrow(REQUEST).headers['authorization'];
         // parse Basic auth, compare, throw HttpException(401) on failure
-        return next();
+        return next(ctx);
     }
 }
 ```
@@ -245,16 +245,16 @@ class CompressionInterceptor extends Interceptor {
         });
     }
 
-    async intercept(next: () => unknown) {
-        const req = RequestContext.getOrThrow(REQUEST);
-        const res = RequestContext.getOrThrow(RESPONSE);
+    async intercept(ctx: Context, next: (ctx: Context) => unknown) {
+        const req = ctx.getOrThrow(REQUEST);
+        const res = ctx.getOrThrow(RESPONSE);
 
         // Wrap res with compression before downstream writes to it
         await new Promise<void>((resolve, reject) => {
             this.compress(req, res, (err?: Error) => err ? reject(err) : resolve());
         });
 
-        return next();
+        return next(ctx);
     }
 }
 ```
@@ -284,12 +284,12 @@ class CorsOptions {
 class CorsInterceptor extends Interceptor {
     constructor(private readonly config = injectConfig(CorsOptions)) { super(); }
 
-    async intercept(next: () => unknown) {
-        const req = RequestContext.getOrThrow(REQUEST);
-        const res = RequestContext.getOrThrow(RESPONSE);
+    async intercept(ctx: Context, next: (ctx: Context) => unknown) {
+        const req = ctx.getOrThrow(REQUEST);
+        const res = ctx.getOrThrow(RESPONSE);
         const origin = req.headers['origin'];
 
-        if (!origin) return next();
+        if (!origin) return next(ctx);
 
         if (!this.isAllowed(origin)) {
             throw new HttpException(403, 'Origin not allowed');
@@ -309,7 +309,7 @@ class CorsInterceptor extends Interceptor {
             return new RawResponse(204, {}, '');
         }
 
-        return next();
+        return next(ctx);
     }
 
     private isAllowed(origin: string): boolean {
@@ -368,9 +368,9 @@ class RateLimitInterceptor extends Interceptor {
         private readonly store = inject(RateLimitStore),
     ) { super(); }
 
-    async intercept(next: () => unknown) {
-        const req = RequestContext.getOrThrow(REQUEST);
-        const res = RequestContext.getOrThrow(RESPONSE);
+    async intercept(ctx: Context, next: (ctx: Context) => unknown) {
+        const req = ctx.getOrThrow(REQUEST);
+        const res = ctx.getOrThrow(RESPONSE);
         const key = req.socket.remoteAddress ?? 'unknown';
 
         const { count, resetAt } = await this.store.increment(key, this.config.window);
@@ -387,7 +387,7 @@ class RateLimitInterceptor extends Interceptor {
             });
         }
 
-        return next();
+        return next(ctx);
     }
 }
 ```
@@ -427,9 +427,9 @@ class CsrfOptions {
 class CsrfInterceptor extends Interceptor {
     constructor(private readonly config = injectConfig(CsrfOptions)) { super(); }
 
-    async intercept(next: () => unknown) {
-        const req = RequestContext.getOrThrow(REQUEST);
-        const res = RequestContext.getOrThrow(RESPONSE);
+    async intercept(ctx: Context, next: (ctx: Context) => unknown) {
+        const req = ctx.getOrThrow(REQUEST);
+        const res = ctx.getOrThrow(RESPONSE);
 
         // Set CSRF cookie on every response if not present.
         // NOT HttpOnly — frontend must read it via document.cookie.
@@ -448,12 +448,12 @@ class CsrfInterceptor extends Interceptor {
             }
         }
 
-        return next();
+        return next(ctx);
     }
 
     private requiresCheck(req: IncomingMessage): boolean {
-        const endpoint = RequestContext.get(ENDPOINT);
-        const ctrl = RequestContext.get(CONTROLLER);
+        const endpoint = ctx.get(ENDPOINT);
+        const ctrl = ctx.get(CONTROLLER);
 
         if (endpoint && ctrl) {
             // Matched a controller action — check unless @NoCsrf
@@ -478,11 +478,11 @@ Usage:
 @Controller(UserRoute)
 class UserController implements ControllerType<typeof UserRoute> {
     // CSRF checked (default for state-changing actions)
-    async createUser(input: CreateUserBody) { ... }
+    async createUser(input: CreateUserBody, ctx: Context) { ... }
 
     // CSRF skipped — this endpoint uses Bearer token auth
     @NoCsrf()
-    async apiCreateUser(input: CreateUserBody) { ... }
+    async apiCreateUser(input: CreateUserBody, ctx: Context) { ... }
 }
 ```
 
@@ -604,12 +604,12 @@ class StaticFileInterceptor extends Interceptor {
         });
     }
 
-    async intercept(next: () => unknown) {
-        const req = RequestContext.getOrThrow(REQUEST);
-        const res = RequestContext.getOrThrow(RESPONSE);
+    async intercept(ctx: Context, next: (ctx: Context) => unknown) {
+        const req = ctx.getOrThrow(REQUEST);
+        const res = ctx.getOrThrow(RESPONSE);
         const url = req.url ?? '';
 
-        if (this.config.prefix && !url.startsWith(this.config.prefix)) return next();
+        if (this.config.prefix && !url.startsWith(this.config.prefix)) return next(ctx);
 
         // Strip prefix so serve-static resolves from root
         if (this.config.prefix) {
@@ -631,7 +631,7 @@ class StaticFileInterceptor extends Interceptor {
             return new FileResponse(fallbackPath, 'text/html');
         }
 
-        return next();
+        return next(ctx);
     }
 }
 ```
@@ -690,9 +690,9 @@ Custom error handling via interceptor:
 @Component()
 @Priority(Interceptor.EXCEPTION)
 class ErrorInterceptor extends Interceptor {
-    async intercept(next: () => unknown) {
+    async intercept(ctx: Context, next: (ctx: Context) => unknown) {
         try {
-            return await next();
+            return await next(ctx);
         } catch (err) {
             if (err instanceof AppError) {
                 throw new HttpException(err.httpStatus, err.message);
@@ -779,14 +779,13 @@ class WebApplication {
     /** Return raw Node.js HTTP handler. */
     toHandler(): (req: IncomingMessage, res: ServerResponse) => void {
         return (req, res) => {
-            RequestContext.run(async () => {
-                RequestContext.set(REQUEST, req);
-                RequestContext.set(RESPONSE, res);
-                RequestContext.set(URL, new URL(req.url!, `http://${req.headers.host}`));
+            const ctx = RequestContext.create();
+            ctx.set(REQUEST, req)
+               .set(RESPONSE, res)
+               .set(URL, new URL(req.url!, `http://${req.headers.host}`));
 
-                const chain = this.buildChain(this.interceptors, 0);
-                await chain();
-            }).catch(err => {
+            const chain = this.buildChain(this.interceptors, 0);
+            Promise.resolve(chain(ctx)).catch(err => {
                 if (!res.headersSent) {
                     res.writeHead(500);
                     res.end('Internal Server Error');
@@ -795,11 +794,17 @@ class WebApplication {
         };
     }
 
-    private buildChain(interceptors: readonly Interceptor[], index: number): () => unknown {
+    private buildChain(
+        interceptors: readonly Interceptor[],
+        index: number,
+    ): (ctx: Context) => unknown {
         if (index >= interceptors.length) {
             return () => { throw new HttpException(404, 'Not Found'); };
         }
-        return () => interceptors[index].intercept(this.buildChain(interceptors, index + 1));
+        return (ctx) => interceptors[index].intercept(
+            ctx,
+            this.buildChain(interceptors, index + 1),
+        );
     }
 }
 ```
@@ -833,9 +838,9 @@ The outermost interceptor. Awaits the result from the entire downstream chain an
 @Component()
 @Priority(Interceptor.RESPONSE)
 class ResponseInterceptor extends Interceptor {
-    async intercept(next: () => unknown) {
-        const res = RequestContext.getOrThrow(RESPONSE);
-        const result = await next();
+    async intercept(ctx: Context, next: (ctx: Context) => unknown) {
+        const res = ctx.getOrThrow(RESPONSE);
+        const result = await next(ctx);
 
         // If response already written (e.g., static file interceptor piped directly), skip
         if (res.headersSent) return;
@@ -871,9 +876,9 @@ Catches errors from downstream interceptors and maps them to HTTP responses.
 @Component()
 @Priority(Interceptor.EXCEPTION)
 class ExceptionInterceptor extends Interceptor {
-    async intercept(next: () => unknown) {
+    async intercept(ctx: Context, next: (ctx: Context) => unknown) {
         try {
-            return await next();
+            return await next(ctx);
         } catch (err) {
             if (err instanceof HttpException) {
                 return new RawResponse(
@@ -918,14 +923,14 @@ class RouteInterceptor extends Interceptor {
         }
     }
 
-    async intercept(next: () => unknown) {
-        const req = RequestContext.getOrThrow(REQUEST);
+    async intercept(ctx: Context, next: (ctx: Context) => unknown) {
+        const req = ctx.getOrThrow(REQUEST);
         const match = this.router.match(req.method!, req.url!);
 
         if (match) {
-            RequestContext.set(ENDPOINT, match.endpoint);
-            RequestContext.set(CONTROLLER, match.ctrl);
-            RequestContext.set(PATH_PARAMS, match.params);
+            ctx.set(ENDPOINT, match.endpoint);
+            ctx.set(CONTROLLER, match.ctrl);
+            ctx.set(PATH_PARAMS, match.params);
         } else {
             // Check if the path exists but method is wrong → 405
             const allowedMethods = this.router.getAllowedMethods(req.url!);
@@ -935,12 +940,12 @@ class RouteInterceptor extends Interceptor {
                 });
             }
 
-            RequestContext.set(ENDPOINT, null);
-            RequestContext.set(CONTROLLER, null);
-            RequestContext.set(PATH_PARAMS, {});
+            ctx.set(ENDPOINT, null);
+            ctx.set(CONTROLLER, null);
+            ctx.set(PATH_PARAMS, {});
         }
 
-        return next();
+        return next(ctx);
     }
 }
 ```
@@ -956,12 +961,12 @@ All parse interceptors are **passive** — if the target key is already set (by 
 @Component()
 @Priority(Interceptor.PARSE)
 class QueryParseInterceptor extends Interceptor {
-    async intercept(next: () => unknown) {
-        if (!RequestContext.has(QUERY)) {
-            const url = RequestContext.getOrThrow(URL);
-            RequestContext.set(QUERY, Object.fromEntries(url.searchParams));
+    async intercept(ctx: Context, next: (ctx: Context) => unknown) {
+        if (!ctx.has(QUERY)) {
+            const url = ctx.getOrThrow(URL);
+            ctx.set(QUERY, Object.fromEntries(url.searchParams));
         }
-        return next();
+        return next(ctx);
     }
 }
 
@@ -971,19 +976,19 @@ class QueryParseInterceptor extends Interceptor {
 class JsonParseInterceptor extends Interceptor {
     constructor(private readonly config = injectConfig(WebOptions)) { super(); }
 
-    async intercept(next: () => unknown) {
-        if (RequestContext.has(BODY)) return next();
+    async intercept(ctx: Context, next: (ctx: Context) => unknown) {
+        if (ctx.has(BODY)) return next(ctx);
 
-        const endpoint = RequestContext.get(ENDPOINT);
-        if (!endpoint || endpoint.request === 'void') return next();
+        const endpoint = ctx.get(ENDPOINT);
+        if (!endpoint || endpoint.request === 'void') return next(ctx);
 
-        const req = RequestContext.getOrThrow(REQUEST);
+        const req = ctx.getOrThrow(REQUEST);
         const contentType = req.headers['content-type'] ?? '';
-        if (!contentType.includes('application/json')) return next();
+        if (!contentType.includes('application/json')) return next(ctx);
 
         const raw = await readBody(req, this.config.maxBodySize);
-        RequestContext.set(BODY, JSON.parse(raw));
-        return next();
+        ctx.set(BODY, JSON.parse(raw));
+        return next(ctx);
     }
 }
 
@@ -993,19 +998,19 @@ class JsonParseInterceptor extends Interceptor {
 class UrlencodedParseInterceptor extends Interceptor {
     constructor(private readonly config = injectConfig(WebOptions)) { super(); }
 
-    async intercept(next: () => unknown) {
-        if (RequestContext.has(BODY)) return next();
+    async intercept(ctx: Context, next: (ctx: Context) => unknown) {
+        if (ctx.has(BODY)) return next(ctx);
 
-        const endpoint = RequestContext.get(ENDPOINT);
-        if (!endpoint || endpoint.request === 'void') return next();
+        const endpoint = ctx.get(ENDPOINT);
+        if (!endpoint || endpoint.request === 'void') return next(ctx);
 
-        const req = RequestContext.getOrThrow(REQUEST);
+        const req = ctx.getOrThrow(REQUEST);
         const contentType = req.headers['content-type'] ?? '';
-        if (!contentType.includes('application/x-www-form-urlencoded')) return next();
+        if (!contentType.includes('application/x-www-form-urlencoded')) return next(ctx);
 
         const raw = await readBody(req, this.config.maxBodySize);
-        RequestContext.set(BODY, Object.fromEntries(new URLSearchParams(raw)));
-        return next();
+        ctx.set(BODY, Object.fromEntries(new URLSearchParams(raw)));
+        return next(ctx);
     }
 }
 
@@ -1015,20 +1020,20 @@ class UrlencodedParseInterceptor extends Interceptor {
 class MultipartParseInterceptor extends Interceptor {
     constructor(private readonly config = injectConfig(WebOptions)) { super(); }
 
-    async intercept(next: () => unknown) {
-        if (RequestContext.has(BODY)) return next();
+    async intercept(ctx: Context, next: (ctx: Context) => unknown) {
+        if (ctx.has(BODY)) return next(ctx);
 
-        const endpoint = RequestContext.get(ENDPOINT);
-        if (!endpoint || endpoint.request === 'void') return next();
-        if ((endpoint.options.requestType ?? 'data') !== 'multipart') return next();
+        const endpoint = ctx.get(ENDPOINT);
+        if (!endpoint || endpoint.request === 'void') return next(ctx);
+        if ((endpoint.options.requestType ?? 'data') !== 'multipart') return next(ctx);
 
-        const req = RequestContext.getOrThrow(REQUEST);
+        const req = ctx.getOrThrow(REQUEST);
         const maxBodySize = endpoint.options.multipart?.maxBodySize ?? this.config.maxBodySize;
 
         const { fields, files } = await parseMultipart(req, endpoint.options.multipart!, maxBodySize);
-        RequestContext.set(BODY, fields);
-        RequestContext.set(FILES, files);
-        return next();
+        ctx.set(BODY, fields);
+        ctx.set(FILES, files);
+        return next(ctx);
     }
 }
 
@@ -1036,15 +1041,15 @@ class MultipartParseInterceptor extends Interceptor {
 @Component()
 @Priority(Interceptor.PARSE + 1)
 class BinaryParseInterceptor extends Interceptor {
-    async intercept(next: () => unknown) {
-        if (RequestContext.has(BODY)) return next();
+    async intercept(ctx: Context, next: (ctx: Context) => unknown) {
+        if (ctx.has(BODY)) return next(ctx);
 
-        const endpoint = RequestContext.get(ENDPOINT);
-        if (!endpoint || endpoint.request === 'void') return next();
-        if ((endpoint.options.requestType ?? 'data') !== 'binary') return next();
+        const endpoint = ctx.get(ENDPOINT);
+        if (!endpoint || endpoint.request === 'void') return next(ctx);
+        if ((endpoint.options.requestType ?? 'data') !== 'binary') return next(ctx);
 
-        RequestContext.set(BODY, RequestContext.getOrThrow(REQUEST));
-        return next();
+        ctx.set(BODY, ctx.getOrThrow(REQUEST));
+        return next(ctx);
     }
 }
 ```
@@ -1059,17 +1064,17 @@ Merges raw pieces (PathParams, Query, Body, Files) into a single object matching
 @Component()
 @Priority(Interceptor.RESOLVE)
 class ResolveInterceptor extends Interceptor {
-    async intercept(next: () => unknown) {
-        const endpoint = RequestContext.get(ENDPOINT);
+    async intercept(ctx: Context, next: (ctx: Context) => unknown) {
+        const endpoint = ctx.get(ENDPOINT);
         if (!endpoint || endpoint.request === 'void') {
-            RequestContext.set(PARAMS, undefined);
-            return next();
+            ctx.set(PARAMS, undefined);
+            return next(ctx);
         }
 
-        const pathParams = RequestContext.get(PATH_PARAMS) ?? {};
-        const query = RequestContext.get(QUERY) ?? {};
-        const body = RequestContext.get(BODY);
-        const files = RequestContext.get(FILES) ?? {};
+        const pathParams = ctx.get(PATH_PARAMS) ?? {};
+        const query = ctx.get(QUERY) ?? {};
+        const body = ctx.get(BODY);
+        const files = ctx.get(FILES) ?? {};
 
         // Merge: path params + query + body fields + files
         // Path params and query are always merged.
@@ -1089,8 +1094,8 @@ class ResolveInterceptor extends Interceptor {
             merged[fieldName] = fileOrFiles;
         }
 
-        RequestContext.set(PARAMS, merged);
-        return next();
+        ctx.set(PARAMS, merged);
+        return next(ctx);
     }
 }
 ```
@@ -1103,13 +1108,13 @@ Validates `Params` against the endpoint's request schema. Throws `HttpException(
 @Component()
 @Priority(Interceptor.VALIDATE)
 class ValidateInterceptor extends Interceptor {
-    async intercept(next: () => unknown) {
-        const endpoint = RequestContext.get(ENDPOINT);
+    async intercept(ctx: Context, next: (ctx: Context) => unknown) {
+        const endpoint = ctx.get(ENDPOINT);
         if (!endpoint || endpoint.request === 'void') {
-            return next();
+            return next(ctx);
         }
 
-        const params = RequestContext.get(PARAMS);
+        const params = ctx.get(PARAMS);
         const requestClass = endpoint.request as AnyConstructor<any>;
 
         // Validate and parse using @kavri/schema
@@ -1123,9 +1128,9 @@ class ValidateInterceptor extends Interceptor {
 
         // Parse into typed instance (applies custom parsers like @IsDate)
         const parsed = parse(requestClass, params);
-        RequestContext.set(PARAMS, parsed);
+        ctx.set(PARAMS, parsed);
 
-        return next();
+        return next(ctx);
     }
 }
 ```
@@ -1138,12 +1143,12 @@ Dispatches to the matched controller action. If no HTTP endpoint matched, passes
 @Component()
 @Priority(Interceptor.ACTION)
 class ActionInterceptor extends Interceptor {
-    async intercept(next: () => unknown) {
-        const endpoint = RequestContext.get(ENDPOINT);
-        const ctrl = RequestContext.get(CONTROLLER);
+    async intercept(ctx: Context, next: (ctx: Context) => unknown) {
+        const endpoint = ctx.get(ENDPOINT);
+        const ctrl = ctx.get(CONTROLLER);
 
         // No HTTP endpoint matched — pass through (may be WS or static)
-        if (!endpoint || !ctrl) return next();
+        if (!endpoint || !ctrl) return next(ctx);
 
         // Find the method name on the controller that matches this endpoint
         const methodName = /* resolved from endpoint name */;
@@ -1154,7 +1159,7 @@ class ActionInterceptor extends Interceptor {
         }
 
         // Call handler with parsed params (or no args if void)
-        const params = RequestContext.get(PARAMS);
+        const params = ctx.get(PARAMS);
         const result = endpoint.request === 'void'
             ? await handler.call(ctrl)
             : await handler.call(ctrl, params);
@@ -1181,17 +1186,17 @@ Handles WebSocket upgrade requests. If the matched endpoint is a WebSocket proto
 @Component()
 @Priority(Interceptor.ACTION)
 class WebSocketUpgradeInterceptor extends Interceptor {
-    async intercept(next: () => unknown) {
-        const endpoint = RequestContext.get(ENDPOINT);
+    async intercept(ctx: Context, next: (ctx: Context) => unknown) {
+        const endpoint = ctx.get(ENDPOINT);
 
         // Not a WebSocket endpoint — pass through
-        if (!endpoint?.websocket) return next();
+        if (!endpoint?.websocket) return next(ctx);
 
-        const req = RequestContext.getOrThrow(REQUEST);
-        const res = RequestContext.getOrThrow(RESPONSE);
+        const req = ctx.getOrThrow(REQUEST);
+        const res = ctx.getOrThrow(RESPONSE);
 
         // Upgrade the connection using the matched handler and codec
-        // Sets up per-connection AsyncContext, calls onOpen, wires message dispatch
+        // Sets up per-connection Context, calls onOpen, wires message dispatch
         await this.upgrade(req, res, endpoint);
     }
 
@@ -1306,17 +1311,17 @@ const UserRoute = defineRoute('UserRoute', '/user', {
 class UserController implements ControllerType<typeof UserRoute> {
     constructor(private readonly repo = inject(UserRepository)) {}
 
-    async getUser(input: GetUserParams) {
+    async getUser(input: GetUserParams, ctx: Context) {
         const user = await this.repo.findById(input.id);
         if (!user) throw new HttpException(404, 'User not found');
         return user;
     }
 
-    async createUser(input: CreateUserBody) {
+    async createUser(input: CreateUserBody, ctx: Context) {
         return this.repo.create(input);
     }
 
-    async deleteUser(input: GetUserParams) {
+    async deleteUser(input: GetUserParams, ctx: Context) {
         await this.repo.delete(input.id);
     }
 }
@@ -1326,11 +1331,11 @@ class UserController implements ControllerType<typeof UserRoute> {
 @Component()
 @Priority(Interceptor.GUARD)
 class AuthInterceptor extends Interceptor {
-    async intercept(next: () => unknown) {
-        const token = RequestContext.getOrThrow(REQUEST).headers['authorization'];
+    async intercept(ctx: Context, next: (ctx: Context) => unknown) {
+        const token = ctx.getOrThrow(REQUEST).headers['authorization'];
         if (!token) throw new HttpException(401);
-        RequestContext.set(CURRENT_USER, verifyToken(token));
-        return next();
+        ctx.set(CURRENT_USER, verifyToken(token));
+        return next(ctx);
     }
 }
 
