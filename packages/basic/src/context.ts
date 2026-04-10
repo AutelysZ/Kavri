@@ -95,23 +95,23 @@ export interface Context {
  * Not exported — users receive Context instances from AsyncScope methods.
  */
 class ContextImpl implements Context {
-  private readonly store = new Map<Key<unknown>, unknown>();
-  private readonly parent: ContextImpl | undefined;
-  private readonly scope: AsyncScope;
+  readonly #store = new Map<Key<unknown>, unknown>();
+  readonly #parent: ContextImpl | undefined;
+  readonly #scope: AsyncScope;
 
   constructor(scope: AsyncScope, parent?: ContextImpl) {
-    this.scope = scope;
-    this.parent = parent;
+    this.#scope = scope;
+    this.#parent = parent;
   }
 
   has(key: Key<unknown>): boolean {
-    if (this.store.has(key)) return true;
-    return this.parent?.has(key) ?? false;
+    if (this.#store.has(key)) return true;
+    return this.#parent?.has(key) ?? false;
   }
 
   get<V>(key: Key<V>): V | undefined {
-    if (this.store.has(key)) return this.store.get(key) as V;
-    return this.parent?.get(key);
+    if (this.#store.has(key)) return this.#store.get(key) as V;
+    return this.#parent?.get(key);
   }
 
   getOrThrow<V>(key: Key<V>): V {
@@ -123,44 +123,44 @@ class ContextImpl implements Context {
 
   getOrInsert<V>(key: Key<V>, value: V): V {
     if (this.has(key)) return this.get(key) as V;
-    this.store.set(key, value);
+    this.#store.set(key, value);
     return value;
   }
 
   getOrInsertComputed<V>(key: Key<V>, callback: (key: Key<V>) => V): V {
     if (this.has(key)) return this.get(key) as V;
     const value = callback(key);
-    this.store.set(key, value);
+    this.#store.set(key, value);
     return value;
   }
 
   set<V>(key: Key<V>, value: V): this {
-    this.store.set(key, value);
+    this.#store.set(key, value);
     return this;
   }
 
   delete(key: Key<unknown>): boolean {
-    return this.store.delete(key);
+    return this.#store.delete(key);
   }
 
   isActive(): boolean {
-    return this.scope.isActive();
+    return this.#scope.isActive();
   }
 
   run<T>(fn: (ctx: Context) => Awaitable<T>): Promise<T> {
-    return this.scope.run(fn, this);
+    return this.#scope.run(fn, this);
   }
 
   fork<T>(fn: (ctx: Context) => Awaitable<T>): Promise<T> {
-    return this.scope.fork(fn, this);
+    return this.#scope.fork(fn, this);
   }
 
   enter(): void {
-    this.scope.enter(this);
+    this.#scope.enter(this);
   }
 
   extend(): Context {
-    return new ContextImpl(this.scope, this);
+    return new ContextImpl(this.#scope, this);
   }
 }
 
@@ -192,21 +192,21 @@ class ContextImpl implements Context {
  * ```
  */
 export class AsyncScope {
-  private als: AsyncLocalStorage<ContextImpl> | undefined;
+  #als: AsyncLocalStorage<ContextImpl> | undefined;
 
-  private ensureAls(): AsyncLocalStorage<ContextImpl> {
-    if (!this.als) {
-      this.als = new AsyncLocalStorage<ContextImpl>();
+  #ensureAls(): AsyncLocalStorage<ContextImpl> {
+    if (!this.#als) {
+      this.#als = new AsyncLocalStorage<ContextImpl>();
     }
-    return this.als;
+    return this.#als;
   }
 
   /**
    * Get the current ALS context, or throw if not in a scope.
    * Used by delegated state methods.
    */
-  private current(): ContextImpl {
-    const ctx = this.als?.getStore();
+  #current(): ContextImpl {
+    const ctx = this.#als?.getStore();
     if (!ctx) throw new Error('Not in AsyncScope');
     return ctx;
   }
@@ -215,7 +215,7 @@ export class AsyncScope {
    * Verify that `state` (if provided) matches the current ALS context.
    * Throws if ALS is active with a different context.
    */
-  private checkState(current: ContextImpl | undefined, state: Context | undefined): void {
+  #checkState(current: ContextImpl | undefined, state: Context | undefined): void {
     if (current && state && state !== current) {
       throw new Error('Provided context does not match active scope');
     }
@@ -225,45 +225,45 @@ export class AsyncScope {
 
   /** @see {@link Context.has} */
   has(key: Key<unknown>): boolean {
-    return this.current().has(key);
+    return this.#current().has(key);
   }
 
   /** @see {@link Context.get} */
   get<V>(key: Key<V>): V | undefined {
-    return this.current().get(key);
+    return this.#current().get(key);
   }
 
   /** @see {@link Context.getOrThrow} */
   getOrThrow<V>(key: Key<V>): V {
-    return this.current().getOrThrow(key);
+    return this.#current().getOrThrow(key);
   }
 
   /** @see {@link Context.getOrInsert} */
   getOrInsert<V>(key: Key<V>, value: V): V {
-    return this.current().getOrInsert(key, value);
+    return this.#current().getOrInsert(key, value);
   }
 
   /** @see {@link Context.getOrInsertComputed} */
   getOrInsertComputed<V>(key: Key<V>, callback: (key: Key<V>) => V): V {
-    return this.current().getOrInsertComputed(key, callback);
+    return this.#current().getOrInsertComputed(key, callback);
   }
 
   /** @see {@link Context.set} */
   set<V>(key: Key<V>, value: V): this {
-    this.current().set(key, value);
+    this.#current().set(key, value);
     return this;
   }
 
   /** @see {@link Context.delete} */
   delete(key: Key<unknown>): boolean {
-    return this.current().delete(key);
+    return this.#current().delete(key);
   }
 
   // -- Scope methods --
 
   /** Returns `true` if an ALS scope is active. */
   isActive(): boolean {
-    return this.als?.getStore() !== undefined;
+    return this.#als?.getStore() !== undefined;
   }
 
   /**
@@ -276,9 +276,9 @@ export class AsyncScope {
    * @param state - Optional Context to use. Must match current if ALS is already active.
    */
   async run<T>(fn: (ctx: Context) => Awaitable<T>, state?: Context): Promise<T> {
-    const als = this.ensureAls();
+    const als = this.#ensureAls();
     const current = als.getStore();
-    this.checkState(current, state);
+    this.#checkState(current, state);
     if (current) return fn(current);
     const ctx = (state as ContextImpl | undefined) ?? new ContextImpl(this);
     return als.run(ctx, () => fn(ctx));
@@ -294,9 +294,9 @@ export class AsyncScope {
    * @param state - Optional parent Context. Must match current if ALS is already active.
    */
   async fork<T>(fn: (ctx: Context) => Awaitable<T>, state?: Context): Promise<T> {
-    const als = this.ensureAls();
+    const als = this.#ensureAls();
     const current = als.getStore();
-    this.checkState(current, state);
+    this.#checkState(current, state);
     const parent = (state as ContextImpl | undefined) ?? current ?? new ContextImpl(this);
     const child = new ContextImpl(this, parent);
     return als.run(child, () => fn(child));
@@ -311,9 +311,9 @@ export class AsyncScope {
    * @param state - Optional Context to use.
    */
   enter(state?: Context): void {
-    const als = this.ensureAls();
+    const als = this.#ensureAls();
     const current = als.getStore();
-    this.checkState(current, state);
+    this.#checkState(current, state);
     if (current) return;
     const ctx = (state as ContextImpl | undefined) ?? new ContextImpl(this);
     als.enterWith(ctx);

@@ -78,16 +78,16 @@ function isTC39MemberContext(
  */
 export class MetadataStore {
   /** Class-level: factory → Map<constructor, metadata[]> */
-  private readonly classStore = new WeakMap<Function, Map<Function, unknown[]>>();
+  readonly #classStore = new WeakMap<Function, Map<Function, unknown[]>>();
   /** Member-level: factory → Map<constructor, Map<key, metadata[]>> */
-  private readonly memberStore = new WeakMap<Function, Map<Function, Map<Qualifier, unknown[]>>>();
+  readonly #memberStore = new WeakMap<Function, Map<Function, Map<Qualifier, unknown[]>>>();
 
   /** Push a class-level metadata entry. */
-  private pushClassMeta(factory: Function, target: Function, metadata: unknown): void {
-    let byTarget = this.classStore.get(factory);
+  #pushClassMeta(factory: Function, target: Function, metadata: unknown): void {
+    let byTarget = this.#classStore.get(factory);
     if (!byTarget) {
       byTarget = new Map();
-      this.classStore.set(factory, byTarget);
+      this.#classStore.set(factory, byTarget);
     }
     let items = byTarget.get(target);
     if (!items) {
@@ -98,16 +98,11 @@ export class MetadataStore {
   }
 
   /** Push a member-level (method/field) metadata entry. */
-  private pushMemberMeta(
-    factory: Function,
-    target: Function,
-    key: Qualifier,
-    metadata: unknown,
-  ): void {
-    let byTarget = this.memberStore.get(factory);
+  #pushMemberMeta(factory: Function, target: Function, key: Qualifier, metadata: unknown): void {
+    let byTarget = this.#memberStore.get(factory);
     if (!byTarget) {
       byTarget = new Map();
-      this.memberStore.set(factory, byTarget);
+      this.#memberStore.set(factory, byTarget);
     }
     let byKey = byTarget.get(target);
     if (!byKey) {
@@ -123,13 +118,13 @@ export class MetadataStore {
   }
 
   /** Flush all pending entries from a DecoratorMetadata object into the member store. */
-  private flushPending(meta: DecoratorMetadata, target: Function): void {
+  #flushPending(meta: DecoratorMetadata, target: Function): void {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const obj = meta as any;
     const pending = obj[PENDING] as PendingEntry[] | undefined;
     if (pending) {
       for (const entry of pending) {
-        this.pushMemberMeta(entry.factory, target, entry.key, entry.metadata);
+        this.#pushMemberMeta(entry.factory, target, entry.key, entry.metadata);
       }
       delete obj[PENDING];
     }
@@ -137,16 +132,16 @@ export class MetadataStore {
   }
 
   /** Ensure any pending TC39 metadata for `target` is flushed. */
-  private ensureFlushed(target: Function): void {
+  #ensureFlushed(target: Function): void {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const meta = (target as any)[Symbol.metadata] as DecoratorMetadata | undefined;
     if (meta && !(meta as Record<symbol, unknown>)[FLUSHED]) {
-      this.flushPending(meta, target);
+      this.#flushPending(meta, target);
     }
   }
 
   /** Resolve a target (class constructor or instance) to the class constructor. */
-  private resolveTarget(target: object): Function {
+  #resolveTarget(target: object): Function {
     if (typeof target === 'function') return target;
     return target.constructor;
   }
@@ -178,11 +173,11 @@ export class MetadataStore {
     extra?: ClassDecorator<unknown>[],
   ): ClassDecorator<T> {
     const decorator = ((target: Function, context?: ClassDecoratorContext): void => {
-      this.pushClassMeta(factory, target, metadata);
+      this.#pushClassMeta(factory, target, metadata);
 
       // TC39: flush pending method/field metadata now that we have the class
       if (isTC39ClassContext(context)) {
-        this.flushPending(context.metadata, target);
+        this.#flushPending(context.metadata, target);
       }
 
       if (extra) {
@@ -222,7 +217,7 @@ export class MetadataStore {
       } else {
         const key = contextOrKey as Qualifier;
         const ctor = typeof target === 'function' ? target : (target as object).constructor;
-        this.pushMemberMeta(factory, ctor, key, metadata);
+        this.#pushMemberMeta(factory, ctor, key, metadata);
       }
 
       if (extra) {
@@ -260,7 +255,7 @@ export class MetadataStore {
       } else {
         const key = contextOrKey as Qualifier;
         const ctor = typeof target === 'function' ? target : (target as object).constructor;
-        this.pushMemberMeta(factory, ctor, key, metadata);
+        this.#pushMemberMeta(factory, ctor, key, metadata);
       }
 
       if (extra) {
@@ -294,12 +289,12 @@ export class MetadataStore {
     key: Qualifier,
   ): readonly T[];
   of(factory: Function, target: object, key?: Qualifier): readonly unknown[] {
-    const ctor = this.resolveTarget(target);
-    this.ensureFlushed(ctor);
+    const ctor = this.#resolveTarget(target);
+    this.#ensureFlushed(ctor);
     if (key === undefined) {
-      return this.classStore.get(factory)?.get(ctor) ?? [];
+      return this.#classStore.get(factory)?.get(ctor) ?? [];
     }
-    return this.memberStore.get(factory)?.get(ctor)?.get(key) ?? [];
+    return this.#memberStore.get(factory)?.get(ctor)?.get(key) ?? [];
   }
 
   /**
@@ -317,11 +312,11 @@ export class MetadataStore {
     metadata: T,
   ): void;
   apply(factory: Function, target: object, keyOrMetadata: unknown, metadata?: unknown): void {
-    const ctor = this.resolveTarget(target);
+    const ctor = this.#resolveTarget(target);
     if (metadata === undefined) {
-      this.pushClassMeta(factory, ctor, keyOrMetadata);
+      this.#pushClassMeta(factory, ctor, keyOrMetadata);
     } else {
-      this.pushMemberMeta(factory, ctor, keyOrMetadata as Qualifier, metadata);
+      this.#pushMemberMeta(factory, ctor, keyOrMetadata as Qualifier, metadata);
     }
   }
 
@@ -335,7 +330,7 @@ export class MetadataStore {
    */
   entries<T>(factory: MethodDecoratorFactory<T>): readonly [Function, Qualifier, T][];
   entries(factory: Function): readonly unknown[] {
-    const cm = this.classStore.get(factory);
+    const cm = this.#classStore.get(factory);
     if (cm) {
       const result: [Function, unknown][] = [];
       for (const [ctor, items] of cm) {
@@ -346,7 +341,7 @@ export class MetadataStore {
       return result;
     }
 
-    const mm = this.memberStore.get(factory);
+    const mm = this.#memberStore.get(factory);
     if (mm) {
       const result: [Function, Qualifier, unknown][] = [];
       for (const [ctor, byKey] of mm) {
@@ -379,12 +374,12 @@ export class MetadataStore {
     const result: unknown[] = [];
     let current: Function | null = clazz;
     while (current && current !== Object && current !== Function) {
-      this.ensureFlushed(current);
+      this.#ensureFlushed(current);
       if (key === undefined) {
-        const items = this.classStore.get(factory)?.get(current);
+        const items = this.#classStore.get(factory)?.get(current);
         if (items) result.push(...items);
       } else {
-        const items = this.memberStore.get(factory)?.get(current)?.get(key);
+        const items = this.#memberStore.get(factory)?.get(current)?.get(key);
         if (items) result.push(...items);
       }
       const proto = Object.getPrototypeOf(current.prototype);
