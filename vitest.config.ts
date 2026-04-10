@@ -15,6 +15,8 @@ export default defineConfig({
       },
     }),
   ],
+  // Disable Oxc transform — SWC handles TS + TC39 decorators
+  oxc: false,
   test: {
     passWithNoTests: true,
   },
