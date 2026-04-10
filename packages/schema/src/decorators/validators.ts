@@ -1,9 +1,98 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * String format validators powered by validator.js.
+ * Uses tree-shakeable ES imports and @types/validator option types.
  * Each composes IsString internally and adds format-specific validation.
  */
-import validator from 'validator';
+import isEmailFn from 'validator/es/lib/isEmail';
+import isURLFn from 'validator/es/lib/isURL';
+import isUUIDFn from 'validator/es/lib/isUUID';
+import isIPFn from 'validator/es/lib/isIP';
+import isIPRangeFn from 'validator/es/lib/isIPRange';
+import isAlphaFn from 'validator/es/lib/isAlpha';
+import isAlphanumericFn from 'validator/es/lib/isAlphanumeric';
+import isNumericFn from 'validator/es/lib/isNumeric';
+import isAsciiFn from 'validator/es/lib/isAscii';
+import isMultibyteFn from 'validator/es/lib/isMultibyte';
+import isFullWidthFn from 'validator/es/lib/isFullWidth';
+import isHalfWidthFn from 'validator/es/lib/isHalfWidth';
+import isVariableWidthFn from 'validator/es/lib/isVariableWidth';
+import isSurrogatePairFn from 'validator/es/lib/isSurrogatePair';
+import isLowercaseFn from 'validator/es/lib/isLowercase';
+import isUppercaseFn from 'validator/es/lib/isUppercase';
+import isSlugFn from 'validator/es/lib/isSlug';
+import isLocaleFn from 'validator/es/lib/isLocale';
+import isEmptyFn from 'validator/es/lib/isEmpty';
+import isBase32Fn from 'validator/es/lib/isBase32';
+import isBase58Fn from 'validator/es/lib/isBase58';
+import isBase64Fn from 'validator/es/lib/isBase64';
+import isDataURIFn from 'validator/es/lib/isDataURI';
+import isMagnetURIFn from 'validator/es/lib/isMagnetURI';
+import isMailtoURIFn from 'validator/es/lib/isMailtoURI';
+import isMimeTypeFn from 'validator/es/lib/isMimeType';
+import isJSONFn from 'validator/es/lib/isJSON';
+import isJWTFn from 'validator/es/lib/isJWT';
+import isOctalFn from 'validator/es/lib/isOctal';
+import isHexColorFn from 'validator/es/lib/isHexColor';
+import isHexadecimalFn from 'validator/es/lib/isHexadecimal';
+import isHSLFn from 'validator/es/lib/isHSL';
+import isRgbColorFn from 'validator/es/lib/isRgbColor';
+import isHashFn from 'validator/es/lib/isHash';
+import isMD5Fn from 'validator/es/lib/isMD5';
+import isCreditCardFn from 'validator/es/lib/isCreditCard';
+import isCurrencyFn from 'validator/es/lib/isCurrency';
+import isEANFn from 'validator/es/lib/isEAN';
+import isISINFn from 'validator/es/lib/isISIN';
+import isISBNFn from 'validator/es/lib/isISBN';
+import isEthereumAddressFn from 'validator/es/lib/isEthereumAddress';
+import isBtcAddressFn from 'validator/es/lib/isBtcAddress';
+import isIBANFn from 'validator/es/lib/isIBAN';
+import isBICFn from 'validator/es/lib/isBIC';
+import isAbaRoutingFn from 'validator/es/lib/isAbaRouting';
+import isVATFn from 'validator/es/lib/isVAT';
+import isTaxIDFn from 'validator/es/lib/isTaxID';
+import isLuhnNumberFn from 'validator/es/lib/isLuhnNumber';
+import isMobilePhoneFn from 'validator/es/lib/isMobilePhone';
+import isPassportNumberFn from 'validator/es/lib/isPassportNumber';
+import isIdentityCardFn from 'validator/es/lib/isIdentityCard';
+// @ts-expect-error - no type declarations for ES module
+import isIMEIFn from 'validator/es/lib/isIMEI';
+import isLicensePlateFn from 'validator/es/lib/isLicensePlate';
+import isFQDNFn from 'validator/es/lib/isFQDN';
+import isMACAddressFn from 'validator/es/lib/isMACAddress';
+import isPortFn from 'validator/es/lib/isPort';
+import isMongoIdFn from 'validator/es/lib/isMongoId';
+import isLatLongFn from 'validator/es/lib/isLatLong';
+import isPostalCodeFn from 'validator/es/lib/isPostalCode';
+import isISO8601Fn from 'validator/es/lib/isISO8601';
+import isRFC3339Fn from 'validator/es/lib/isRFC3339';
+import isTimeFn from 'validator/es/lib/isTime';
+import isISO4217Fn from 'validator/es/lib/isISO4217';
+import isISO6346Fn from 'validator/es/lib/isISO6346';
+import isISO6391Fn from 'validator/es/lib/isISO6391';
+import isISO15924Fn from 'validator/es/lib/isISO15924';
+import isISO31661Alpha2Fn from 'validator/es/lib/isISO31661Alpha2';
+import isISO31661Alpha3Fn from 'validator/es/lib/isISO31661Alpha3';
+import isISO31661NumericFn from 'validator/es/lib/isISO31661Numeric';
+import isISRCFn from 'validator/es/lib/isISRC';
+import isISSNFn from 'validator/es/lib/isISSN';
+// @ts-expect-error - no type declarations for ES module
+import isFreightContainerIDFn from 'validator/es/lib/isFreightContainerID';
+import isULIDFn from 'validator/es/lib/isULID';
+import isSemVerFn from 'validator/es/lib/isSemVer';
+import isStrongPasswordFn from 'validator/es/lib/isStrongPassword';
+import isFloatFn from 'validator/es/lib/isFloat';
+import isIntFn from 'validator/es/lib/isInt';
+import isDecimalFn from 'validator/es/lib/isDecimal';
+import isDivisibleByFn from 'validator/es/lib/isDivisibleBy';
+import isByteLengthFn from 'validator/es/lib/isByteLength';
+import isWhitelistedFn from 'validator/es/lib/isWhitelisted';
+import isAfterFn from 'validator/es/lib/isAfter';
+import isBeforeFn from 'validator/es/lib/isBefore';
+import isDateFn from 'validator/es/lib/isDate';
+
+// @ts-expect-error - used for type references like validator.HashAlgorithm
+import type validator from 'validator';
 import type {
   StringSchema,
   ValidateOptions,
@@ -14,517 +103,246 @@ import { createSchemaFieldDecoratorFactory, SchemaField } from '../field.js';
 import { IsString } from './primitives.js';
 
 // ---------------------------------------------------------------------------
-// Helper: create a string format validator with minimal boilerplate
+// Re-export option types from @types/validator
 // ---------------------------------------------------------------------------
 
-function sv<P extends ValidateOptions = ValidateOptions>(
+export type { IsEmailOptions } from 'validator/lib/isEmail';
+export type { IsURLOptions } from 'validator/lib/isURL';
+export type { IsFQDNOptions } from 'validator/lib/isFQDN';
+export type { IsFloatOptions } from 'validator/lib/isFloat';
+export type { IsIntOptions as IsIntStringOptions } from 'validator/lib/isInt';
+export type { IsDecimalOptions } from 'validator/lib/isDecimal';
+export type { IsByteLengthOptions } from 'validator/lib/isByteLength';
+export type { IsCurrencyOptions } from 'validator/lib/isCurrency';
+export type { IsNumericOptions as IsNumericStringOptions } from 'validator/lib/isNumeric';
+export type { IsBase32Options } from 'validator/lib/isBase32';
+export type { IsMACAddressOptions } from 'validator/lib/isMACAddress';
+export type { IsISSNOptions } from 'validator/lib/isISSN';
+export type { IsISO8601Options } from 'validator/lib/isISO8601';
+export type { IsTimeOptions } from 'validator/lib/isTime';
+export type { IsRgbColorOptions } from 'validator/lib/isRgbColor';
+export type { IsAfterOptions } from 'validator/lib/isAfter';
+export type { IsBeforeOptions } from 'validator/lib/isBefore';
+export type { IsDateOptions as IsDateStringOptions } from 'validator/lib/isDate';
+export type { IsMobilePhoneOptions } from 'validator/lib/isMobilePhone';
+export type { IsLengthOptions } from 'validator/lib/isLength';
+export type { IsLatLongOptions } from 'validator/lib/isLatLong';
+export type { IsEmptyOptions } from 'validator/lib/isEmpty';
+export type { IsJSONOptions } from 'validator/lib/isJSON';
+export type { IsIBANOptions } from 'validator/lib/isIBAN';
+export type { StrongPasswordOptions as IsStrongPasswordOptions } from 'validator/lib/isStrongPassword';
+export type { IsIPOptions } from 'validator/lib/isIP';
+
+// Types not available in @types/validator — defined inline
+export interface IsUUIDOptions extends ValidateOptions {
+  version?: 1 | 2 | 3 | 4 | 5 | 7 | 'all';
+}
+export interface IsHashOptions extends ValidateOptions {
+  algorithm: validator.HashAlgorithm;
+}
+export interface IsISBNOptions extends ValidateOptions {
+  version?: 10 | 13;
+}
+export interface IsAlphaOptions extends ValidateOptions {
+  locale?: validator.AlphaLocale;
+  ignore?: string | RegExp;
+}
+export interface IsAlphanumericOptions extends ValidateOptions {
+  locale?: validator.AlphanumericLocale;
+  ignore?: string | RegExp;
+}
+export interface IsCreditCardOptions extends ValidateOptions {
+  provider?: 'amex' | 'dinersclub' | 'discover' | 'jcb' | 'mastercard' | 'unionpay' | 'visa';
+}
+export interface IsVATOptions extends ValidateOptions {
+  countryCode: string;
+}
+export interface IsTaxIDOptions extends ValidateOptions {
+  locale: string;
+}
+export interface IsPassportNumberOptions extends ValidateOptions {
+  countryCode?: string;
+}
+export interface IsIdentityCardOptions extends ValidateOptions {
+  locale?: validator.IdentityCardLocale;
+}
+export interface IsIMEIOptions extends ValidateOptions {
+  allow_hyphens?: boolean;
+}
+export interface IsLicensePlateOptions extends ValidateOptions {
+  locale: string;
+}
+export interface IsPostalCodeOptions extends ValidateOptions {
+  locale: validator.PostalCodeLocale;
+}
+export interface IsDivisibleByOptions extends ValidateOptions {
+  divisor: number;
+}
+export interface IsWhitelistedOptions extends ValidateOptions {
+  chars: string | string[];
+}
+export interface IsBase64Options extends ValidateOptions {
+  urlSafe?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Helper
+// ---------------------------------------------------------------------------
+
+function sv<P = ValidateOptions>(
   name: string,
   validateFn: (value: string, params: P) => boolean,
   format?: string,
 ): SchemaFieldDecoratorFactory<P> {
   const ref: { current?: SchemaFieldDecoratorFactory<P> } = {};
-  const factory = createSchemaFieldDecoratorFactory(
+  const factory = createSchemaFieldDecoratorFactory<any>(
     Object.defineProperty(
       function (options?: P, schema?: StringSchema): SchemaFieldDecorator<P> {
-        return SchemaField(ref.current as SchemaFieldDecoratorFactory<P>, (options ?? {}) as P, [
-          IsString(schema),
-        ]);
+        return SchemaField(ref.current as any, (options ?? {}) as any, [IsString(schema)]) as any;
       },
       'name',
       { value: name },
-    ) as SchemaFieldDecoratorFactory<P>,
+    ),
     {
-      validate: (p: P, v: unknown) => typeof v !== 'string' || validateFn(v, p),
+      validate: (p: any, v: unknown) => typeof v !== 'string' || validateFn(v, p),
       toJsonSchema: format ? () => ({ type: 'string', format }) : undefined,
     },
-  );
+  ) as unknown as SchemaFieldDecoratorFactory<P>;
   ref.current = factory;
   return factory;
 }
 
 // ---------------------------------------------------------------------------
-// Email / URL / UUID / IP
+// Validators
 // ---------------------------------------------------------------------------
 
-/** @see validator.isEmail */
-export interface IsEmailOptions extends ValidateOptions {
-  allow_display_name?: boolean;
-  require_display_name?: boolean;
-  allow_utf8_local_part?: boolean;
-  require_tld?: boolean;
-  allow_ip_domain?: boolean;
-  domain_specific_validation?: boolean;
-  blacklisted_chars?: string;
-  host_blacklist?: string[];
-  host_whitelist?: string[];
-}
-
-export const IsEmail = sv<IsEmailOptions>('IsEmail', (v, p) => validator.isEmail(v, p), 'email');
-
-/** @see validator.isURL */
-export interface IsUrlOptions extends ValidateOptions {
-  protocols?: string[];
-  require_tld?: boolean;
-  require_protocol?: boolean;
-  require_host?: boolean;
-  require_port?: boolean;
-  require_valid_protocol?: boolean;
-  allow_underscores?: boolean;
-  host_whitelist?: (string | RegExp)[];
-  host_blacklist?: (string | RegExp)[];
-  allow_trailing_dot?: boolean;
-  allow_protocol_relative_urls?: boolean;
-  allow_fragments?: boolean;
-  allow_query_components?: boolean;
-  validate_length?: boolean;
-  max_allowed_length?: number;
-}
-
-export const IsURL = sv<IsUrlOptions>('IsURL', (v, p) => validator.isURL(v, p), 'uri');
-
-/** @see validator.isUUID */
-export interface IsUUIDOptions extends ValidateOptions {
-  version?: 1 | 2 | 3 | 4 | 5 | 7 | 'all';
-}
-
-export const IsUUID = sv<IsUUIDOptions>('IsUUID', (v, p) => validator.isUUID(v, p.version), 'uuid');
-
-/** @see validator.isIP */
-export interface IsIPOptions extends ValidateOptions {
-  version?: 4 | 6;
-}
-
-export const IsIP = sv<IsIPOptions>('IsIP', (v, p) => validator.isIP(v, p.version), 'ipv4');
-
-/** @see validator.isIPRange */
-export const IsIPRange = sv<IsIPOptions>('IsIPRange', (v, p) => validator.isIPRange(v, p.version));
-
-// ---------------------------------------------------------------------------
-// String content validators
-// ---------------------------------------------------------------------------
-
-/** @see validator.isAlpha */
-export interface IsAlphaOptions extends ValidateOptions {
-  locale?: validator.AlphaLocale;
-  ignore?: string | RegExp;
-}
-
+export const IsEmail = sv<validator.IsEmailOptions>('IsEmail', (v, p) => isEmailFn(v, p), 'email');
+export const IsURL = sv<validator.IsURLOptions>('IsURL', (v, p) => isURLFn(v, p), 'uri');
+export const IsUUID = sv<IsUUIDOptions>('IsUUID', (v, p) => isUUIDFn(v, p.version), 'uuid');
+export const IsIP = sv<validator.IsIPOptions>('IsIP', (v, p) => isIPFn(v, p), 'ipv4');
+export const IsIPRange = sv<validator.IsIPOptions>('IsIPRange', (v, p) =>
+  isIPRangeFn(v, p.version),
+);
 export const IsAlpha = sv<IsAlphaOptions>('IsAlpha', (v, p) =>
-  validator.isAlpha(v, p.locale, { ignore: p.ignore }),
+  isAlphaFn(v, p.locale, { ignore: p.ignore }),
 );
-
-/** @see validator.isAlphanumeric */
-export interface IsAlphanumericOptions extends ValidateOptions {
-  locale?: validator.AlphanumericLocale;
-  ignore?: string | RegExp;
-}
-
 export const IsAlphanumeric = sv<IsAlphanumericOptions>('IsAlphanumeric', (v, p) =>
-  validator.isAlphanumeric(v, p.locale, { ignore: p.ignore }),
+  isAlphanumericFn(v, p.locale, { ignore: p.ignore }),
 );
-
-/** @see validator.isNumeric */
-export interface IsNumericStringOptions extends ValidateOptions {
-  no_symbols?: boolean;
-  locale?: validator.FloatLocale;
-}
-
-export const IsNumericString = sv<IsNumericStringOptions>('IsNumericString', (v, p) =>
-  validator.isNumeric(v, p),
+export const IsNumericString = sv<validator.IsNumericOptions>('IsNumericString', (v, p) =>
+  isNumericFn(v, p),
 );
-
-export const IsAscii = sv('IsAscii', (v) => validator.isAscii(v));
-export const IsMultibyte = sv('IsMultibyte', (v) => validator.isMultibyte(v));
-export const IsFullWidth = sv('IsFullWidth', (v) => validator.isFullWidth(v));
-export const IsHalfWidth = sv('IsHalfWidth', (v) => validator.isHalfWidth(v));
-export const IsVariableWidth = sv('IsVariableWidth', (v) => validator.isVariableWidth(v));
-export const IsSurrogatePair = sv('IsSurrogatePair', (v) => validator.isSurrogatePair(v));
-export const IsLowercase = sv('IsLowercase', (v) => validator.isLowercase(v));
-export const IsUppercase = sv('IsUppercase', (v) => validator.isUppercase(v));
-export const IsSlug = sv('IsSlug', (v) => validator.isSlug(v));
-export const IsLocale = sv('IsLocale', (v) => validator.isLocale(v));
-export const IsEmpty = sv('IsEmpty', (v) => validator.isEmpty(v));
-
-// ---------------------------------------------------------------------------
-// Encoding / Format validators
-// ---------------------------------------------------------------------------
-
-/** @see validator.isBase32 */
-export interface IsBase32Options extends ValidateOptions {
-  crockford?: boolean;
-}
-
-export const IsBase32 = sv<IsBase32Options>('IsBase32', (v, p) => validator.isBase32(v, p));
-export const IsBase58 = sv('IsBase58', (v) => validator.isBase58(v));
-
-/** @see validator.isBase64 */
-export interface IsBase64Options extends ValidateOptions {
-  urlSafe?: boolean;
-}
-
-export const IsBase64 = sv<IsBase64Options>('IsBase64', (v, p) => validator.isBase64(v, p));
-export const IsDataURI = sv('IsDataURI', (v) => validator.isDataURI(v));
-export const IsMagnetURI = sv('IsMagnetURI', (v) => validator.isMagnetURI(v));
-export const IsMailtoURI = sv('IsMailtoURI', (v) => validator.isMailtoURI(v));
-export const IsMimeType = sv('IsMimeType', (v) => validator.isMimeType(v));
-export const IsJSON = sv('IsJSON', (v) => validator.isJSON(v));
-export const IsJWT = sv('IsJWT', (v) => validator.isJWT(v));
-export const IsOctal = sv('IsOctal', (v) => validator.isOctal(v));
-
-// ---------------------------------------------------------------------------
-// Color validators
-// ---------------------------------------------------------------------------
-
-export const IsHexColor = sv('IsHexColor', (v) => validator.isHexColor(v));
-export const IsHexadecimal = sv('IsHexadecimal', (v) => validator.isHexadecimal(v));
-
-/** @see validator.isHSL */
-export const IsHSL = sv('IsHSL', (v) => validator.isHSL(v));
-
-/** @see validator.isRgbColor */
-export interface IsRgbColorOptions extends ValidateOptions {
-  includePercentValues?: boolean;
-}
-
-export const IsRgbColor = sv<IsRgbColorOptions>('IsRgbColor', (v, p) =>
-  validator.isRgbColor(v, p.includePercentValues),
+export const IsAscii = sv('IsAscii', (v) => isAsciiFn(v));
+export const IsMultibyte = sv('IsMultibyte', (v) => isMultibyteFn(v));
+export const IsFullWidth = sv('IsFullWidth', (v) => isFullWidthFn(v));
+export const IsHalfWidth = sv('IsHalfWidth', (v) => isHalfWidthFn(v));
+export const IsVariableWidth = sv('IsVariableWidth', (v) => isVariableWidthFn(v));
+export const IsSurrogatePair = sv('IsSurrogatePair', (v) => isSurrogatePairFn(v));
+export const IsLowercase = sv('IsLowercase', (v) => isLowercaseFn(v));
+export const IsUppercase = sv('IsUppercase', (v) => isUppercaseFn(v));
+export const IsSlug = sv('IsSlug', (v) => isSlugFn(v));
+export const IsLocale = sv('IsLocale', (v) => isLocaleFn(v));
+export const IsEmpty = sv<validator.IsEmptyOptions>('IsEmpty', (v, p) => isEmptyFn(v, p));
+export const IsBase32 = sv<validator.IsBase32Options>('IsBase32', (v, p) => isBase32Fn(v, p));
+export const IsBase58 = sv('IsBase58', (v) => isBase58Fn(v));
+export const IsBase64 = sv<IsBase64Options>('IsBase64', (v, p) => isBase64Fn(v, p));
+export const IsDataURI = sv('IsDataURI', (v) => isDataURIFn(v));
+export const IsMagnetURI = sv('IsMagnetURI', (v) => isMagnetURIFn(v));
+export const IsMailtoURI = sv('IsMailtoURI', (v) => isMailtoURIFn(v));
+export const IsMimeType = sv('IsMimeType', (v) => isMimeTypeFn(v));
+export const IsJSON = sv<validator.IsJSONOptions>('IsJSON', (v, p) => isJSONFn(v, p));
+export const IsJWT = sv('IsJWT', (v) => isJWTFn(v));
+export const IsOctal = sv('IsOctal', (v) => isOctalFn(v));
+export const IsHexColor = sv('IsHexColor', (v) => isHexColorFn(v));
+export const IsHexadecimal = sv('IsHexadecimal', (v) => isHexadecimalFn(v));
+export const IsHSL = sv('IsHSL', (v) => isHSLFn(v));
+export const IsRgbColor = sv<validator.IsRgbColorOptions>('IsRgbColor', (v, p) =>
+  isRgbColorFn(v, p.includePercentValues),
 );
-
-// ---------------------------------------------------------------------------
-// Hash / Crypto validators
-// ---------------------------------------------------------------------------
-
-/** @see validator.isHash */
-export interface IsHashOptions extends ValidateOptions {
-  algorithm: validator.HashAlgorithm;
-}
-
-export const IsHash = sv<IsHashOptions>('IsHash', (v, p) => validator.isHash(v, p.algorithm));
-export const IsMD5 = sv('IsMD5', (v) => validator.isMD5(v));
-
-// ---------------------------------------------------------------------------
-// Financial validators
-// ---------------------------------------------------------------------------
-
-/** @see validator.isCreditCard */
-export interface IsCreditCardOptions extends ValidateOptions {
-  provider?: 'amex' | 'dinersclub' | 'discover' | 'jcb' | 'mastercard' | 'unionpay' | 'visa';
-}
-
+export const IsHash = sv<IsHashOptions>('IsHash', (v, p) => isHashFn(v, p.algorithm));
+export const IsMD5 = sv('IsMD5', (v) => isMD5Fn(v));
 export const IsCreditCard = sv<IsCreditCardOptions>('IsCreditCard', (v, p) =>
-  validator.isCreditCard(v, p),
+  isCreditCardFn(v, p as any),
 );
-
-/** @see validator.isCurrency */
-export interface IsCurrencyOptions extends ValidateOptions {
-  symbol?: string;
-  require_symbol?: boolean;
-  allow_space_after_symbol?: boolean;
-  symbol_after_digits?: boolean;
-  allow_negatives?: boolean;
-  parens_for_negatives?: boolean;
-  negative_sign_before_digits?: boolean;
-  negative_sign_after_digits?: boolean;
-  allow_negative_sign_placeholder?: boolean;
-  thousands_separator?: string;
-  decimal_separator?: string;
-  allow_decimal?: boolean;
-  require_decimal?: boolean;
-  digits_after_decimal?: number[];
-  allow_space_after_digits?: boolean;
-}
-
-export const IsCurrency = sv<IsCurrencyOptions>('IsCurrency', (v, p) => validator.isCurrency(v, p));
-
-export const IsEAN = sv('IsEAN', (v) => validator.isEAN(v));
-export const IsISIN = sv('IsISIN', (v) => validator.isISIN(v));
-
-/** @see validator.isISBN */
-export interface IsISBNOptions extends ValidateOptions {
-  version?: 10 | 13;
-}
-
-export const IsISBN = sv<IsISBNOptions>('IsISBN', (v, p) => validator.isISBN(v, p.version));
-export const IsEthereumAddress = sv('IsEthereumAddress', (v) => validator.isEthereumAddress(v));
-export const IsBtcAddress = sv('IsBtcAddress', (v) => validator.isBtcAddress(v));
-
-/** @see validator.isIBAN */
-export interface IsIBANOptions extends ValidateOptions {
-  whitelist?: readonly string[];
-  blacklist?: string[];
-}
-
-export const IsIBAN = sv<IsIBANOptions>('IsIBAN', (v, p) => validator.isIBAN(v, p as any));
-export const IsBIC = sv('IsBIC', (v) => validator.isBIC(v));
-export const IsAbaRouting = sv('IsAbaRouting', (v) => validator.isAbaRouting(v));
-
-/** @see validator.isVAT */
-export interface IsVATOptions extends ValidateOptions {
-  countryCode: string;
-}
-
-export const IsVAT = sv<IsVATOptions>('IsVAT', (v, p) => validator.isVAT(v, p.countryCode as any));
-
-/** @see validator.isTaxID */
-export interface IsTaxIDOptions extends ValidateOptions {
-  locale: string;
-}
-
-export const IsTaxID = sv<IsTaxIDOptions>('IsTaxID', (v, p) => validator.isTaxID(v, p.locale));
-export const IsLuhnNumber = sv('IsLuhnNumber', (v) => validator.isLuhnNumber(v));
-
-// ---------------------------------------------------------------------------
-// Phone / Identity validators
-// ---------------------------------------------------------------------------
-
-/** @see validator.isMobilePhone */
-export interface IsMobilePhoneOptions extends ValidateOptions {
-  locale?: validator.MobilePhoneLocale | validator.MobilePhoneLocale[];
-  strictMode?: boolean;
-}
-
-export const IsMobilePhone = sv<IsMobilePhoneOptions>('IsMobilePhone', (v, p) =>
-  validator.isMobilePhone(v, p.locale, { strictMode: p.strictMode }),
+export const IsCurrency = sv<validator.IsCurrencyOptions>('IsCurrency', (v, p) =>
+  isCurrencyFn(v, p),
 );
-
-/** @see validator.isPassportNumber */
-export interface IsPassportNumberOptions extends ValidateOptions {
-  countryCode?: string;
-}
-
+export const IsEAN = sv('IsEAN', (v) => isEANFn(v));
+export const IsISIN = sv('IsISIN', (v) => isISINFn(v));
+export const IsISBN = sv<IsISBNOptions>('IsISBN', (v, p) => isISBNFn(v, p.version));
+export const IsEthereumAddress = sv('IsEthereumAddress', (v) => isEthereumAddressFn(v));
+export const IsBtcAddress = sv('IsBtcAddress', (v) => isBtcAddressFn(v));
+export const IsIBAN = sv<validator.IsIBANOptions>('IsIBAN', (v, p) => isIBANFn(v, p));
+export const IsBIC = sv('IsBIC', (v) => isBICFn(v));
+export const IsAbaRouting = sv('IsAbaRouting', (v) => isAbaRoutingFn(v));
+export const IsVAT = sv<IsVATOptions>('IsVAT', (v, p) => isVATFn(v, p.countryCode as any));
+export const IsTaxID = sv<IsTaxIDOptions>('IsTaxID', (v, p) => isTaxIDFn(v, p.locale));
+export const IsLuhnNumber = sv('IsLuhnNumber', (v) => isLuhnNumberFn(v));
+export const IsMobilePhone = sv<validator.IsMobilePhoneOptions>('IsMobilePhone', (v, p) =>
+  isMobilePhoneFn(v, undefined as any, p),
+);
 export const IsPassportNumber = sv<IsPassportNumberOptions>('IsPassportNumber', (v, p) =>
-  validator.isPassportNumber(v, p.countryCode),
+  isPassportNumberFn(v, p.countryCode),
 );
-
-/** @see validator.isIdentityCard */
-export interface IsIdentityCardOptions extends ValidateOptions {
-  locale?: validator.IdentityCardLocale;
-}
-
 export const IsIdentityCard = sv<IsIdentityCardOptions>('IsIdentityCard', (v, p) =>
-  validator.isIdentityCard(v, p.locale),
+  isIdentityCardFn(v, p.locale),
 );
-
-/** @see validator.isIMEI */
-export interface IsIMEIOptions extends ValidateOptions {
-  allow_hyphens?: boolean;
-}
-
-export const IsIMEI = sv<IsIMEIOptions>('IsIMEI', (v, p) => validator.isIMEI(v, p));
-
-/** @see validator.isLicensePlate */
-export interface IsLicensePlateOptions extends ValidateOptions {
-  locale: string;
-}
-
+export const IsIMEI = sv<IsIMEIOptions>('IsIMEI', (v, p) => isIMEIFn(v, p));
 export const IsLicensePlate = sv<IsLicensePlateOptions>(
   'IsLicensePlate',
-  (v, p) => !!validator.isLicensePlate(v, p.locale),
+  (v, p) => !!isLicensePlateFn(v, p.locale),
 );
-
-// ---------------------------------------------------------------------------
-// Network / Domain validators
-// ---------------------------------------------------------------------------
-
-/** @see validator.isFQDN */
-export interface IsFQDNOptions extends ValidateOptions {
-  require_tld?: boolean;
-  allow_underscores?: boolean;
-  allow_trailing_dot?: boolean;
-  allow_numeric_tld?: boolean;
-  allow_wildcard?: boolean;
-  ignore_max_length?: boolean;
-}
-
-export const IsFQDN = sv<IsFQDNOptions>('IsFQDN', (v, p) => validator.isFQDN(v, p), 'hostname');
-
-/** @see validator.isMACAddress */
-export interface IsMACAddressOptions extends ValidateOptions {
-  no_separators?: boolean;
-  no_colons?: boolean;
-  eui?: '48' | '64';
-}
-
-export const IsMACAddress = sv<IsMACAddressOptions>('IsMACAddress', (v, p) =>
-  validator.isMACAddress(v, p),
+export const IsFQDN = sv<validator.IsFQDNOptions>('IsFQDN', (v, p) => isFQDNFn(v, p), 'hostname');
+export const IsMACAddress = sv<validator.IsMACAddressOptions>('IsMACAddress', (v, p) =>
+  isMACAddressFn(v, p),
 );
-
-export const IsPort = sv('IsPort', (v) => validator.isPort(v));
-export const IsMongoId = sv('IsMongoId', (v) => validator.isMongoId(v));
-
-// ---------------------------------------------------------------------------
-// Geo / Postal validators
-// ---------------------------------------------------------------------------
-
-export const IsLatLong = sv('IsLatLong', (v) => validator.isLatLong(v));
-
-/** @see validator.isPostalCode */
-export interface IsPostalCodeOptions extends ValidateOptions {
-  locale: validator.PostalCodeLocale;
-}
-
+export const IsPort = sv('IsPort', (v) => isPortFn(v));
+export const IsMongoId = sv('IsMongoId', (v) => isMongoIdFn(v));
+export const IsLatLong = sv<validator.IsLatLongOptions>('IsLatLong', (v, p) => isLatLongFn(v, p));
 export const IsPostalCode = sv<IsPostalCodeOptions>('IsPostalCode', (v, p) =>
-  validator.isPostalCode(v, p.locale),
+  isPostalCodeFn(v, p.locale),
 );
-
-// ---------------------------------------------------------------------------
-// Date / Time format validators
-// ---------------------------------------------------------------------------
-
-/** @see validator.isISO8601 */
-export interface IsISO8601Options extends ValidateOptions {
-  strict?: boolean;
-  strictSeparator?: boolean;
-}
-
-export const IsISO8601 = sv<IsISO8601Options>(
+export const IsISO8601 = sv<validator.IsISO8601Options>(
   'IsISO8601',
-  (v, p) => validator.isISO8601(v, p),
+  (v, p) => isISO8601Fn(v, p),
   'date-time',
 );
-
-export const IsRFC3339 = sv('IsRFC3339', (v) => validator.isRFC3339(v), 'date-time');
-
-/** @see validator.isTime */
-export interface IsTimeOptions extends ValidateOptions {
-  hourFormat?: 'hour24' | 'hour12';
-  mode?: 'default' | 'withSeconds';
-}
-
-export const IsTime = sv<IsTimeOptions>('IsTime', (v, p) => validator.isTime(v, p), 'time');
-
-// ---------------------------------------------------------------------------
-// ISO / Standard validators
-// ---------------------------------------------------------------------------
-
-export const IsISO4217 = sv('IsISO4217', (v) => validator.isISO4217(v));
-export const IsISO6346 = sv('IsISO6346', (v) => validator.isISO6346(v));
-export const IsISO6391 = sv('IsISO6391', (v) => validator.isISO6391(v));
-export const IsISO15924 = sv('IsISO15924', (v) => validator.isISO15924(v));
-export const IsISO31661Alpha2 = sv('IsISO31661Alpha2', (v) => validator.isISO31661Alpha2(v));
-export const IsISO31661Alpha3 = sv('IsISO31661Alpha3', (v) => validator.isISO31661Alpha3(v));
-export const IsISO31661Numeric = sv('IsISO31661Numeric', (v) => validator.isISO31661Numeric(v));
-export const IsISRC = sv('IsISRC', (v) => validator.isISRC(v));
-
-/** @see validator.isISSN */
-export interface IsISSNOptions extends ValidateOptions {
-  case_sensitive?: boolean;
-  require_hyphen?: boolean;
-}
-
-export const IsISSN = sv<IsISSNOptions>('IsISSN', (v, p) => validator.isISSN(v, p));
-export const IsFreightContainerID = sv('IsFreightContainerID', (v) =>
-  validator.isFreightContainerID(v),
-);
-export const IsULID = sv('IsULID', (v) => validator.isULID(v));
-
-// ---------------------------------------------------------------------------
-// Misc validators
-// ---------------------------------------------------------------------------
-
-export const IsSemVer = sv('IsSemVer', (v) => validator.isSemVer(v));
-
-/** @see validator.isStrongPassword */
-export interface IsStrongPasswordOptions extends ValidateOptions {
-  minLength?: number;
-  minLowercase?: number;
-  minUppercase?: number;
-  minNumbers?: number;
-  minSymbols?: number;
-  returnScore?: boolean;
-  pointsPerUnique?: number;
-  pointsPerRepeat?: number;
-  pointsForContainingLower?: number;
-  pointsForContainingUpper?: number;
-  pointsForContainingNumber?: number;
-  pointsForContainingSymbol?: number;
-}
-
-export const IsStrongPassword = sv<IsStrongPasswordOptions>(
+export const IsRFC3339 = sv('IsRFC3339', (v) => isRFC3339Fn(v), 'date-time');
+export const IsTime = sv<validator.IsTimeOptions>('IsTime', (v, p) => isTimeFn(v, p), 'time');
+export const IsISO4217 = sv('IsISO4217', (v) => isISO4217Fn(v));
+export const IsISO6346 = sv('IsISO6346', (v) => isISO6346Fn(v));
+export const IsISO6391 = sv('IsISO6391', (v) => isISO6391Fn(v));
+export const IsISO15924 = sv('IsISO15924', (v) => isISO15924Fn(v));
+export const IsISO31661Alpha2 = sv('IsISO31661Alpha2', (v) => isISO31661Alpha2Fn(v));
+export const IsISO31661Alpha3 = sv('IsISO31661Alpha3', (v) => isISO31661Alpha3Fn(v));
+export const IsISO31661Numeric = sv('IsISO31661Numeric', (v) => isISO31661NumericFn(v));
+export const IsISRC = sv('IsISRC', (v) => isISRCFn(v));
+export const IsISSN = sv<validator.IsISSNOptions>('IsISSN', (v, p) => isISSNFn(v, p));
+export const IsFreightContainerID = sv('IsFreightContainerID', (v) => isFreightContainerIDFn(v));
+export const IsULID = sv('IsULID', (v) => isULIDFn(v));
+export const IsSemVer = sv('IsSemVer', (v) => isSemVerFn(v));
+export const IsStrongPassword = sv<validator.StrongPasswordOptions>(
   'IsStrongPassword',
-  (v, p) => !!validator.isStrongPassword(v, p),
+  (v, p) => !!isStrongPasswordFn(v, p),
 );
-
-/** @see validator.isFloat */
-export interface IsFloatOptions extends ValidateOptions {
-  min?: number;
-  max?: number;
-  gt?: number;
-  lt?: number;
-  locale?: validator.FloatLocale;
-}
-
-export const IsFloatString = sv<IsFloatOptions>('IsFloatString', (v, p) => validator.isFloat(v, p));
-
-/** @see validator.isInt */
-export interface IsIntStringOptions extends ValidateOptions {
-  min?: number;
-  max?: number;
-  allow_leading_zeroes?: boolean;
-  lt?: number;
-  gt?: number;
-}
-
-export const IsIntString = sv<IsIntStringOptions>('IsIntString', (v, p) => validator.isInt(v, p));
-
-/** @see validator.isDecimal */
-export interface IsDecimalOptions extends ValidateOptions {
-  force_decimal?: boolean;
-  decimal_digits?: string;
-  locale?: validator.DecimalLocale;
-}
-
-export const IsDecimal = sv<IsDecimalOptions>('IsDecimal', (v, p) => validator.isDecimal(v, p));
-
-/** @see validator.isDivisibleBy */
-export interface IsDivisibleByOptions extends ValidateOptions {
-  divisor: number;
-}
-
+export const IsFloatString = sv<validator.IsFloatOptions>('IsFloatString', (v, p) =>
+  isFloatFn(v, p),
+);
+export const IsIntString = sv<validator.IsIntOptions>('IsIntString', (v, p) => isIntFn(v, p));
+export const IsDecimal = sv<validator.IsDecimalOptions>('IsDecimal', (v, p) => isDecimalFn(v, p));
 export const IsDivisibleBy = sv<IsDivisibleByOptions>('IsDivisibleBy', (v, p) =>
-  validator.isDivisibleBy(v, p.divisor),
+  isDivisibleByFn(v, p.divisor),
 );
-
-/** @see validator.isByteLength */
-export interface IsByteLengthOptions extends ValidateOptions {
-  min?: number;
-  max?: number;
-}
-
-export const IsByteLength = sv<IsByteLengthOptions>('IsByteLength', (v, p) =>
-  validator.isByteLength(v, p),
+export const IsByteLength = sv<validator.IsByteLengthOptions>('IsByteLength', (v, p) =>
+  isByteLengthFn(v, p),
 );
-
-/** @see validator.isWhitelisted */
-export interface IsWhitelistedOptions extends ValidateOptions {
-  chars: string | string[];
-}
-
 export const IsWhitelisted = sv<IsWhitelistedOptions>('IsWhitelisted', (v, p) =>
-  validator.isWhitelisted(v, p.chars),
+  isWhitelistedFn(v, p.chars),
 );
-
-/** @see validator.isAfter */
-export interface IsAfterOptions extends ValidateOptions {
-  date?: string;
-}
-
-export const IsAfter = sv<IsAfterOptions>('IsAfter', (v, p) => validator.isAfter(v, p.date));
-
-/** @see validator.isBefore */
-export interface IsBeforeOptions extends ValidateOptions {
-  date?: string;
-}
-
-export const IsBefore = sv<IsBeforeOptions>('IsBefore', (v, p) => validator.isBefore(v, p.date));
-
-/** @see validator.isDate */
-export interface IsDateStringOptions extends ValidateOptions {
-  format?: string;
-  strictMode?: boolean;
-  delimiters?: string[];
-}
-
-export const IsDateString = sv<IsDateStringOptions>('IsDateString', (v, p) =>
-  validator.isDate(v, p),
+export const IsAfter = sv<validator.IsAfterOptions>('IsAfter', (v, p) =>
+  isAfterFn(v, p.comparisonDate),
 );
+export const IsBefore = sv<validator.IsBeforeOptions>('IsBefore', (v, p) =>
+  isBeforeFn(v, p.comparisonDate),
+);
+export const IsDateString = sv<validator.IsDateOptions>('IsDateString', (v, p) => isDateFn(v, p));
