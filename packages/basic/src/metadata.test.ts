@@ -315,3 +315,152 @@ describe('MetadataManager isolation', () => {
     expect(store2.of(Tag1, Foo)).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Legacy (experimentalDecorators) protocol tests
+//
+// These call decorator functions manually with legacy signatures to exercise
+// the legacy code paths without needing a different compiler.
+// Legacy class decorator:  (target) → void
+// Legacy method decorator: (target.prototype, key, descriptor) → void
+// Legacy field decorator:  (target.prototype, key) → void
+// ---------------------------------------------------------------------------
+
+describe('legacy decorator protocol', () => {
+  // Fresh store to isolate from TC39 tests
+  const LM = new MetadataManager();
+  const lcd = LM.createClassDecorator.bind(LM);
+  const lmd = LM.createMethodDecorator.bind(LM);
+  const lfd = LM.createFieldDecorator.bind(LM);
+
+  function LTag(tag: string): ClassDecorator<TagMeta> {
+    return lcd(LTag, { tag });
+  }
+  function LMarker(label: string): MethodDecorator<MarkerMeta> {
+    return lmd(LMarker, { label });
+  }
+  function LField(type: string): FieldDecorator<FieldMeta> {
+    return lfd(LField, { type });
+  }
+
+  describe('class decorators (legacy)', () => {
+    it('stores and reads class metadata', () => {
+      class Foo {}
+      LTag('hello')(Foo);
+      expect(LM.of(LTag, Foo)).toEqual([{ tag: 'hello' }]);
+    });
+
+    it('supports multiple decorators', () => {
+      class Foo {}
+      LTag('a')(Foo);
+      LTag('b')(Foo);
+      expect(LM.of(LTag, Foo)).toEqual([{ tag: 'a' }, { tag: 'b' }]);
+    });
+
+    it('reads from instance', () => {
+      class Foo {}
+      LTag('inst')(Foo);
+      expect(LM.of(LTag, new Foo())).toEqual([{ tag: 'inst' }]);
+    });
+  });
+
+  describe('method decorators (legacy)', () => {
+    it('stores and reads method metadata', () => {
+      class Foo {
+        hello() {}
+      }
+      LTag('cls')(Foo);
+      const desc = Object.getOwnPropertyDescriptor(Foo.prototype, 'hello') as PropertyDescriptor;
+      LMarker('greet')(Foo.prototype, 'hello', desc);
+      expect(LM.of(LMarker, Foo, 'hello')).toEqual([{ label: 'greet' }]);
+    });
+
+    it('reads via instance', () => {
+      class Foo {
+        bar() {}
+      }
+      const desc = Object.getOwnPropertyDescriptor(Foo.prototype, 'bar') as PropertyDescriptor;
+      LMarker('m')(Foo.prototype, 'bar', desc);
+      expect(LM.of(LMarker, new Foo(), 'bar')).toEqual([{ label: 'm' }]);
+    });
+  });
+
+  describe('field decorators (legacy)', () => {
+    it('stores and reads field metadata', () => {
+      class Foo {
+        name!: string;
+      }
+      LTag('cls')(Foo);
+      LField('string')(Foo.prototype, 'name');
+      expect(LM.of(LField, Foo, 'name')).toEqual([{ type: 'string' }]);
+    });
+  });
+
+  describe('composite decorators (legacy)', () => {
+    it('applies extra class decorators', () => {
+      function LSpecial(tag: string): ClassDecorator<TagMeta> {
+        return lcd(LSpecial, { tag }, [LTag(`special:${tag}`)]);
+      }
+      class Foo {}
+      LSpecial('vip')(Foo);
+      expect(LM.of(LSpecial, Foo)).toEqual([{ tag: 'vip' }]);
+      expect(LM.of(LTag, Foo)).toEqual([{ tag: 'special:vip' }]);
+    });
+
+    it('applies extra method decorators', () => {
+      function LLog(msg: string): MethodDecorator<{ msg: string }> {
+        return lmd(LLog, { msg });
+      }
+      function LTraced(msg: string): MethodDecorator<{ msg: string }> {
+        return lmd(LTraced, { msg }, [LLog(`traced:${msg}`)]);
+      }
+      class Foo {
+        run() {}
+      }
+      const desc = Object.getOwnPropertyDescriptor(Foo.prototype, 'run') as PropertyDescriptor;
+      LTraced('hello')(Foo.prototype, 'run', desc);
+      expect(LM.of(LTraced, Foo, 'run')).toEqual([{ msg: 'hello' }]);
+      expect(LM.of(LLog, Foo, 'run')).toEqual([{ msg: 'traced:hello' }]);
+    });
+
+    it('applies extra field decorators', () => {
+      function LRequired(): FieldDecorator<{ required: true }> {
+        return lfd(LRequired, { required: true as const });
+      }
+      function LTyped(type: string): FieldDecorator<FieldMeta> {
+        return lfd(LTyped, { type }, [LRequired()]);
+      }
+      class Foo {
+        name!: string;
+      }
+      LTyped('string')(Foo.prototype, 'name');
+      expect(LM.of(LTyped, Foo, 'name')).toEqual([{ type: 'string' }]);
+      expect(LM.of(LRequired, Foo, 'name')).toEqual([{ required: true }]);
+    });
+  });
+
+  describe('lookup (legacy)', () => {
+    it('walks prototype chain', () => {
+      function LLevel(n: number): ClassDecorator<{ n: number }> {
+        return lcd(LLevel, { n });
+      }
+      class Base {}
+      LLevel(1)(Base);
+      class Child extends Base {}
+      LLevel(2)(Child);
+      expect(LM.lookup(LLevel, Child)).toEqual([{ n: 2 }, { n: 1 }]);
+    });
+  });
+
+  describe('static method decorators (legacy)', () => {
+    it('stores metadata on constructor for static methods', () => {
+      class Foo {
+        static bar() {}
+      }
+      const desc = Object.getOwnPropertyDescriptor(Foo, 'bar') as PropertyDescriptor;
+      // For static methods, legacy target is the constructor itself
+      LMarker('static')(Foo, 'bar', desc);
+      expect(LM.of(LMarker, Foo, 'bar')).toEqual([{ label: 'static' }]);
+    });
+  });
+});
