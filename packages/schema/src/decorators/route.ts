@@ -40,7 +40,11 @@ export interface IsFileOptions extends ValidateOptions {
 /**
  * Marks a field as a file upload. Use in multipart request schemas only.
  * Composes Ref(() => MultipartFile) or IsArray(Ref(() => MultipartFile)) as dep.
- * Do NOT combine with other schema decorators.
+ * Can combine with other decorators like @MaxItems for array uploads.
+ *
+ * Validates:
+ * - `accept`: checks file MIME type against allowed patterns (glob-style).
+ * - `maxSize`: checks file size in bytes.
  */
 export const IsFile = createSchemaFieldDecoratorFactory(
   (options?: IsFileOptions): SchemaFieldDecorator<IsFileOptions> => {
@@ -50,8 +54,30 @@ export const IsFile = createSchemaFieldDecoratorFactory(
   },
   {
     rule: 'IsFile',
+    validate: (p, v) => {
+      if (v == null) return true; // handled by required/optional
+      const files: MultipartFile[] = Array.isArray(v) ? v : [v];
+      for (const file of files) {
+        if (!(file instanceof MultipartFile)) return false;
+        if (p.maxSize !== undefined && file.size > p.maxSize) return false;
+        if (p.accept?.length && !matchAccept(p.accept, file.type)) return false;
+      }
+      return true;
+    },
   },
 );
+
+/** Check if a MIME type matches any of the accept patterns. */
+function matchAccept(accept: string[], mimeType: string): boolean {
+  return accept.some((pattern) => {
+    if (pattern === mimeType) return true;
+    if (pattern.endsWith('/*')) {
+      const prefix = pattern.slice(0, -1); // 'image/*' → 'image/'
+      return mimeType.startsWith(prefix);
+    }
+    return false;
+  });
+}
 
 // ---------------------------------------------------------------------------
 // IsBody
