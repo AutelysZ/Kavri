@@ -68,7 +68,9 @@ export interface IsFilenameOptions extends ValidateOptions {
  */
 export const IsFilename = createSchemaFieldDecoratorFactory(
   (options?: IsFilenameOptions, schema?: StringSchema): SchemaFieldDecorator<IsFilenameOptions> => {
-    return SchemaField(IsFilename, (options ?? {}) as IsFilenameOptions, [IsString(schema)]);
+    return SchemaField(IsFilename, (options ?? {}) as IsFilenameOptions, undefined, [
+      IsString(schema),
+    ]);
   },
   {
     validate: (p, v) => {

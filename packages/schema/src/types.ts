@@ -177,7 +177,11 @@ export interface AllOfSchema<T = unknown> extends BaseSchema<T> {
 
 /**
  * Metadata stored by a schema field decorator.
- * Contains the factory reference, params, and composed child decorators.
+ *
+ * - `deps`: dependencies validated BEFORE this decorator (e.g., IsString for IsEmail).
+ *   If a dep fails, this decorator's validation is skipped.
+ * - `children`: constraints validated AFTER this decorator (e.g., MinLength for IsString).
+ *   Only run if this decorator's own validation passes.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export interface SchemaFieldDecoratorMetadata<P = any> {
@@ -185,8 +189,10 @@ export interface SchemaFieldDecoratorMetadata<P = any> {
   factory: SchemaFieldDecoratorFactory<P>;
   /** Parameters passed to the factory. */
   params: P;
-  /** Composed child decorators (e.g., MinLength from IsString's minLength option). */
-  decorators: SchemaFieldDecorator[];
+  /** Dependencies: validated before this decorator. If any fails, this is skipped. */
+  deps: SchemaFieldDecorator[];
+  /** Children: constraints validated after this decorator passes. */
+  children: SchemaFieldDecorator[];
 }
 
 /** A field decorator carrying schema metadata. */

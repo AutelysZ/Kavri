@@ -179,10 +179,10 @@ export interface DateOptions extends ValidateOptions {
  */
 export const IsDate = createSchemaFieldDecoratorFactory(
   (options?: DateOptions, schema?: StringSchema<Date>): SchemaFieldDecorator<DateOptions> => {
-    const children: SchemaFieldDecorator[] = [IsString(schema)];
+    const children: SchemaFieldDecorator[] = [];
     if (options?.before !== undefined) children.push(IsBefore(options.before));
     if (options?.after !== undefined) children.push(IsAfter(options.after));
-    return SchemaField(IsDate, (options ?? {}) as DateOptions, children);
+    return SchemaField(IsDate, (options ?? {}) as DateOptions, children, [IsString(schema)]);
   },
   {
     validate: (_, v) => {

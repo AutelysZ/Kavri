@@ -98,7 +98,8 @@ describe('createSchemaFieldDecoratorFactory', () => {
     expect(meta).toHaveLength(1);
     expect(meta[0].factory).toBe(MinLength);
     expect(meta[0].params).toEqual({ value: 3 });
-    expect(meta[0].decorators).toEqual([]);
+    expect(meta[0].children).toEqual([]);
+    expect(meta[0].deps).toEqual([]);
   });
 });
 
@@ -122,7 +123,7 @@ describe('SchemaField', () => {
     expect(decorator.metadata.params).toEqual({ value: 'test' });
   });
 
-  it('collects child decorators', () => {
+  it('collects children', () => {
     const MinLength = createSchemaFieldDecoratorFactory(
       function MinLength(
         options: ValidateSchema<number>,
@@ -162,9 +163,9 @@ describe('SchemaField', () => {
 
     const meta = Metadata.of(IsString, Foo, 'name') as SchemaFieldDecoratorMetadata[];
     expect(meta).toHaveLength(1);
-    expect(meta[0].decorators).toHaveLength(2);
+    expect(meta[0].children).toHaveLength(2);
 
-    const [min, max] = meta[0].decorators;
+    const [min, max] = meta[0].children;
     expect((min.metadata as SchemaFieldDecoratorMetadata<ValidateSchema<number>>).factory).toBe(
       MinLength,
     );
@@ -179,7 +180,7 @@ describe('SchemaField', () => {
     ).toBe(100);
   });
 
-  it('merges params.decorators with explicit decorators', () => {
+  it('merges params.decorators with explicit children', () => {
     const A = createSchemaFieldDecoratorFactory(function A(): SchemaFieldDecorator {
       return SchemaField(A, {});
     }, {});
@@ -193,9 +194,9 @@ describe('SchemaField', () => {
 
     const dec = C();
     // params.decorators come first, then explicit
-    expect(dec.metadata.decorators).toHaveLength(2);
-    expect(dec.metadata.decorators[0].metadata.factory).toBe(A);
-    expect(dec.metadata.decorators[1].metadata.factory).toBe(B);
+    expect(dec.metadata.children).toHaveLength(2);
+    expect(dec.metadata.children[0].metadata.factory).toBe(A);
+    expect(dec.metadata.children[1].metadata.factory).toBe(B);
   });
 
   it('statics are callable on the factory', () => {

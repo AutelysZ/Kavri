@@ -63,27 +63,28 @@ export function createSchemaFieldDecoratorFactory<P extends ValidateOptions>(
 /**
  * Create a schema field decorator instance.
  *
- * Stores `{ factory, params, decorators }` as the decorator's metadata via
- * `createFieldDecorator` from `@kavri/basic`. The `decorators` array holds
- * composed child decorators (e.g., `MinLength(3)` composed by `IsString({ minLength: 3 })`).
- *
  * @param factory - The factory that creates this decorator (serves as metadata key).
  * @param params - Parameters for this decorator instance.
- * @param decorators - Child decorators to compose.
+ * @param children - Child constraint decorators, validated after this decorator passes
+ *   (e.g., MinLength for IsString).
+ * @param deps - Dependency decorators, validated before this decorator
+ *   (e.g., IsString for IsEmail). If a dep fails, this decorator is skipped.
  */
 export function SchemaField<P extends ValidateOptions>(
   factory: SchemaFieldDecoratorFactory<P>,
   params: P,
-  decorators?: SchemaFieldDecorator[],
+  children?: SchemaFieldDecorator[],
+  deps?: SchemaFieldDecorator[],
 ): SchemaFieldDecorator<P> {
-  const allDecorators = [
+  const allChildren = [
     ...((params as { decorators?: SchemaFieldDecorator[] }).decorators ?? []),
-    ...(decorators ?? []),
+    ...(children ?? []),
   ];
   const metadata: SchemaFieldDecoratorMetadata<P> = {
     factory,
     params,
-    decorators: allDecorators,
+    deps: deps ?? [],
+    children: allChildren,
   };
   return createFieldDecorator(factory, metadata) as SchemaFieldDecorator<P>;
 }

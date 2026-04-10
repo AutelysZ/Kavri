@@ -155,7 +155,7 @@ type SV0 = ((schema?: StringSchema) => SchemaFieldDecorator<ValidateOptions>) &
 function sv0(validateFn: (value: string) => boolean, format?: string): SV0 {
   const factory = createSchemaFieldDecoratorFactory(
     (schema?: StringSchema): any => {
-      return SchemaField(factory, (schema ?? {}) as any, [IsString(schema)]);
+      return SchemaField(factory, (schema ?? {}) as any, undefined, [IsString(schema)]);
     },
     {
       validate: (_: any, v: unknown) => typeof v !== 'string' || validateFn(v),
@@ -181,7 +181,9 @@ function svo<P>(
 ): SVO<P> {
   const factory = createSchemaFieldDecoratorFactory<any>(
     (param?: P, schema?: StringSchema): any => {
-      return SchemaField(factory, { value: param, ...(schema ?? {}) } as any, [IsString(schema)]);
+      return SchemaField(factory, { value: param, ...(schema ?? {}) } as any, undefined, [
+        IsString(schema),
+      ]);
     },
     {
       validate: (_: any, v: unknown) => typeof v !== 'string' || validateFn(v, _.value),
@@ -201,7 +203,9 @@ type SVR<P> = ((param: P, schema?: StringSchema) => SchemaFieldDecorator<Validat
 function svr<P>(validateFn: (value: string, param: P) => boolean, format?: string): SVR<P> {
   const factory = createSchemaFieldDecoratorFactory<any>(
     (param: P, schema?: StringSchema): any => {
-      return SchemaField(factory, { value: param, ...(schema ?? {}) } as any, [IsString(schema)]);
+      return SchemaField(factory, { value: param, ...(schema ?? {}) } as any, undefined, [
+        IsString(schema),
+      ]);
     },
     {
       validate: (_: any, v: unknown) => typeof v !== 'string' || validateFn(v, _.value),
