@@ -9,6 +9,8 @@ export type {
   ObjectSchema,
   ArraySchema,
   AnyOfSchema,
+  OneOfSchema,
+  AllOfSchema,
   SchemaFieldDecoratorMetadata,
   SchemaFieldDecorator,
   SchemaFieldDecoratorFactory,

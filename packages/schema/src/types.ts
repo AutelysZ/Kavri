@@ -139,9 +139,19 @@ export interface ArraySchema<T = unknown> extends BaseSchema<T[]> {
   unevaluatedItems?: SchemaFieldDecorator | false;
 }
 
-/** Schema options for union (anyOf) fields. */
+/** Schema options for anyOf (union) fields. */
 export interface AnyOfSchema<T = unknown> extends BaseSchema<T> {
   anyOf: SchemaFieldDecorator[];
+}
+
+/** Schema options for oneOf (exactly one match) fields. */
+export interface OneOfSchema<T = unknown> extends BaseSchema<T> {
+  oneOf: SchemaFieldDecorator[];
+}
+
+/** Schema options for allOf (intersection) fields. */
+export interface AllOfSchema<T = unknown> extends BaseSchema<T> {
+  allOf: SchemaFieldDecorator[];
 }
 
 // ---------------------------------------------------------------------------
