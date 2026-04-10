@@ -19,3 +19,5 @@ export type {
 } from './types.js';
 
 export { createSchemaFieldDecoratorFactory, SchemaField } from './field.js';
+
+export * from './decorators/index.js';

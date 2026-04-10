@@ -138,9 +138,9 @@ export interface ObjectSchema<T = object> extends BaseSchema<T> {
   propertyNames?: SchemaFieldDecorator;
   maxProperties?: ValidateField<number>;
   minProperties?: ValidateField<number>;
-  required?: ValidateField<Array<keyof T>>;
-  dependentRequired?: Partial<Record<keyof T, Array<keyof T>>>;
-  dependentSchemas?: Partial<Record<keyof T, SchemaFieldDecorator>>;
+  required?: ValidateField<(keyof T & string)[]>;
+  dependentRequired?: Partial<Record<keyof T & string, (keyof T & string)[]>>;
+  dependentSchemas?: Partial<Record<keyof T & string, SchemaFieldDecorator>>;
 }
 
 /** Schema options for array fields. */
