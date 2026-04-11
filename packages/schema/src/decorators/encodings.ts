@@ -12,8 +12,6 @@ import isBase32Fn from 'validator/es/lib/isBase32';
 import isBase58Fn from 'validator/es/lib/isBase58';
 import isBase64Fn from 'validator/es/lib/isBase64';
 import isJSONFn from 'validator/es/lib/isJSON';
-import { Buffer } from 'node:buffer';
-
 import type {
   StringSchema,
   SchemaFieldDecorator,
@@ -143,6 +141,37 @@ function fromUint8Array(data: Uint8Array, text: boolean): Uint8Array | string {
 }
 
 // ---------------------------------------------------------------------------
+// Base64 encode/decode (browser + Node compatible via atob/btoa)
+// ---------------------------------------------------------------------------
+
+function base64Decode(input: string, urlSafe: boolean): Uint8Array {
+  let str = urlSafe ? input.replace(/-/g, '+').replace(/_/g, '/') : input;
+  // Add padding if needed
+  while (str.length % 4 !== 0) str += '=';
+  const binary = atob(str);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+function base64Encode(data: Uint8Array, urlSafe: boolean, padding: boolean): string {
+  let binary = '';
+  for (const byte of data) {
+    binary += String.fromCharCode(byte);
+  }
+  let result = btoa(binary);
+  if (urlSafe) {
+    result = result.replace(/\+/g, '-').replace(/\//g, '_');
+  }
+  if (!padding) {
+    result = result.replace(/=+$/, '');
+  }
+  return result;
+}
+
+// ---------------------------------------------------------------------------
 // IsBase32
 // ---------------------------------------------------------------------------
 
@@ -257,19 +286,16 @@ export const IsBase64: ((
         typeof v !== 'string' || isBase64Fn(v, { urlSafe: p.urlSafe ?? true }),
       parse: (p: IsBase64Options, v: unknown) => {
         if (!(p.transform ?? true) || typeof v !== 'string') return v;
-        const encoding = (p.urlSafe ?? true) ? 'base64url' : 'base64';
-        const decoded = Buffer.from(v, encoding);
-        return fromUint8Array(
-          new Uint8Array(decoded.buffer, decoded.byteOffset, decoded.byteLength),
-          p.text ?? false,
-        );
+        const decoded = base64Decode(v, p.urlSafe ?? true);
+        return fromUint8Array(decoded, p.text ?? false);
       },
       serialize: (p: IsBase64Options, v: unknown) => {
         if (!(p.transform ?? true)) return v;
-        const encoding = (p.urlSafe ?? true) ? 'base64url' : 'base64';
-        const buf = Buffer.from(toUint8Array(v as Uint8Array | string));
-        const result = buf.toString(encoding);
-        return (p.padding ?? false) ? result : result.replace(/=+$/, '');
+        return base64Encode(
+          toUint8Array(v as Uint8Array | string),
+          p.urlSafe ?? true,
+          p.padding ?? false,
+        );
       },
       toJsonSchema: (p: IsBase64Options) => ({
         type: 'string',
