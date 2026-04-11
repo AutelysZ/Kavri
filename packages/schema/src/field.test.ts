@@ -91,9 +91,10 @@ describe('createSchemaFieldDecoratorFactory', () => {
       name!: string;
     }
 
-    const meta = Metadata.of(MinLength, Foo, 'name') as SchemaFieldDecoratorMetadata<
-      ValidateSchema<number>
-    >[];
+    const meta = // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      Metadata.of(SchemaField as any, Foo, 'name') as SchemaFieldDecoratorMetadata<
+        ValidateSchema<number>
+      >[];
     expect(meta).toHaveLength(1);
     expect(meta[0].rule).toBe('MinLength');
     expect(meta[0].factory).toBe(MinLength);
@@ -158,7 +159,8 @@ describe('SchemaField', () => {
       name!: string;
     }
 
-    const meta = Metadata.of(IsString, Foo, 'name') as SchemaFieldDecoratorMetadata[];
+    const meta = // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      Metadata.of(SchemaField as any, Foo, 'name') as SchemaFieldDecoratorMetadata[];
     expect(meta).toHaveLength(1);
     expect(meta[0].children).toHaveLength(2);
 

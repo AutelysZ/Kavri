@@ -1,5 +1,5 @@
-import { createFieldDecorator } from '@kavri/basic';
-import type { FieldDecoratorFactory } from '@kavri/basic';
+import { createFieldDecorator, Metadata } from '@kavri/basic';
+import type { FieldDecoratorFactory, MethodDecoratorFactory, Qualifier } from '@kavri/basic';
 import type {
   ValidateField,
   ValidateSchema,
@@ -87,5 +87,29 @@ export function SchemaField<P extends ValidateOptions>(
     deps: deps ?? [],
     children: allChildren,
   };
-  return createFieldDecorator(factory, metadata) as SchemaFieldDecorator<P>;
+  // Use SchemaField itself as the factory key for ALL schema field decorators.
+  // This means Metadata.of(SchemaField, cls, key) returns metadata for any schema
+  // field regardless of which decorator factory created it.
+  return createFieldDecorator(
+    SchemaField as unknown as FieldDecoratorFactory<SchemaFieldDecoratorMetadata>,
+    metadata as SchemaFieldDecoratorMetadata,
+  ) as SchemaFieldDecorator<P>;
+}
+
+/**
+ * Get all schema field entries for a class.
+ * Returns `[fieldKey, metadata][]` for all fields decorated with schema decorators.
+ */
+export function getSchemaFields(
+  target: object,
+): readonly [Qualifier, SchemaFieldDecoratorMetadata][] {
+  // Field decorators share the method metadata store. Cast to MethodDecoratorFactory
+  // to satisfy the entries() overload.
+  const entries = Metadata.entries(
+    SchemaField as unknown as MethodDecoratorFactory<SchemaFieldDecoratorMetadata>,
+  );
+  const ctor = typeof target === 'function' ? target : target.constructor;
+  return (entries as unknown as [Function, Qualifier, SchemaFieldDecoratorMetadata][])
+    .filter(([cls]) => cls === ctor)
+    .map(([, key, meta]) => [key, meta]);
 }
