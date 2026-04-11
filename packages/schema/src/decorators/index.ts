@@ -4,5 +4,7 @@ export type * from './primitives.js';
 export * from './composite.js';
 export * from './validators.js';
 export * from './sanitizers.js';
+export * from './encodings.js';
+export type * from './encodings.js';
 export * from './route.js';
 export type * from './route.js';

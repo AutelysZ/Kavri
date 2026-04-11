@@ -27,14 +27,10 @@ import isUppercaseFn from 'validator/es/lib/isUppercase';
 import isSlugFn from 'validator/es/lib/isSlug';
 import isLocaleFn from 'validator/es/lib/isLocale';
 import isEmptyFn from 'validator/es/lib/isEmpty';
-import isBase32Fn from 'validator/es/lib/isBase32';
-import isBase58Fn from 'validator/es/lib/isBase58';
-import isBase64Fn from 'validator/es/lib/isBase64';
 import isDataURIFn from 'validator/es/lib/isDataURI';
 import isMagnetURIFn from 'validator/es/lib/isMagnetURI';
 import isMailtoURIFn from 'validator/es/lib/isMailtoURI';
 import isMimeTypeFn from 'validator/es/lib/isMimeType';
-import isJSONFn from 'validator/es/lib/isJSON';
 import isJWTFn from 'validator/es/lib/isJWT';
 import isOctalFn from 'validator/es/lib/isOctal';
 import isHexColorFn from 'validator/es/lib/isHexColor';
@@ -106,9 +102,6 @@ import {
   type IsIPOptions,
   type IsNumericOptions,
   type IsEmptyOptions,
-  type IsBase32Options,
-  type IsBase64Options,
-  type IsJSONOptions,
   type IsCreditCardOptions,
   type IsCurrencyOptions,
   type IsIBANOptions,
@@ -257,7 +250,6 @@ export const IsLowercase = sv0('IsLowercase', isLowercaseFn);
 export const IsUppercase = sv0('IsUppercase', isUppercaseFn);
 export const IsSlug = sv0('IsSlug', isSlugFn);
 export const IsLocale = sv0('IsLocale', isLocaleFn);
-export const IsBase58 = sv0('IsBase58', isBase58Fn);
 export const IsDataURI = sv0('IsDataURI', isDataURIFn);
 export const IsMagnetURI = sv0('IsMagnetURI', isMagnetURIFn);
 export const IsMailtoURI = sv0('IsMailtoURI', isMailtoURIFn);
@@ -326,9 +318,6 @@ export const IsAlphanumeric = svo<IsAlphanumericOptions>('IsAlphanumeric', (v, p
 );
 export const IsNumericString = svo<IsNumericOptions>('IsNumericString', isNumericFn);
 export const IsEmpty = svo<IsEmptyOptions>('IsEmpty', isEmptyFn);
-export const IsBase32 = svo<IsBase32Options>('IsBase32', isBase32Fn);
-export const IsBase64 = svo<IsBase64Options>('IsBase64', isBase64Fn);
-export const IsJSON = svo<IsJSONOptions>('IsJSON', isJSONFn);
 export const IsCreditCard = svo<IsCreditCardOptions>('IsCreditCard', isCreditCardFn);
 export const IsCurrency = svo<IsCurrencyOptions>('IsCurrency', isCurrencyFn);
 export const IsIBAN = svo<IsIBANOptions>('IsIBAN', isIBANFn);
