@@ -123,7 +123,7 @@ export const IsFilename = createSchemaFieldDecoratorFactory(
     validate: (p, v) => {
       if (typeof v !== 'string' || !p.accept?.length) return true;
       const mimeType = lookup(v) || '';
-      return p.accept.some((pattern) => {
+      return p.accept.some((pattern: string) => {
         if (pattern.startsWith('.')) return v.endsWith(pattern);
         return matchAccept([pattern], mimeType);
       });

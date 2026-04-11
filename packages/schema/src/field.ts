@@ -53,11 +53,12 @@ export function toValidateSchema<T>(input: ValidateField<T>): ValidateSchema<T> 
  * );
  * ```
  */
-export function createSchemaFieldDecoratorFactory<P extends ValidateOptions>(
-  factory: FieldDecoratorFactory<SchemaFieldDecoratorMetadata<P>>,
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function createSchemaFieldDecoratorFactory<P = any, F extends (...args: any[]) => any = any>(
+  factory: F,
   statics: SchemaFieldDecoratorFactoryStatic<P>,
-): SchemaFieldDecoratorFactory<P> {
-  return Object.assign(factory, statics) as SchemaFieldDecoratorFactory<P>;
+): F & SchemaFieldDecoratorFactoryStatic<P> {
+  return Object.assign(factory, statics);
 }
 
 /**
