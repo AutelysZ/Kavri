@@ -15,11 +15,12 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
-    "baseUrl": ".",
+    "incremental": true,
+    "tsBuildInfoFile": ".tsbuildinfo",
+    "outDir": "temp",
     "paths": {
       "@kavri/*": ["./packages/*/src/index.ts"]
-    },
-    "ignoreDeprecations": "6.0"
+    }
   },
-  "exclude": ["node_modules"]
+  "exclude": ["node_modules", "docs"]
 }

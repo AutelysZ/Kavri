@@ -20,3 +20,5 @@ coverage/
 .env
 .env.*
 !.env.example
+.tsbuildinfo
+temp/
