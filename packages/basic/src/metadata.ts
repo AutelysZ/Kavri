@@ -458,7 +458,7 @@ export class MetadataManager {
     qualifier: Qualifier,
   ): readonly FieldDecoratedEntry<T, R>[];
   ofField(factory: Function, target?: Function, qualifier?: Qualifier): any {
-    return this.ofMethod(factory as any, target, qualifier);
+    return this.ofMethod(factory as any, target as any, qualifier as any);
   }
 
   /** Find all decorated subclasses of superTarget for a given factory. O(1). */

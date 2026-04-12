@@ -1,2 +1,5 @@
 packages:
   - packages/*
+
+patchedDependencies:
+  tsup: patches/tsup.patch
