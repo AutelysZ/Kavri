@@ -18,32 +18,44 @@ import type {
 // Decorated entries — query results
 // ---------------------------------------------------------------------------
 
+/** Base shape for all decorated entry query results. */
 export interface DecoratedEntryBase<T, R = any> {
+  /** The decorator kind: 'class', 'method', or 'field'. */
   kind: string;
+  /** The class constructor the decorator was applied to. */
   target: AnyConstructor<R>;
+  /** The factory function that created this decorator. */
   factory: AnyDecoratorFactory<T>;
+  /** The metadata value stored by the decorator. */
   metadata: T;
 }
 
+/** Entry for a class decorator application. */
 export interface ClassDecoratedEntry<T, R = any> extends DecoratedEntryBase<T, R> {
   kind: 'class';
 }
 
+/** Entry for a method decorator application. */
 export interface MethodDecoratedEntry<T, R = any> extends DecoratedEntryBase<T, R> {
   kind: 'method';
+  /** The method name the decorator was applied to. */
   method: keyof R;
 }
 
+/** Entry for a field decorator application. */
 export interface FieldDecoratedEntry<T, R = any> extends DecoratedEntryBase<T, R> {
   kind: 'field';
+  /** The field name the decorator was applied to. */
   field: keyof R;
 }
 
+/** Union of all decorated entry types. */
 export type DecoratedEntry<T, R = any> =
   | ClassDecoratedEntry<T, R>
   | MethodDecoratedEntry<T, R>
   | FieldDecoratedEntry<T, R>;
 
+/** Extract a specific entry kind from {@link DecoratedEntry}. */
 export type DecoratedEntryOf<
   T,
   R = any,
@@ -54,16 +66,30 @@ export type DecoratedEntryOf<
 // Compose options
 // ---------------------------------------------------------------------------
 
+/**
+ * Options for composing additional decorators alongside the primary one.
+ *
+ * Can be a simple array of same-kind decorators (shorthand for `{ self: [...] }`),
+ * or an object with fine-grained control over cross-kind and cross-class composition.
+ */
 export type ComposeOptions<T, Kind extends keyof DecoratorMap<T>> =
   | readonly AnyDecorator<unknown, Kind>[]
   | {
+      /** Additional same-kind decorators to apply on the same target. */
       self?: readonly AnyDecorator<unknown, Kind>[];
+      /** Class decorators to apply on the same class. */
       classes?: readonly ClassDecorator<unknown>[];
+      /** Method decorators to apply on the same class: `[methodName, decorator]`. */
       methods?: readonly [Qualifier, MethodDecorator<unknown>][];
+      /** Field decorators to apply on the same class: `[fieldName, decorator]`. */
       fields?: readonly [Qualifier, FieldDecorator<unknown>][];
+      /** Class decorators to apply on other classes: `[class, decorator]`. */
       otherClass?: readonly [AnyConstructor, ClassDecorator<unknown>][];
+      /** Method decorators to apply on other classes: `[class, methodName, decorator]`. */
       otherMethods?: readonly [AnyConstructor, Qualifier, MethodDecorator<unknown>][];
+      /** Field decorators to apply on other classes: `[class, fieldName, decorator]`. */
       otherFields?: readonly [AnyConstructor, Qualifier, FieldDecorator<unknown>][];
+      /** Replace the original method/function with a wrapper (AOP). */
       aspect?: (original: Function) => Function;
     };
 
@@ -458,7 +484,14 @@ export class MetadataManager {
     qualifier: Qualifier,
   ): readonly FieldDecoratedEntry<T, R>[];
   ofField(factory: Function, target?: Function, qualifier?: Qualifier): any {
-    return this.ofMethod(factory as any, target as any, qualifier as any);
+    if (target) this.#ensureFlushed(target);
+    const byTarget = this.#fieldStore.get(factory);
+    if (!byTarget) return target ? (qualifier !== undefined ? [] : new Map()) : new Map();
+    if (!target) return byTarget;
+    const byKey = byTarget.get(target);
+    if (!byKey) return qualifier !== undefined ? [] : new Map();
+    if (qualifier !== undefined) return byKey.get(qualifier) ?? [];
+    return byKey;
   }
 
   /** Find all decorated subclasses of superTarget for a given factory. O(1). */
@@ -476,8 +509,17 @@ export class MetadataManager {
 // Global instance + bound helpers
 // ---------------------------------------------------------------------------
 
+/** The global metadata manager instance. */
 export const Metadata = /* @__PURE__ */ new MetadataManager();
+
+/** Create a class decorator bound to the global {@link Metadata}. */
 export const createClassDecorator = /* @__PURE__ */ Metadata.createClassDecorator.bind(Metadata);
+
+/** Create a method decorator bound to the global {@link Metadata}. */
 export const createMethodDecorator = /* @__PURE__ */ Metadata.createMethodDecorator.bind(Metadata);
+
+/** Create a field decorator bound to the global {@link Metadata}. */
 export const createFieldDecorator = /* @__PURE__ */ Metadata.createFieldDecorator.bind(Metadata);
+
+/** Create a multi-kind decorator bound to the global {@link Metadata}. */
 export const createDecorator = /* @__PURE__ */ Metadata.createDecorator.bind(Metadata);

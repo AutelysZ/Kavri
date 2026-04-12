@@ -16,6 +16,7 @@
     "@commitlint/config-conventional": "^20.5.0",
     "@eslint/js": "^10.0.1",
     "@swc/core": "^1.15.24",
+    "@types/node": "^25.6.0",
     "@vitest/coverage-v8": "^4.1.4",
     "eslint": "^10.2.0",
     "eslint-config-prettier": "^10.1.8",
@@ -26,7 +27,7 @@
     "typescript": "^6.0.2",
     "typescript-eslint": "^8.58.1",
     "unplugin-swc": "^1.5.9",
-    "@types/node": "^25.6.0",
+    "vite-tsconfig-paths": "^6.1.1",
     "vitest": "^4.1.4"
   },
   "lint-staged": {
@@ -37,6 +38,5 @@
     "*.{json,yaml,yml,md}": [
       "prettier --write"
     ]
-  },
-  "dependencies": {}
+  }
 }
