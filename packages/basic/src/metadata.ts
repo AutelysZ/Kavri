@@ -423,14 +423,14 @@ export class MetadataManager {
   }
 
   ofMethod<T>(
-    factory: AnyDecoratorFactory<T>,
+    factory: MethodDecoratorFactory<T>,
   ): Map<AnyConstructor, Map<Qualifier, readonly MethodDecoratedEntry<T>[]>>;
   ofMethod<T, R>(
-    factory: AnyDecoratorFactory<T>,
+    factory: MethodDecoratorFactory<T>,
     target: AnyConstructor<R>,
   ): Map<Qualifier, readonly MethodDecoratedEntry<T, R>[]>;
   ofMethod<T, R>(
-    factory: AnyDecoratorFactory<T>,
+    factory: MethodDecoratorFactory<T>,
     target: AnyConstructor<R>,
     qualifier: Qualifier,
   ): readonly MethodDecoratedEntry<T, R>[];
@@ -446,26 +446,19 @@ export class MetadataManager {
   }
 
   ofField<T>(
-    factory: AnyDecoratorFactory<T>,
+    factory: FieldDecoratorFactory<T>,
   ): Map<AnyConstructor, Map<Qualifier, readonly FieldDecoratedEntry<T>[]>>;
   ofField<T, R>(
-    factory: AnyDecoratorFactory<T>,
+    factory: FieldDecoratorFactory<T>,
     target: AnyConstructor<R>,
   ): Map<Qualifier, readonly FieldDecoratedEntry<T, R>[]>;
   ofField<T, R>(
-    factory: AnyDecoratorFactory<T>,
+    factory: FieldDecoratorFactory<T>,
     target: AnyConstructor<R>,
     qualifier: Qualifier,
   ): readonly FieldDecoratedEntry<T, R>[];
   ofField(factory: Function, target?: Function, qualifier?: Qualifier): any {
-    if (target) this.#ensureFlushed(target);
-    const byTarget = this.#fieldStore.get(factory);
-    if (!byTarget) return target ? (qualifier !== undefined ? [] : new Map()) : new Map();
-    if (!target) return byTarget;
-    const byKey = byTarget.get(target);
-    if (!byKey) return qualifier !== undefined ? [] : new Map();
-    if (qualifier !== undefined) return byKey.get(qualifier) ?? [];
-    return byKey;
+    return this.ofMethod(factory as any, target, qualifier);
   }
 
   /** Find all decorated subclasses of superTarget for a given factory. O(1). */
