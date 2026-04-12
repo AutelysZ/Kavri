@@ -3,7 +3,7 @@
  * These are exclusive to route request schemas.
  */
 import { lookup } from 'mime-types';
-import type { BaseSchema, StringSchema, ValidateOptions, SchemaFieldDecorator } from '../types.js';
+import type { BaseSchema, SchemaFieldDecorator, StringSchema, ValidateOptions } from '../types.js';
 import { createSchemaFieldDecoratorFactory, SchemaField } from '../field.js';
 import { IsString } from './primitives.js';
 import { IsArray, Ref } from './composite.js';

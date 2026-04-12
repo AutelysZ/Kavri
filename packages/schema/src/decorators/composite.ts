@@ -4,19 +4,19 @@
  */
 import type { AnyConstructor } from '@kavri/basic';
 import type {
-  ArraySchema,
-  ObjectSchema,
-  AnyOfSchema,
-  OneOfSchema,
   AllOfSchema,
+  AnyOfSchema,
+  ArraySchema,
   BaseSchema,
+  InferredSchema,
+  ObjectSchema,
+  OneOfSchema,
+  SchemaFieldDecorator,
   ValidateField,
   ValidateSchema,
-  InferredSchema,
-  SchemaFieldDecorator,
 } from '../types.js';
 import { createSchemaFieldDecoratorFactory, SchemaField, toValidateSchema } from '../field.js';
-import { MinItems, MaxItems, UniqueItems, MinProperties, MaxProperties } from './constraints.js';
+import { MaxItems, MaxProperties, MinItems, MinProperties, UniqueItems } from './constraints.js';
 
 // ---------------------------------------------------------------------------
 // Helpers

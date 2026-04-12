@@ -13,9 +13,9 @@ import isBase58Fn from 'validator/es/lib/isBase58';
 import isBase64Fn from 'validator/es/lib/isBase64';
 import isJSONFn from 'validator/es/lib/isJSON';
 import type {
-  StringSchema,
   SchemaFieldDecorator,
   SchemaFieldDecoratorFactoryStatic,
+  StringSchema,
 } from '../types.js';
 import { createSchemaFieldDecoratorFactory, SchemaField } from '../field.js';
 import { IsString } from './primitives.js';

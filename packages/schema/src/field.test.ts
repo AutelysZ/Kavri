@@ -1,12 +1,11 @@
-import { describe, it, expect } from 'vitest';
-import { Metadata } from '@kavri/basic';
+import { describe, expect, it } from 'vitest';
 import type { ClassDecorator } from '@kavri/basic';
-import { createClassDecorator } from '@kavri/basic';
-import { toValidateSchema, createSchemaFieldDecoratorFactory, SchemaField } from './field.js';
+import { createClassDecorator, Metadata } from '@kavri/basic';
+import { createSchemaFieldDecoratorFactory, SchemaField, toValidateSchema } from './field.js';
 import type {
-  ValidateSchema,
   SchemaFieldDecorator,
   SchemaFieldDecoratorMetadata,
+  ValidateSchema,
 } from './types.js';
 
 // Dummy class decorator to flush TC39 metadata

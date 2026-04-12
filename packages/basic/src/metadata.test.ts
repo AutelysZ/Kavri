@@ -1,10 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { MetadataManager } from './metadata.js';
 import type {
-  ClassDecorator,
-  MethodDecorator,
-  FieldDecorator,
   AnyConstructor,
+  ClassDecorator,
+  FieldDecorator,
+  MethodDecorator,
   MethodDecoratorFactory,
 } from './types.js';
 
@@ -16,6 +16,7 @@ const createFieldDecorator = Metadata.createFieldDecorator.bind(Metadata);
 interface TagMeta {
   tag: string;
 }
+
 function Tag(tag: string): ClassDecorator<TagMeta> {
   return createClassDecorator(Tag, { tag });
 }
@@ -23,6 +24,7 @@ function Tag(tag: string): ClassDecorator<TagMeta> {
 interface MarkerMeta {
   label: string;
 }
+
 function Marker(label: string): MethodDecorator<MarkerMeta> {
   return createMethodDecorator(Marker, { label });
 }
@@ -30,6 +32,7 @@ function Marker(label: string): MethodDecorator<MarkerMeta> {
 interface FieldMeta {
   type: string;
 }
+
 function FieldType(type: string): FieldDecorator<FieldMeta> {
   return createFieldDecorator(FieldType, { type });
 }
@@ -42,6 +45,7 @@ describe('class decorators (TC39)', () => {
   it('stores and reads class metadata', () => {
     @Tag('hello')
     class Foo {}
+
     const entries = Metadata.ofClass(Tag, Foo);
     expect(entries).toHaveLength(1);
     expect(entries[0].metadata).toEqual({ tag: 'hello' });
@@ -53,6 +57,7 @@ describe('class decorators (TC39)', () => {
     @Tag('a')
     @Tag('b')
     class Foo {}
+
     const entries = Metadata.ofClass(Tag, Foo);
     expect(entries).toHaveLength(2);
   });
@@ -72,6 +77,7 @@ describe('class decorators (TC39)', () => {
 
   it('returns empty for undecorated class', () => {
     class Bare {}
+
     expect(Metadata.ofClass(Tag, Bare)).toEqual([]);
   });
 });
@@ -83,6 +89,7 @@ describe('method decorators (TC39)', () => {
       @Marker('greet')
       hello() {}
     }
+
     const entries = Metadata.ofMethod(Marker, Foo, 'hello' as keyof Foo);
     expect(entries).toHaveLength(1);
     expect(entries[0].metadata).toEqual({ label: 'greet' });
@@ -94,6 +101,7 @@ describe('method decorators (TC39)', () => {
     class Foo {
       bar() {}
     }
+
     expect(Metadata.ofMethod(Marker, Foo, 'bar' as keyof Foo)).toEqual([]);
   });
 });
@@ -105,6 +113,7 @@ describe('field decorators (TC39)', () => {
       @FieldType('string')
       name!: string;
     }
+
     const entries = Metadata.ofField(FieldType, Foo, 'name' as keyof Foo);
     expect(entries).toHaveLength(1);
     expect(entries[0].metadata).toEqual({ type: 'string' });
@@ -116,6 +125,7 @@ describe('composite decorators', () => {
   it('applies extra decorators', () => {
     @Special('vip')
     class Foo {}
+
     expect(Metadata.ofClass(Special, Foo)).toHaveLength(1);
     expect(Metadata.ofClass(Tag, Foo)).toHaveLength(1);
     expect(Metadata.ofClass(Tag, Foo)[0].metadata.tag).toBe('special:vip');
@@ -127,8 +137,10 @@ describe('ofClass() global', () => {
     function U(v: string): ClassDecorator<{ v: string }> {
       return createClassDecorator(U, { v });
     }
+
     @U('a')
     class A {}
+
     @U('b')
     class B {}
 
@@ -143,9 +155,12 @@ describe('subclassesOf', () => {
     function C(): ClassDecorator<object> {
       return createClassDecorator(C, {});
     }
+
     class Base {}
+
     @C()
     class Child extends Base {}
+
     @C()
     class GrandChild extends Child {}
 
@@ -227,15 +242,18 @@ describe('legacy decorator protocol', () => {
   function LTag(tag: string): ClassDecorator<TagMeta> {
     return lcd(LTag, { tag });
   }
+
   function LMarker(label: string): MethodDecorator<MarkerMeta> {
     return lmd(LMarker, { label });
   }
+
   function LField(type: string): FieldDecorator<FieldMeta> {
     return lfd(LField, { type });
   }
 
   it('class decorator (legacy)', () => {
     class Foo {}
+
     LTag('hello')(Foo);
     expect(LM.ofClass(LTag, Foo)).toHaveLength(1);
   });
@@ -244,6 +262,7 @@ describe('legacy decorator protocol', () => {
     class Foo {
       hello() {}
     }
+
     LTag('cls')(Foo);
     const desc = Object.getOwnPropertyDescriptor(Foo.prototype, 'hello') as PropertyDescriptor;
     LMarker('greet')(Foo.prototype, 'hello', desc);
@@ -254,6 +273,7 @@ describe('legacy decorator protocol', () => {
     class Foo {
       name!: string;
     }
+
     LTag('cls')(Foo);
     (LField('string') as Function)(Foo.prototype, 'name');
     expect(LM.ofField(LField, Foo, 'name' as keyof Foo)).toHaveLength(1);

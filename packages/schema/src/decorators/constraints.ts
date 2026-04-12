@@ -3,7 +3,7 @@
  * These are used internally by type decorators (e.g., IsString composes MinLength)
  * and can also be applied directly.
  */
-import type { ValidateField, ValidateSchema, SchemaFieldDecorator } from '../types.js';
+import type { SchemaFieldDecorator, ValidateField, ValidateSchema } from '../types.js';
 import { createSchemaFieldDecoratorFactory, SchemaField, toValidateSchema } from '../field.js';
 
 // ---------------------------------------------------------------------------

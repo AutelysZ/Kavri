@@ -4,25 +4,25 @@
  * Each composes relevant constraint decorators from schema options.
  */
 import type {
-  StringSchema,
-  NumericSchema,
   BaseSchema,
-  ValidateOptions,
+  NumericSchema,
   SchemaFieldDecorator,
+  StringSchema,
+  ValidateField,
+  ValidateOptions,
 } from '../types.js';
 import { createSchemaFieldDecoratorFactory, SchemaField, toValidateSchema } from '../field.js';
-import type { ValidateField } from '../types.js';
 import {
-  MinLength,
-  MaxLength,
-  Pattern,
-  Min,
-  Max,
-  ExclusiveMin,
   ExclusiveMax,
-  MultipleOf,
-  IsBefore,
+  ExclusiveMin,
   IsAfter,
+  IsBefore,
+  Max,
+  MaxLength,
+  Min,
+  MinLength,
+  MultipleOf,
+  Pattern,
 } from './constraints.js';
 
 // ---------------------------------------------------------------------------

@@ -16,15 +16,15 @@ import normalizeEmailFn from 'validator/es/lib/normalizeEmail';
 import type { NormalizeEmailOptions } from 'validator';
 
 import type {
-  StringSchema,
-  NumericSchema,
   BaseSchema,
-  ValidateSchema,
+  NumericSchema,
   SchemaFieldDecorator,
   SchemaFieldDecoratorFactoryStatic,
+  StringSchema,
+  ValidateSchema,
 } from '../types.js';
 import { createSchemaFieldDecoratorFactory, SchemaField } from '../field.js';
-import { IsString, IsInteger, IsNumber, IsBoolean } from './primitives.js';
+import { IsBoolean, IsInteger, IsNumber, IsString } from './primitives.js';
 
 // ---------------------------------------------------------------------------
 // Helpers

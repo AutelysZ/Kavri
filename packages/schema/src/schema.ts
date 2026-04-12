@@ -1,11 +1,11 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import type { AnyConstructor, ClassDecorator, Qualifier } from '@kavri/basic';
 /**
  * @Schema class decorator, getSchema, defineSchema, and schema utilities:
  * validate, parse, serialize, toJsonSchema.
  */
 import { createClassDecorator, Metadata } from '@kavri/basic';
-import type { AnyConstructor, ClassDecorator, Qualifier } from '@kavri/basic';
-import type { ObjectSchema, JsonSchema, SchemaFieldDecoratorMetadata } from './types.js';
+import type { JsonSchema, ObjectSchema, SchemaFieldDecoratorMetadata } from './types.js';
 import { getSchemaFields } from './field.js';
 
 // ---------------------------------------------------------------------------

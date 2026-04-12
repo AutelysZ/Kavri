@@ -7,6 +7,6 @@ export default defineConfig({
   sourcemap: true,
   clean: true,
   target: ['chrome100', 'node20'],
+  tsconfig: './tsconfig.build.json',
   outExtension: () => ({ js: '.mjs', dts: '.d.mts' }),
-  external: [/^@kavri\//, /^node:/],
 });

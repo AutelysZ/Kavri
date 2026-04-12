@@ -16,13 +16,12 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsup",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "build": "tsup"
   },
-  "devDependencies": {},
-  "dependencies": {
+  "devDependencies": {
     "@types/node": "^25.6.0"
   },
+  "dependencies": {},
   "license": "MIT",
   "repository": {
     "type": "git",

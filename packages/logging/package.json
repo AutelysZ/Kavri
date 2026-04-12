@@ -16,8 +16,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsup",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "build": "tsup"
   },
   "dependencies": {
     "@kavri/container": "workspace:*",

@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { Key, AsyncScope } from './context.js';
+import { describe, expect, it } from 'vitest';
+import { AsyncScope, Key } from './context.js';
 
 describe('Key', () => {
   it('creates keys via static factory', () => {
