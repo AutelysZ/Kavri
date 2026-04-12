@@ -9,6 +9,10 @@ export type {
   ClassDecoratorFactory,
   MethodDecoratorFactory,
   FieldDecoratorFactory,
+  DecoratorMap,
+  UnionToIntersection,
+  AnyDecorator,
+  AnyDecoratorFactory,
 } from './types.js';
 
 export {
@@ -17,6 +21,17 @@ export {
   createClassDecorator,
   createMethodDecorator,
   createFieldDecorator,
+  createDecorator,
+} from './metadata.js';
+export type {
+  DecoratedEntryBase,
+  ClassDecoratedEntry,
+  MethodDecoratedEntry,
+  FieldDecoratedEntry,
+  DecoratedEntry,
+  DecoratedEntryOf,
+  ComposeOptions,
 } from './metadata.js';
 
-export { Key, type Context, AsyncScope } from './context.js';
+export { Key, AsyncScope } from './context.js';
+export type { Context } from './context.js';

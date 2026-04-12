@@ -91,16 +91,15 @@ describe('createSchemaFieldDecoratorFactory', () => {
       name!: string;
     }
 
-    const meta = // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      Metadata.of(SchemaField as any, Foo, 'name') as SchemaFieldDecoratorMetadata<
-        ValidateSchema<number>
-      >[];
-    expect(meta).toHaveLength(1);
-    expect(meta[0].rule).toBe('MinLength');
-    expect(meta[0].factory).toBe(MinLength);
-    expect(meta[0].params).toEqual({ value: 3 });
-    expect(meta[0].children).toEqual([]);
-    expect(meta[0].deps).toEqual([]);
+    const entries = // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      Metadata.ofField(SchemaField as any, Foo, 'name' as any);
+    expect(entries).toHaveLength(1);
+    const meta = entries[0].metadata as SchemaFieldDecoratorMetadata<ValidateSchema<number>>;
+    expect(meta.rule).toBe('MinLength');
+    expect(meta.factory).toBe(MinLength);
+    expect(meta.params).toEqual({ value: 3 });
+    expect(meta.children).toEqual([]);
+    expect(meta.deps).toEqual([]);
   });
 });
 
@@ -159,12 +158,13 @@ describe('SchemaField', () => {
       name!: string;
     }
 
-    const meta = // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      Metadata.of(SchemaField as any, Foo, 'name') as SchemaFieldDecoratorMetadata[];
-    expect(meta).toHaveLength(1);
-    expect(meta[0].children).toHaveLength(2);
+    const entries = // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      Metadata.ofField(SchemaField as any, Foo, 'name' as any);
+    expect(entries).toHaveLength(1);
+    const meta = entries[0].metadata as SchemaFieldDecoratorMetadata;
+    expect(meta.children).toHaveLength(2);
 
-    const [min, max] = meta[0].children;
+    const [min, max] = meta.children;
     expect(min.metadata.rule).toBe('MinLength');
     expect(min.metadata.params.value).toBe(1);
     expect(max.metadata.rule).toBe('MaxLength');

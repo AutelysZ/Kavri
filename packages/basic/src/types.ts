@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
 /** A string or symbol used to qualify/identify a named component or member. */
 export type Qualifier = string | symbol;
 
@@ -5,8 +7,7 @@ export type Qualifier = string | symbol;
 export type Awaitable<T> = T | Promise<T>;
 
 /** Any class constructor (concrete or abstract). */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export type AnyConstructor<T> = abstract new (...args: any[]) => T;
+export type AnyConstructor<T = any> = abstract new (...args: any[]) => T;
 
 /**
  * Static metadata property carried by every Kavri decorator.
@@ -15,41 +16,45 @@ export type AnyConstructor<T> = abstract new (...args: any[]) => T;
  */
 export type DecoratorStatic<T> = { readonly metadata: T };
 
-/**
- * A class decorator that works with both TC39 and legacy TypeScript decorator protocols.
- * Carries typed metadata `T` via the `metadata` static property.
- */
+/** A class decorator that works with both TC39 and legacy TypeScript decorator protocols. */
 export type ClassDecorator<T> = globalThis.ClassDecorator &
   ((target: Function, context: ClassDecoratorContext) => void) &
   DecoratorStatic<T>;
 
-/**
- * A method decorator that works with both TC39 and legacy TypeScript decorator protocols.
- * Carries typed metadata `T` via the `metadata` static property.
- */
+/** A method decorator that works with both TC39 and legacy TypeScript decorator protocols. */
 export type MethodDecorator<T> = globalThis.MethodDecorator &
   ((target: Function, context: ClassMethodDecoratorContext) => void) &
   DecoratorStatic<T>;
 
-/**
- * A field decorator that works with both TC39 and legacy TypeScript decorator protocols.
- * Uses `globalThis.MethodDecorator` as the legacy branch since legacy field decorators
- * receive the same `(target, key, descriptor?)` signature.
- * Carries typed metadata `T` via the `metadata` static property.
- */
+/** A field decorator (legacy uses MethodDecorator signature). */
 export type FieldDecorator<T> = globalThis.MethodDecorator &
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ((value: any, context: ClassFieldDecoratorContext) => void) &
   DecoratorStatic<T>;
 
-/** A factory function that creates a {@link ClassDecorator}. Also serves as the metadata key for `Metadata.of()`. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type ClassDecoratorFactory<T> = (...args: any[]) => ClassDecorator<T>;
-
-/** A factory function that creates a {@link MethodDecorator}. Also serves as the metadata key for `Metadata.of()`. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type MethodDecoratorFactory<T> = (...args: any[]) => MethodDecorator<T>;
-
-/** A factory function that creates a {@link FieldDecorator}. Also serves as the metadata key for `Metadata.of()`. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type FieldDecoratorFactory<T> = (...args: any[]) => FieldDecorator<T>;
+
+/** Map of decorator kind → decorator type. */
+export interface DecoratorMap<T> {
+  class: ClassDecorator<T>;
+  method: MethodDecorator<T>;
+  field: FieldDecorator<T>;
+}
+
+export type UnionToIntersection<U> = (U extends any ? (arg: U) => void : never) extends (
+  arg: infer I,
+) => void
+  ? I
+  : never;
+
+/** A decorator that works for one or more kinds (class/method/field). */
+export type AnyDecorator<
+  T,
+  Kind extends keyof DecoratorMap<T> = keyof DecoratorMap<T>,
+> = UnionToIntersection<DecoratorMap<T>[Kind]>;
+
+/** Factory for {@link AnyDecorator}. */
+export type AnyDecoratorFactory<T, Kind extends keyof DecoratorMap<T> = keyof DecoratorMap<T>> = (
+  ...args: any[]
+) => AnyDecorator<T, Kind>;

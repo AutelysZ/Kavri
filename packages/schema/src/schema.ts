@@ -55,7 +55,7 @@ export function getSchema(
  * Programmatically register schema metadata on a class.
  */
 export function defineSchema(clazz: AnyConstructor<any>, schema: ObjectSchema<any>): void {
-  Metadata.apply(Schema, clazz, { options: schema });
+  Schema(schema as any)(clazz);
 }
 
 // ---------------------------------------------------------------------------
@@ -294,8 +294,8 @@ function nodeToJsonSchema(meta: SchemaFieldDecoratorMetadata): JsonSchema {
  * Generate JSON Schema 2020-12 from a @Schema class.
  */
 export function toJsonSchema(clazz: AnyConstructor<any>): JsonSchema {
-  const schemaMeta = Metadata.of(Schema, clazz);
-  const options = schemaMeta.length > 0 ? schemaMeta[0].options : {};
+  const schemaMeta = Metadata.ofClass(Schema, clazz);
+  const options = schemaMeta.length > 0 ? schemaMeta[0].metadata.options : {};
 
   const fields = getSchema(clazz);
   const properties: Record<string, JsonSchema> = {};

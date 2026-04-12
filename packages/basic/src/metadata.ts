@@ -1,64 +1,96 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
 import type {
-  Qualifier,
+  AnyConstructor,
+  AnyDecorator,
+  AnyDecoratorFactory,
   ClassDecorator,
-  MethodDecorator,
-  FieldDecorator,
   ClassDecoratorFactory,
-  MethodDecoratorFactory,
+  DecoratorMap,
+  FieldDecorator,
   FieldDecoratorFactory,
+  MethodDecorator,
+  MethodDecoratorFactory,
+  Qualifier,
 } from './types.js';
 
 // ---------------------------------------------------------------------------
+// Decorated entries — query results
+// ---------------------------------------------------------------------------
+
+export interface DecoratedEntryBase<T, R = any> {
+  kind: string;
+  target: AnyConstructor<R>;
+  factory: AnyDecoratorFactory<T>;
+  metadata: T;
+}
+
+export interface ClassDecoratedEntry<T, R = any> extends DecoratedEntryBase<T, R> {
+  kind: 'class';
+}
+
+export interface MethodDecoratedEntry<T, R = any> extends DecoratedEntryBase<T, R> {
+  kind: 'method';
+  method: keyof R;
+}
+
+export interface FieldDecoratedEntry<T, R = any> extends DecoratedEntryBase<T, R> {
+  kind: 'field';
+  field: keyof R;
+}
+
+export type DecoratedEntry<T, R = any> =
+  | ClassDecoratedEntry<T, R>
+  | MethodDecoratedEntry<T, R>
+  | FieldDecoratedEntry<T, R>;
+
+export type DecoratedEntryOf<
+  T,
+  R = any,
+  Kind extends DecoratedEntry<T, R>['kind'] = DecoratedEntry<T, R>['kind'],
+> = Extract<DecoratedEntry<T, R>, { kind: Kind }>;
+
+// ---------------------------------------------------------------------------
+// Compose options
+// ---------------------------------------------------------------------------
+
+export type ComposeOptions<T, Kind extends keyof DecoratorMap<T>> =
+  | readonly AnyDecorator<unknown, Kind>[]
+  | {
+      self?: readonly AnyDecorator<unknown, Kind>[];
+      classes?: readonly ClassDecorator<unknown>[];
+      methods?: readonly [Qualifier, MethodDecorator<unknown>][];
+      fields?: readonly [Qualifier, FieldDecorator<unknown>][];
+      otherClass?: readonly [AnyConstructor, ClassDecorator<unknown>][];
+      otherMethods?: readonly [AnyConstructor, Qualifier, MethodDecorator<unknown>][];
+      otherFields?: readonly [AnyConstructor, Qualifier, FieldDecorator<unknown>][];
+      aspect?: (original: Function) => Function;
+    };
+
+// ---------------------------------------------------------------------------
 // TC39 pending metadata
-//
-// TC39 method/field decorators cannot access the class constructor at
-// decoration time. Pending entries are stored in `context.metadata` (the
-// shared DecoratorMetadata object per class) and flushed when:
-// (a) a class decorator runs on the same class, or
-// (b) Metadata.of/entries/lookup lazily flushes via Symbol.metadata.
 // ---------------------------------------------------------------------------
 
 interface PendingEntry {
   factory: Function;
   key: Qualifier;
   metadata: unknown;
+  kind: 'method' | 'field';
+  compose?: ComposeOptions<any, any>;
 }
 
 const PENDING = Symbol('kavri:pending');
 const FLUSHED = Symbol('kavri:flushed');
 
-/** Store a pending member metadata entry in the TC39 DecoratorMetadata object. */
-function storePending(
-  meta: DecoratorMetadata,
-  factory: Function,
-  key: Qualifier,
-  metadata: unknown,
-): void {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const obj = meta as any;
-  let pending = obj[PENDING] as PendingEntry[] | undefined;
-  if (!pending) {
-    pending = [];
-    obj[PENDING] = pending;
-  }
-  pending.push({ factory, key, metadata });
-}
-
-// ---------------------------------------------------------------------------
-// Decorator protocol detection
-// ---------------------------------------------------------------------------
-
-/** Check if an argument is a TC39 class decorator context. */
 function isTC39ClassContext(arg: unknown): arg is ClassDecoratorContext {
-  return typeof arg === 'object' && arg !== null && (arg as { kind?: string }).kind === 'class';
+  return typeof arg === 'object' && arg !== null && (arg as any).kind === 'class';
 }
 
-/** Check if an argument is a TC39 method/field/getter/setter decorator context. */
 function isTC39MemberContext(
   arg: unknown,
 ): arg is ClassMethodDecoratorContext | ClassFieldDecoratorContext {
   if (typeof arg !== 'object' || arg === null) return false;
-  const kind = (arg as { kind?: string }).kind;
+  const kind = (arg as any).kind;
   return kind === 'method' || kind === 'field' || kind === 'getter' || kind === 'setter';
 }
 
@@ -66,24 +98,23 @@ function isTC39MemberContext(
 // MetadataManager
 // ---------------------------------------------------------------------------
 
-/**
- * Storage and query API for decorator metadata.
- *
- * All decorators created with `createClassDecorator`, `createMethodDecorator`,
- * or `createFieldDecorator` store typed metadata that can be queried through
- * this API. The decorator factory function itself serves as the metadata key.
- *
- * Metadata is stored in instance-level maps (not global state), so multiple
- * `MetadataManager` instances are isolated from each other.
- */
 export class MetadataManager {
-  /** Class-level: factory → Map<constructor, metadata[]> */
-  readonly #classStore = new WeakMap<Function, Map<Function, unknown[]>>();
-  /** Member-level: factory → Map<constructor, Map<key, metadata[]>> */
-  readonly #memberStore = new WeakMap<Function, Map<Function, Map<Qualifier, unknown[]>>>();
+  readonly #classStore = new Map<Function, Map<Function, ClassDecoratedEntry<any>[]>>();
+  readonly #methodStore = new Map<
+    Function,
+    Map<Function, Map<Qualifier, MethodDecoratedEntry<any>[]>>
+  >();
+  readonly #fieldStore = new Map<
+    Function,
+    Map<Function, Map<Qualifier, FieldDecoratedEntry<any>[]>>
+  >();
+  readonly #subclassIndex = new Map<Function, Map<Function, Function[]>>();
 
-  /** Push a class-level metadata entry. */
-  #pushClassMeta(factory: Function, target: Function, metadata: unknown): void {
+  // -----------------------------------------------------------------------
+  // Internal storage
+  // -----------------------------------------------------------------------
+
+  #pushClass(factory: Function, target: Function, entry: ClassDecoratedEntry<any>): void {
     let byTarget = this.#classStore.get(factory);
     if (!byTarget) {
       byTarget = new Map();
@@ -94,15 +125,20 @@ export class MetadataManager {
       items = [];
       byTarget.set(target, items);
     }
-    items.push(metadata);
+    items.push(entry);
+    this.#indexSubclass(factory, target);
   }
 
-  /** Push a member-level (method/field) metadata entry. */
-  #pushMemberMeta(factory: Function, target: Function, key: Qualifier, metadata: unknown): void {
-    let byTarget = this.#memberStore.get(factory);
+  #pushMethod(
+    factory: Function,
+    target: Function,
+    key: Qualifier,
+    entry: MethodDecoratedEntry<any>,
+  ): void {
+    let byTarget = this.#methodStore.get(factory);
     if (!byTarget) {
       byTarget = new Map();
-      this.#memberStore.set(factory, byTarget);
+      this.#methodStore.set(factory, byTarget);
     }
     let byKey = byTarget.get(target);
     if (!byKey) {
@@ -114,301 +150,341 @@ export class MetadataManager {
       items = [];
       byKey.set(key, items);
     }
-    items.push(metadata);
+    items.push(entry);
   }
 
-  /** Flush all pending entries from a DecoratorMetadata object into the member store. */
+  #pushField(
+    factory: Function,
+    target: Function,
+    key: Qualifier,
+    entry: FieldDecoratedEntry<any>,
+  ): void {
+    let byTarget = this.#fieldStore.get(factory);
+    if (!byTarget) {
+      byTarget = new Map();
+      this.#fieldStore.set(factory, byTarget);
+    }
+    let byKey = byTarget.get(target);
+    if (!byKey) {
+      byKey = new Map();
+      byTarget.set(target, byKey);
+    }
+    let items = byKey.get(key);
+    if (!items) {
+      items = [];
+      byKey.set(key, items);
+    }
+    items.push(entry);
+  }
+
+  #indexSubclass(factory: Function, target: Function): void {
+    let current = Object.getPrototypeOf(target.prototype);
+    while (current && current !== Object.prototype) {
+      const superCtor = current.constructor;
+      let byFactory = this.#subclassIndex.get(superCtor);
+      if (!byFactory) {
+        byFactory = new Map();
+        this.#subclassIndex.set(superCtor, byFactory);
+      }
+      let subs = byFactory.get(factory);
+      if (!subs) {
+        subs = [];
+        byFactory.set(factory, subs);
+      }
+      if (!subs.includes(target)) subs.push(target);
+      current = Object.getPrototypeOf(current);
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // TC39 pending flush
+  // -----------------------------------------------------------------------
+
+  #storePending(meta: DecoratorMetadata, entry: PendingEntry): void {
+    const obj = meta as any;
+    let pending = obj[PENDING] as PendingEntry[] | undefined;
+    if (!pending) {
+      pending = [];
+      obj[PENDING] = pending;
+    }
+    pending.push(entry);
+  }
+
   #flushPending(meta: DecoratorMetadata, target: Function): void {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const obj = meta as any;
     const pending = obj[PENDING] as PendingEntry[] | undefined;
     if (pending) {
-      for (const entry of pending) {
-        this.#pushMemberMeta(entry.factory, target, entry.key, entry.metadata);
+      for (const p of pending) {
+        if (p.kind === 'method') {
+          this.#pushMethod(p.factory, target, p.key, {
+            kind: 'method',
+            target: target as AnyConstructor,
+            factory: p.factory as any,
+            metadata: p.metadata,
+            method: p.key as any,
+          });
+        } else {
+          this.#pushField(p.factory, target, p.key, {
+            kind: 'field',
+            target: target as AnyConstructor,
+            factory: p.factory as any,
+            metadata: p.metadata,
+            field: p.key as any,
+          });
+        }
+        if (p.compose) this.#applyCompose(p.compose, target, p.kind, p.key);
       }
       delete obj[PENDING];
     }
     obj[FLUSHED] = true;
   }
 
-  /** Ensure any pending TC39 metadata for `target` is flushed. */
   #ensureFlushed(target: Function): void {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const meta = (target as any)[Symbol.metadata] as DecoratorMetadata | undefined;
     if (meta && !(meta as Record<symbol, unknown>)[FLUSHED]) {
       this.#flushPending(meta, target);
     }
   }
 
-  /** Resolve a target (class constructor or instance) to the class constructor. */
-  #resolveTarget(target: object): Function {
-    if (typeof target === 'function') return target;
-    return target.constructor;
+  // -----------------------------------------------------------------------
+  // Compose options processing
+  // -----------------------------------------------------------------------
+
+  #applyCompose(
+    compose: ComposeOptions<any, any>,
+    target: Function,
+    kind: string,
+    key?: Qualifier,
+  ): void {
+    if (Array.isArray(compose)) {
+      for (const d of compose) {
+        if (kind === 'class') (d as Function)(target);
+        else if (key !== undefined) (d as Function)(target.prototype, key);
+      }
+      return;
+    }
+    const opts = compose as Exclude<typeof compose, readonly any[]>;
+    if (opts.self) {
+      for (const d of opts.self) {
+        if (kind === 'class') (d as Function)(target);
+        else if (key !== undefined) (d as Function)(target.prototype, key);
+      }
+    }
+    if (opts.classes) {
+      for (const d of opts.classes) (d as Function)(target);
+    }
+    if (opts.methods) {
+      for (const [k, d] of opts.methods) (d as Function)(target.prototype, k);
+    }
+    if (opts.fields) {
+      for (const [k, d] of opts.fields) (d as Function)(target.prototype, k);
+    }
+    if (opts.otherClass) {
+      for (const [cls, d] of opts.otherClass) (d as Function)(cls);
+    }
+    if (opts.otherMethods) {
+      for (const [cls, k, d] of opts.otherMethods) (d as Function)(cls.prototype, k);
+    }
+    if (opts.otherFields) {
+      for (const [cls, k, d] of opts.otherFields) (d as Function)(cls.prototype, k);
+    }
   }
 
-  // -------------------------------------------------------------------------
-  // Decorator factories
-  // -------------------------------------------------------------------------
+  // -----------------------------------------------------------------------
+  // createDecorator
+  // -----------------------------------------------------------------------
 
-  /**
-   * Create a class decorator that stores typed metadata.
-   *
-   * The returned decorator works with both TC39 and legacy decorator protocols.
-   * The `extra` parameter composes additional decorators (e.g., `@Scheduled` also applies `@Component`).
-   *
-   * @param factory - The decorator factory function. Serves as the metadata key.
-   * @param metadata - The typed metadata to store.
-   * @param extra - Additional class decorators to apply alongside this one.
-   *
-   * @example
-   * ```ts
-   * function Tag(tag: string): ClassDecorator<{ tag: string }> {
-   *   return Metadata.createClassDecorator(Tag, { tag });
-   * }
-   * ```
-   */
+  createDecorator<T, Kind extends keyof DecoratorMap<T>>(
+    _kinds: readonly Kind[],
+    factory: AnyDecoratorFactory<T, Kind>,
+    metadata: T,
+    extra?: ComposeOptions<T, Kind>,
+  ): AnyDecorator<T, Kind> {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
+    const mgr = this;
+
+    const decorator = function (
+      target: any,
+      contextOrKey?: any,
+      descriptor?: PropertyDescriptor,
+    ): any {
+      if (isTC39ClassContext(contextOrKey)) {
+        // TC39 class
+        mgr.#pushClass(factory as Function, target, {
+          kind: 'class',
+          target: target as AnyConstructor,
+          factory: factory as any,
+          metadata,
+        });
+        mgr.#flushPending(contextOrKey.metadata, target);
+        if (extra) mgr.#applyCompose(extra, target, 'class');
+      } else if (isTC39MemberContext(contextOrKey)) {
+        // TC39 method/field
+        const key = contextOrKey.name as Qualifier;
+        const kind = contextOrKey.kind === 'field' ? 'field' : 'method';
+        mgr.#storePending(contextOrKey.metadata, {
+          factory: factory as Function,
+          key,
+          metadata,
+          kind: kind as 'method' | 'field',
+          compose: extra,
+        });
+        if (!Array.isArray(extra) && (extra as any)?.aspect && kind === 'method') {
+          return (extra as any).aspect(target);
+        }
+      } else if (contextOrKey === undefined) {
+        // Legacy class
+        mgr.#pushClass(factory as Function, target, {
+          kind: 'class',
+          target: target as AnyConstructor,
+          factory: factory as any,
+          metadata,
+        });
+        if (extra) mgr.#applyCompose(extra, target, 'class');
+      } else {
+        // Legacy method/field
+        const key = contextOrKey as Qualifier;
+        const ctor = typeof target === 'function' ? target : target.constructor;
+        const kind = descriptor ? 'method' : 'field';
+        if (kind === 'method') {
+          mgr.#pushMethod(factory as Function, ctor, key, {
+            kind: 'method',
+            target: ctor as AnyConstructor,
+            factory: factory as any,
+            metadata,
+            method: key as any,
+          });
+          if (extra) mgr.#applyCompose(extra, ctor, 'method', key);
+          if (!Array.isArray(extra) && (extra as any)?.aspect && descriptor) {
+            descriptor.value = (extra as any).aspect(descriptor.value);
+          }
+        } else {
+          mgr.#pushField(factory as Function, ctor, key, {
+            kind: 'field',
+            target: ctor as AnyConstructor,
+            factory: factory as any,
+            metadata,
+            field: key as any,
+          });
+          if (extra) mgr.#applyCompose(extra, ctor, 'field', key);
+        }
+      }
+    } as AnyDecorator<T, Kind>;
+
+    Object.defineProperty(decorator, 'metadata', { value: metadata, writable: false });
+    return decorator;
+  }
+
+  // -----------------------------------------------------------------------
+  // Convenience wrappers
+  // -----------------------------------------------------------------------
+
   createClassDecorator<T>(
     factory: ClassDecoratorFactory<T>,
     metadata: T,
-    extra?: ClassDecorator<unknown>[],
+    extra?: ComposeOptions<T, 'class'>,
   ): ClassDecorator<T> {
-    const decorator = ((target: Function, context?: ClassDecoratorContext): void => {
-      this.#pushClassMeta(factory, target, metadata);
-
-      // TC39: flush pending method/field metadata now that we have the class
-      if (isTC39ClassContext(context)) {
-        this.#flushPending(context.metadata, target);
-      }
-
-      if (extra) {
-        for (const d of extra) {
-          (d as Function)(target, context);
-        }
-      }
-    }) as ClassDecorator<T>;
-
-    Object.defineProperty(decorator, 'metadata', { value: metadata, writable: false });
-    return decorator;
+    return this.createDecorator(['class'], factory, metadata, extra);
   }
 
-  /**
-   * Create a method decorator that stores typed metadata.
-   *
-   * In TC39 mode, metadata is stored as pending in `context.metadata` and flushed
-   * when a class decorator runs or when `of()` queries the target.
-   *
-   * @param factory - The decorator factory function. Serves as the metadata key.
-   * @param metadata - The typed metadata to store.
-   * @param extra - Additional method decorators to apply alongside this one.
-   */
   createMethodDecorator<T>(
     factory: MethodDecoratorFactory<T>,
     metadata: T,
-    extra?: MethodDecorator<unknown>[],
+    extra?: ComposeOptions<T, 'method'>,
   ): MethodDecorator<T> {
-    const decorator = ((
-      target: unknown,
-      contextOrKey: ClassMethodDecoratorContext | string | symbol,
-      descriptor?: PropertyDescriptor,
-    ): void => {
-      if (isTC39MemberContext(contextOrKey)) {
-        const key = contextOrKey.name as Qualifier;
-        storePending(contextOrKey.metadata, factory, key, metadata);
-      } else {
-        const key = contextOrKey as Qualifier;
-        const ctor = typeof target === 'function' ? target : (target as object).constructor;
-        this.#pushMemberMeta(factory, ctor, key, metadata);
-      }
-
-      if (extra) {
-        for (const d of extra) {
-          (d as Function)(target, contextOrKey, descriptor);
-        }
-      }
-    }) as MethodDecorator<T>;
-
-    Object.defineProperty(decorator, 'metadata', { value: metadata, writable: false });
-    return decorator;
+    return this.createDecorator(['method'], factory, metadata, extra);
   }
 
-  /**
-   * Create a field decorator that stores typed metadata.
-   * Same dual-protocol support as {@link createMethodDecorator}.
-   *
-   * @param factory - The decorator factory function. Serves as the metadata key.
-   * @param metadata - The typed metadata to store.
-   * @param extra - Additional field decorators to apply alongside this one.
-   */
   createFieldDecorator<T>(
     factory: FieldDecoratorFactory<T>,
     metadata: T,
-    extra?: FieldDecorator<unknown>[],
+    extra?: ComposeOptions<T, 'field'>,
   ): FieldDecorator<T> {
-    const decorator = ((
-      target: unknown,
-      contextOrKey: ClassFieldDecoratorContext | string | symbol,
-      descriptor?: PropertyDescriptor,
-    ): void => {
-      if (isTC39MemberContext(contextOrKey)) {
-        const key = contextOrKey.name as Qualifier;
-        storePending(contextOrKey.metadata, factory, key, metadata);
-      } else {
-        const key = contextOrKey as Qualifier;
-        const ctor = typeof target === 'function' ? target : (target as object).constructor;
-        this.#pushMemberMeta(factory, ctor, key, metadata);
-      }
-
-      if (extra) {
-        for (const d of extra) {
-          (d as Function)(target, contextOrKey, descriptor);
-        }
-      }
-    }) as FieldDecorator<T>;
-
-    Object.defineProperty(decorator, 'metadata', { value: metadata, writable: false });
-    return decorator;
+    return this.createDecorator(['field'], factory, metadata, extra);
   }
 
-  // -------------------------------------------------------------------------
-  // Query API
-  // -------------------------------------------------------------------------
+  // -----------------------------------------------------------------------
+  // Query API — all O(1) via Map lookups
+  // -----------------------------------------------------------------------
 
-  /**
-   * Read class-level metadata for a decorator factory on a target.
-   * Returns `readonly T[]` because a decorator can be applied multiple times.
-   * Works on both class constructors and instances.
-   */
-  of<T>(factory: ClassDecoratorFactory<T>, target: object): readonly T[];
-  /**
-   * Read member-level (method/field) metadata for a decorator factory on a target.
-   * @param key - The method or field name (string or symbol).
-   */
-  of<T>(
-    factory: MethodDecoratorFactory<T> | FieldDecoratorFactory<T>,
-    target: object,
-    key: Qualifier,
-  ): readonly T[];
-  of(factory: Function, target: object, key?: Qualifier): readonly unknown[] {
-    const ctor = this.#resolveTarget(target);
-    this.#ensureFlushed(ctor);
-    if (key === undefined) {
-      return this.#classStore.get(factory)?.get(ctor) ?? [];
-    }
-    return this.#memberStore.get(factory)?.get(ctor)?.get(key) ?? [];
+  ofClass<T>(
+    factory: ClassDecoratorFactory<T>,
+  ): Map<AnyConstructor, readonly ClassDecoratedEntry<T>[]>;
+  ofClass<T, R>(
+    factory: ClassDecoratorFactory<T>,
+    target: AnyConstructor<R>,
+  ): readonly ClassDecoratedEntry<T, R>[];
+  ofClass(factory: Function, target?: Function): any {
+    if (target) this.#ensureFlushed(target);
+    const byTarget = this.#classStore.get(factory);
+    if (!byTarget) return target ? [] : new Map();
+    if (target) return byTarget.get(target) ?? [];
+    return byTarget;
   }
 
-  /**
-   * Programmatically attach class-level metadata without using decorator syntax.
-   * Uses push semantics — appends to the metadata array.
-   */
-  apply<T>(factory: ClassDecoratorFactory<T>, target: object, metadata: T): void;
-  /**
-   * Programmatically attach member-level metadata without using decorator syntax.
-   */
-  apply<T>(
-    factory: MethodDecoratorFactory<T> | FieldDecoratorFactory<T>,
-    target: object,
-    key: Qualifier,
-    metadata: T,
-  ): void;
-  apply(factory: Function, target: object, keyOrMetadata: unknown, metadata?: unknown): void {
-    const ctor = this.#resolveTarget(target);
-    if (metadata === undefined) {
-      this.#pushClassMeta(factory, ctor, keyOrMetadata);
-    } else {
-      this.#pushMemberMeta(factory, ctor, keyOrMetadata as Qualifier, metadata);
-    }
+  ofMethod<T>(
+    factory: AnyDecoratorFactory<T>,
+  ): Map<AnyConstructor, Map<Qualifier, readonly MethodDecoratedEntry<T>[]>>;
+  ofMethod<T, R>(
+    factory: AnyDecoratorFactory<T>,
+    target: AnyConstructor<R>,
+  ): Map<Qualifier, readonly MethodDecoratedEntry<T, R>[]>;
+  ofMethod<T, R>(
+    factory: AnyDecoratorFactory<T>,
+    target: AnyConstructor<R>,
+    qualifier: Qualifier,
+  ): readonly MethodDecoratedEntry<T, R>[];
+  ofMethod(factory: Function, target?: Function, qualifier?: Qualifier): any {
+    if (target) this.#ensureFlushed(target);
+    const byTarget = this.#methodStore.get(factory);
+    if (!byTarget) return target ? (qualifier !== undefined ? [] : new Map()) : new Map();
+    if (!target) return byTarget;
+    const byKey = byTarget.get(target);
+    if (!byKey) return qualifier !== undefined ? [] : new Map();
+    if (qualifier !== undefined) return byKey.get(qualifier) ?? [];
+    return byKey;
   }
 
-  /**
-   * Get all registered `[constructor, metadata]` pairs for a class decorator factory.
-   * Used by subsystems to discover all decorated classes.
-   */
-  entries<T>(factory: ClassDecoratorFactory<T>): readonly [Function, T][];
-  /**
-   * Get all registered `[constructor, key, metadata]` triples for a method decorator factory.
-   */
-  entries<T>(factory: MethodDecoratorFactory<T>): readonly [Function, Qualifier, T][];
-  entries(factory: Function): readonly unknown[] {
-    const cm = this.#classStore.get(factory);
-    if (cm) {
-      const result: [Function, unknown][] = [];
-      for (const [ctor, items] of cm) {
-        for (const item of items) {
-          result.push([ctor, item]);
-        }
-      }
-      return result;
-    }
-
-    const mm = this.#memberStore.get(factory);
-    if (mm) {
-      const result: [Function, Qualifier, unknown][] = [];
-      for (const [ctor, byKey] of mm) {
-        for (const [key, items] of byKey) {
-          for (const item of items) {
-            result.push([ctor, key, item]);
-          }
-        }
-      }
-      return result;
-    }
-
-    return [];
+  ofField<T>(
+    factory: AnyDecoratorFactory<T>,
+  ): Map<AnyConstructor, Map<Qualifier, readonly FieldDecoratedEntry<T>[]>>;
+  ofField<T, R>(
+    factory: AnyDecoratorFactory<T>,
+    target: AnyConstructor<R>,
+  ): Map<Qualifier, readonly FieldDecoratedEntry<T, R>[]>;
+  ofField<T, R>(
+    factory: AnyDecoratorFactory<T>,
+    target: AnyConstructor<R>,
+    qualifier: Qualifier,
+  ): readonly FieldDecoratedEntry<T, R>[];
+  ofField(factory: Function, target?: Function, qualifier?: Qualifier): any {
+    if (target) this.#ensureFlushed(target);
+    const byTarget = this.#fieldStore.get(factory);
+    if (!byTarget) return target ? (qualifier !== undefined ? [] : new Map()) : new Map();
+    if (!target) return byTarget;
+    const byKey = byTarget.get(target);
+    if (!byKey) return qualifier !== undefined ? [] : new Map();
+    if (qualifier !== undefined) return byKey.get(qualifier) ?? [];
+    return byKey;
   }
 
-  /**
-   * Walk the prototype chain and collect metadata from the class and all ancestors.
-   * Returns metadata from most-derived to base.
-   */
-  lookup<T>(factory: ClassDecoratorFactory<T>, clazz: Function): readonly T[];
-  /**
-   * Walk the prototype chain for member-level metadata.
-   */
-  lookup<T>(
-    factory: MethodDecoratorFactory<T> | FieldDecoratorFactory<T>,
-    clazz: Function,
-    key: Qualifier,
-  ): readonly T[];
-  lookup(factory: Function, clazz: Function, key?: Qualifier): readonly unknown[] {
-    const result: unknown[] = [];
-    let current: Function | null = clazz;
-    while (current && current !== Object && current !== Function) {
-      this.#ensureFlushed(current);
-      if (key === undefined) {
-        const items = this.#classStore.get(factory)?.get(current);
-        if (items) result.push(...items);
-      } else {
-        const items = this.#memberStore.get(factory)?.get(current)?.get(key);
-        if (items) result.push(...items);
-      }
-      const proto = Object.getPrototypeOf(current.prototype);
-      current = proto ? proto.constructor : null;
-    }
-    return result;
+  /** Find all decorated subclasses of superTarget for a given factory. O(1). */
+  subclassesOf<T, R>(
+    factory: ClassDecoratorFactory<T>,
+    superTarget: AnyConstructor<R>,
+  ): readonly AnyConstructor<R>[] {
+    const byFactory = this.#subclassIndex.get(superTarget);
+    if (!byFactory) return [];
+    return (byFactory.get(factory) ?? []) as AnyConstructor<R>[];
   }
 }
 
-/**
- * The global metadata manager. All decorator metadata in the application
- * is stored and queried through this instance.
- */
+// ---------------------------------------------------------------------------
+// Global instance + bound helpers
+// ---------------------------------------------------------------------------
+
 export const Metadata = /* @__PURE__ */ new MetadataManager();
-
-/**
- * Create a class decorator that stores typed metadata in the global {@link Metadata} store.
- * @see {@link MetadataManager.createClassDecorator}
- */
 export const createClassDecorator = /* @__PURE__ */ Metadata.createClassDecorator.bind(Metadata);
-
-/**
- * Create a method decorator that stores typed metadata in the global {@link Metadata} store.
- * @see {@link MetadataManager.createMethodDecorator}
- */
 export const createMethodDecorator = /* @__PURE__ */ Metadata.createMethodDecorator.bind(Metadata);
-
-/**
- * Create a field decorator that stores typed metadata in the global {@link Metadata} store.
- * @see {@link MetadataManager.createFieldDecorator}
- */
 export const createFieldDecorator = /* @__PURE__ */ Metadata.createFieldDecorator.bind(Metadata);
+export const createDecorator = /* @__PURE__ */ Metadata.createDecorator.bind(Metadata);

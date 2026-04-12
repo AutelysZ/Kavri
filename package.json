@@ -24,9 +24,10 @@
     "lint-staged": "^15.5.2",
     "prettier": "^3.5.3",
     "tsup": "^8.5.1",
-    "typescript": "^5.8.3",
+    "typescript": "^6.0.2",
     "typescript-eslint": "^8.33.0",
     "unplugin-swc": "^1.5.9",
+    "@types/node": "^24.12.2",
     "vitest": "^4.1.4"
   },
   "lint-staged": {
@@ -38,8 +39,5 @@
       "prettier --write"
     ]
   },
-  "dependencies": {
-    "@types/validator": "^13.15.10",
-    "validator": "^13.15.35"
-  }
+  "dependencies": {}
 }
