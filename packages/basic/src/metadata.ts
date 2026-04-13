@@ -84,8 +84,20 @@ export interface ComposeOptions<T, Kind extends keyof DecoratorMap<T>> {
   otherMethods?: readonly [AnyConstructor, Qualifier, MethodDecorator<unknown>][];
   /** Field decorators to apply on other classes: `[class, fieldName, decorator]`. */
   otherFields?: readonly [AnyConstructor, Qualifier, FieldDecorator<unknown>][];
-  /** Replace the original method/function with a wrapper (AOP). */
-  aspect?: (original: Function) => Function;
+  /**
+   * Replace the original method with a wrapper (AOP).
+   * Only applies to method decorators.
+   * @param original - The original method function.
+   * @returns The replacement method function.
+   */
+  proxyMethod?: (original: Function) => Function;
+  /**
+   * Replace the entire class with a subclass or wrapper.
+   * Only applies to class decorators.
+   * @param original - The original class constructor.
+   * @returns The replacement class constructor.
+   */
+  proxyClass?: (original: AnyConstructor) => AnyConstructor;
 }
 
 // ---------------------------------------------------------------------------
@@ -317,7 +329,7 @@ export class MetadataManager {
   // Compose options processing
   // -----------------------------------------------------------------------
 
-  /** Apply all compose options: self, classes, methods, fields, other*, aspect. */
+  /** Apply all compose options: self, classes, methods, fields, other*, proxyMethod, proxyClass. */
   #applyCompose(
     compose: ComposeOptions<any, any>,
     target: Function,
@@ -401,6 +413,9 @@ export class MetadataManager {
         });
         mgr.#flushPending(contextOrKey.metadata, target);
         if (extra) mgr.#applyCompose(extra, target, 'class');
+        if ((extra as any)?.proxyClass) {
+          return (extra as any).proxyClass(target);
+        }
       } else if (isTC39MemberContext(contextOrKey)) {
         // TC39 method/field
         const key = contextOrKey.name as Qualifier;
@@ -415,8 +430,8 @@ export class MetadataManager {
           kind: kind as 'method' | 'field',
           compose: extra,
         });
-        if ((extra as any)?.aspect && kind === 'method') {
-          return (extra as any).aspect(target);
+        if ((extra as any)?.proxyMethod && kind === 'method') {
+          return (extra as any).proxyMethod(target);
         }
       } else if (contextOrKey === undefined) {
         if (!allowed.has('class')) {
@@ -430,6 +445,9 @@ export class MetadataManager {
           metadata,
         });
         if (extra) mgr.#applyCompose(extra, target, 'class');
+        if ((extra as any)?.proxyClass) {
+          return (extra as any).proxyClass(target);
+        }
       } else {
         // Legacy method/field
         const key = contextOrKey as Qualifier;
@@ -450,8 +468,8 @@ export class MetadataManager {
             method: key as any,
           });
           if (extra) mgr.#applyCompose(extra, ctor, 'method', key);
-          if ((extra as any)?.aspect && descriptor) {
-            descriptor.value = (extra as any).aspect(descriptor.value);
+          if ((extra as any)?.proxyMethod && descriptor) {
+            descriptor.value = (extra as any).proxyMethod(descriptor.value);
           }
         } else {
           mgr.#pushField(factory as Function, ctor, key, {

@@ -199,7 +199,7 @@ describe('ComposeOptions', () => {
     expect(useEntries[0].metadata.injectables).toContain(Date);
   });
 
-  it('aspect wraps the method (legacy)', () => {
+  it('proxyMethod wraps the method (legacy)', () => {
     const calls: string[] = [];
 
     function Logged(): MethodDecorator<object> {
@@ -207,7 +207,7 @@ describe('ComposeOptions', () => {
         Logged,
         {},
         {
-          aspect: (original) => {
+          proxyMethod: (original) => {
             return function (this: unknown, ...args: unknown[]) {
               calls.push('before');
               const result = (original as Function).apply(this, args);
@@ -280,7 +280,7 @@ describe('legacy decorator protocol', () => {
   });
 });
 
-describe('aspect decorator pattern', () => {
+describe('proxyMethod decorator pattern', () => {
   it('createAspectDecorator composes Use + method metadata', () => {
     const AM = new MetadataManager();
 
