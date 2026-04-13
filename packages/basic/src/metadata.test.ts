@@ -38,7 +38,7 @@ function FieldType(type: string): FieldDecorator<FieldMeta> {
 }
 
 function Special(tag: string): ClassDecorator<TagMeta> {
-  return createClassDecorator(Special, { tag }, [Tag(`special:${tag}`)]);
+  return createClassDecorator(Special, { tag }, { self: [Tag(`special:${tag}`)] });
 }
 
 describe('class decorators (TC39)', () => {

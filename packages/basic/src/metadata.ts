@@ -68,30 +68,25 @@ export type DecoratedEntryOf<
 
 /**
  * Options for composing additional decorators alongside the primary one.
- *
- * Can be a simple array of same-kind decorators (shorthand for `{ self: [...] }`),
- * or an object with fine-grained control over cross-kind and cross-class composition.
  */
-export type ComposeOptions<T, Kind extends keyof DecoratorMap<T>> =
-  | readonly AnyDecorator<unknown, Kind>[]
-  | {
-      /** Additional same-kind decorators to apply on the same target. */
-      self?: readonly AnyDecorator<unknown, Kind>[];
-      /** Class decorators to apply on the same class. */
-      classes?: readonly ClassDecorator<unknown>[];
-      /** Method decorators to apply on the same class: `[methodName, decorator]`. */
-      methods?: readonly [Qualifier, MethodDecorator<unknown>][];
-      /** Field decorators to apply on the same class: `[fieldName, decorator]`. */
-      fields?: readonly [Qualifier, FieldDecorator<unknown>][];
-      /** Class decorators to apply on other classes: `[class, decorator]`. */
-      otherClass?: readonly [AnyConstructor, ClassDecorator<unknown>][];
-      /** Method decorators to apply on other classes: `[class, methodName, decorator]`. */
-      otherMethods?: readonly [AnyConstructor, Qualifier, MethodDecorator<unknown>][];
-      /** Field decorators to apply on other classes: `[class, fieldName, decorator]`. */
-      otherFields?: readonly [AnyConstructor, Qualifier, FieldDecorator<unknown>][];
-      /** Replace the original method/function with a wrapper (AOP). */
-      aspect?: (original: Function) => Function;
-    };
+export interface ComposeOptions<T, Kind extends keyof DecoratorMap<T>> {
+  /** Additional same-kind decorators to apply on the same target. */
+  self?: readonly AnyDecorator<unknown, Kind>[];
+  /** Class decorators to apply on the same class. */
+  classes?: readonly ClassDecorator<unknown>[];
+  /** Method decorators to apply on the same class: `[methodName, decorator]`. */
+  methods?: readonly [Qualifier, MethodDecorator<unknown>][];
+  /** Field decorators to apply on the same class: `[fieldName, decorator]`. */
+  fields?: readonly [Qualifier, FieldDecorator<unknown>][];
+  /** Class decorators to apply on other classes: `[class, decorator]`. */
+  otherClass?: readonly [AnyConstructor, ClassDecorator<unknown>][];
+  /** Method decorators to apply on other classes: `[class, methodName, decorator]`. */
+  otherMethods?: readonly [AnyConstructor, Qualifier, MethodDecorator<unknown>][];
+  /** Field decorators to apply on other classes: `[class, fieldName, decorator]`. */
+  otherFields?: readonly [AnyConstructor, Qualifier, FieldDecorator<unknown>][];
+  /** Replace the original method/function with a wrapper (AOP). */
+  aspect?: (original: Function) => Function;
+}
 
 // ---------------------------------------------------------------------------
 // TC39 pending metadata
@@ -282,37 +277,29 @@ export class MetadataManager {
     kind: string,
     key?: Qualifier,
   ): void {
-    if (Array.isArray(compose)) {
-      for (const d of compose) {
-        if (kind === 'class') (d as Function)(target);
-        else if (key !== undefined) (d as Function)(target.prototype, key);
-      }
-      return;
-    }
-    const opts = compose as Exclude<typeof compose, readonly any[]>;
-    if (opts.self) {
-      for (const d of opts.self) {
+    if (compose.self) {
+      for (const d of compose.self) {
         if (kind === 'class') (d as Function)(target);
         else if (key !== undefined) (d as Function)(target.prototype, key);
       }
     }
-    if (opts.classes) {
-      for (const d of opts.classes) (d as Function)(target);
+    if (compose.classes) {
+      for (const d of compose.classes) (d as Function)(target);
     }
-    if (opts.methods) {
-      for (const [k, d] of opts.methods) (d as Function)(target.prototype, k);
+    if (compose.methods) {
+      for (const [k, d] of compose.methods) (d as Function)(target.prototype, k);
     }
-    if (opts.fields) {
-      for (const [k, d] of opts.fields) (d as Function)(target.prototype, k);
+    if (compose.fields) {
+      for (const [k, d] of compose.fields) (d as Function)(target.prototype, k);
     }
-    if (opts.otherClass) {
-      for (const [cls, d] of opts.otherClass) (d as Function)(cls);
+    if (compose.otherClass) {
+      for (const [cls, d] of compose.otherClass) (d as Function)(cls);
     }
-    if (opts.otherMethods) {
-      for (const [cls, k, d] of opts.otherMethods) (d as Function)(cls.prototype, k);
+    if (compose.otherMethods) {
+      for (const [cls, k, d] of compose.otherMethods) (d as Function)(cls.prototype, k);
     }
-    if (opts.otherFields) {
-      for (const [cls, k, d] of opts.otherFields) (d as Function)(cls.prototype, k);
+    if (compose.otherFields) {
+      for (const [cls, k, d] of compose.otherFields) (d as Function)(cls.prototype, k);
     }
   }
 
@@ -355,7 +342,7 @@ export class MetadataManager {
           kind: kind as 'method' | 'field',
           compose: extra,
         });
-        if (!Array.isArray(extra) && (extra as any)?.aspect && kind === 'method') {
+        if ((extra as any)?.aspect && kind === 'method') {
           return (extra as any).aspect(target);
         }
       } else if (contextOrKey === undefined) {
@@ -381,7 +368,7 @@ export class MetadataManager {
             method: key as any,
           });
           if (extra) mgr.#applyCompose(extra, ctor, 'method', key);
-          if (!Array.isArray(extra) && (extra as any)?.aspect && descriptor) {
+          if ((extra as any)?.aspect && descriptor) {
             descriptor.value = (extra as any).aspect(descriptor.value);
           }
         } else {
