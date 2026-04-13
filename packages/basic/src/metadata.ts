@@ -263,6 +263,13 @@ export class MetadataManager {
     obj[FLUSHED] = true;
   }
 
+  /** Resolve target to constructor. Returns undefined if target is undefined. */
+  #resolve(target: any): Function | undefined {
+    if (target === undefined) return undefined;
+    if (typeof target === 'function') return target;
+    return target.constructor;
+  }
+
   #ensureFlushed(target: Function): void {
     const meta = (target as any)[Symbol.metadata] as DecoratorMetadata | undefined;
     if (meta && !(meta as Record<symbol, unknown>)[FLUSHED]) {
@@ -442,36 +449,38 @@ export class MetadataManager {
   ofClass<T>(
     factory: ClassDecoratorFactory<T>,
   ): Map<AnyConstructor, readonly ClassDecoratedEntry<T>[]>;
-  ofClass<T, R>(
+  ofClass<T, R extends object>(
     factory: ClassDecoratorFactory<T>,
-    target: AnyConstructor<R>,
+    target: AnyConstructor<R> | R,
   ): readonly ClassDecoratedEntry<T, R>[];
-  ofClass(factory: Function, target?: Function): any {
-    if (target) this.#ensureFlushed(target);
+  ofClass(factory: Function, target?: any): any {
+    const ctor = this.#resolve(target);
+    if (ctor) this.#ensureFlushed(ctor);
     const byTarget = this.#classStore.get(factory);
-    if (!byTarget) return target ? [] : new Map();
-    if (target) return byTarget.get(target) ?? [];
+    if (!byTarget) return ctor ? [] : new Map();
+    if (ctor) return byTarget.get(ctor) ?? [];
     return byTarget;
   }
 
   ofMethod<T>(
     factory: MethodDecoratorFactory<T>,
   ): Map<AnyConstructor, Map<Qualifier, readonly MethodDecoratedEntry<T>[]>>;
-  ofMethod<T, R>(
+  ofMethod<T, R extends object>(
     factory: MethodDecoratorFactory<T>,
-    target: AnyConstructor<R>,
+    target: AnyConstructor<R> | R,
   ): Map<Qualifier, readonly MethodDecoratedEntry<T, R>[]>;
-  ofMethod<T, R>(
+  ofMethod<T, R extends object>(
     factory: MethodDecoratorFactory<T>,
-    target: AnyConstructor<R>,
+    target: AnyConstructor<R> | R,
     qualifier: Qualifier,
   ): readonly MethodDecoratedEntry<T, R>[];
-  ofMethod(factory: Function, target?: Function, qualifier?: Qualifier): any {
-    if (target) this.#ensureFlushed(target);
+  ofMethod(factory: Function, target?: any, qualifier?: Qualifier): any {
+    const ctor = this.#resolve(target);
+    if (ctor) this.#ensureFlushed(ctor);
     const byTarget = this.#methodStore.get(factory);
-    if (!byTarget) return target ? (qualifier !== undefined ? [] : new Map()) : new Map();
-    if (!target) return byTarget;
-    const byKey = byTarget.get(target);
+    if (!byTarget) return ctor ? (qualifier !== undefined ? [] : new Map()) : new Map();
+    if (!ctor) return byTarget;
+    const byKey = byTarget.get(ctor);
     if (!byKey) return qualifier !== undefined ? [] : new Map();
     if (qualifier !== undefined) return byKey.get(qualifier) ?? [];
     return byKey;
@@ -480,21 +489,22 @@ export class MetadataManager {
   ofField<T>(
     factory: FieldDecoratorFactory<T>,
   ): Map<AnyConstructor, Map<Qualifier, readonly FieldDecoratedEntry<T>[]>>;
-  ofField<T, R>(
+  ofField<T, R extends object>(
     factory: FieldDecoratorFactory<T>,
-    target: AnyConstructor<R>,
+    target: AnyConstructor<R> | R,
   ): Map<Qualifier, readonly FieldDecoratedEntry<T, R>[]>;
-  ofField<T, R>(
+  ofField<T, R extends object>(
     factory: FieldDecoratorFactory<T>,
-    target: AnyConstructor<R>,
+    target: AnyConstructor<R> | R,
     qualifier: Qualifier,
   ): readonly FieldDecoratedEntry<T, R>[];
-  ofField(factory: Function, target?: Function, qualifier?: Qualifier): any {
-    if (target) this.#ensureFlushed(target);
+  ofField(factory: Function, target?: any, qualifier?: Qualifier): any {
+    const ctor = this.#resolve(target);
+    if (ctor) this.#ensureFlushed(ctor);
     const byTarget = this.#fieldStore.get(factory);
-    if (!byTarget) return target ? (qualifier !== undefined ? [] : new Map()) : new Map();
-    if (!target) return byTarget;
-    const byKey = byTarget.get(target);
+    if (!byTarget) return ctor ? (qualifier !== undefined ? [] : new Map()) : new Map();
+    if (!ctor) return byTarget;
+    const byKey = byTarget.get(ctor);
     if (!byKey) return qualifier !== undefined ? [] : new Map();
     if (qualifier !== undefined) return byKey.get(qualifier) ?? [];
     return byKey;
