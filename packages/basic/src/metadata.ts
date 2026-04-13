@@ -122,7 +122,36 @@ function isTC39MemberContext(
 // MetadataManager
 // ---------------------------------------------------------------------------
 
+/**
+ * Storage and query engine for decorator metadata.
+ *
+ * All decorators created via `createClassDecorator`, `createMethodDecorator`,
+ * `createFieldDecorator`, or `createDecorator` store typed metadata that can
+ * be queried through this class's `ofClass`/`ofMethod`/`ofField` methods.
+ *
+ * The decorator factory function itself serves as the metadata key.
+ *
+ * Supports both TC39 and legacy TypeScript decorator protocols. TC39 method/field
+ * decorators store pending entries (since the class constructor isn't available at
+ * decoration time), which are flushed when a class decorator runs or when a query
+ * method is called.
+ *
+ * @example
+ * ```ts
+ * const Metadata = new MetadataManager();
+ *
+ * function Tag(tag: string) {
+ *   return Metadata.createClassDecorator(Tag, { tag });
+ * }
+ *
+ * @Tag('hello')
+ * class Foo {}
+ *
+ * Metadata.ofClass(Tag, Foo); // [{ kind: 'class', target: Foo, metadata: { tag: 'hello' }, ... }]
+ * ```
+ */
 export class MetadataManager {
+  /** Class-level storage: factory → Map<constructor, entries[]> */
   readonly #classStore = new Map<Function, Map<Function, ClassDecoratedEntry<any>[]>>();
   readonly #methodStore = new Map<
     Function,
@@ -138,6 +167,7 @@ export class MetadataManager {
   // Internal storage
   // -----------------------------------------------------------------------
 
+  /** Store a class decorator entry. Also indexes the class as a subclass of its ancestors. */
   #pushClass(factory: Function, target: Function, entry: ClassDecoratedEntry<any>): void {
     let byTarget = this.#classStore.get(factory);
     if (!byTarget) {
@@ -153,6 +183,7 @@ export class MetadataManager {
     this.#indexSubclass(factory, target);
   }
 
+  /** Store a method decorator entry. */
   #pushMethod(
     factory: Function,
     target: Function,
@@ -177,6 +208,7 @@ export class MetadataManager {
     items.push(entry);
   }
 
+  /** Store a field decorator entry. */
   #pushField(
     factory: Function,
     target: Function,
@@ -201,6 +233,7 @@ export class MetadataManager {
     items.push(entry);
   }
 
+  /** Walk the prototype chain and register target as a subclass of each ancestor under factory. */
   #indexSubclass(factory: Function, target: Function): void {
     let current = Object.getPrototypeOf(target.prototype);
     while (current && current !== Object.prototype) {
@@ -224,6 +257,7 @@ export class MetadataManager {
   // TC39 pending flush
   // -----------------------------------------------------------------------
 
+  /** Store a pending TC39 method/field entry in context.metadata for later flush. */
   #storePending(meta: DecoratorMetadata, entry: PendingEntry): void {
     const obj = meta as any;
     let pending = obj[PENDING] as PendingEntry[] | undefined;
@@ -234,6 +268,7 @@ export class MetadataManager {
     pending.push(entry);
   }
 
+  /** Flush all pending TC39 entries from context.metadata into the stores. Called when the class constructor becomes available. */
   #flushPending(meta: DecoratorMetadata, target: Function): void {
     const obj = meta as any;
     const pending = obj[PENDING] as PendingEntry[] | undefined;
@@ -270,6 +305,7 @@ export class MetadataManager {
     return target.constructor;
   }
 
+  /** Ensure any pending TC39 entries for target are flushed. Checks Symbol.metadata. */
   #ensureFlushed(target: Function): void {
     const meta = (target as any)[Symbol.metadata] as DecoratorMetadata | undefined;
     if (meta && !(meta as Record<symbol, unknown>)[FLUSHED]) {
@@ -281,6 +317,7 @@ export class MetadataManager {
   // Compose options processing
   // -----------------------------------------------------------------------
 
+  /** Apply all compose options: self, classes, methods, fields, other*, aspect. */
   #applyCompose(
     compose: ComposeOptions<any, any>,
     target: Function,
@@ -317,6 +354,25 @@ export class MetadataManager {
   // createDecorator
   // -----------------------------------------------------------------------
 
+  /**
+   * Create a decorator that works for the specified kinds (class/method/field).
+   *
+   * The returned decorator handles both TC39 and legacy protocols automatically.
+   * When applied, it stores a {@link DecoratedEntry} keyed by `factory`.
+   *
+   * @param kinds - Which kinds this decorator supports. Throws if applied to an unsupported kind.
+   * @param factory - The decorator factory function. Serves as the metadata key for queries.
+   * @param metadata - The typed metadata to store.
+   * @param extra - Additional decorators to compose. See {@link ComposeOptions}.
+   * @returns A decorator function with a readonly `metadata` static property.
+   *
+   * @example
+   * ```ts
+   * function Tag(tag: string) {
+   *   return Metadata.createDecorator(['class'], Tag, { tag });
+   * }
+   * ```
+   */
   createDecorator<T, Kind extends keyof DecoratorMap<T>>(
     kinds: readonly Kind[],
     factory: AnyDecoratorFactory<T, Kind>,
@@ -418,6 +474,13 @@ export class MetadataManager {
   // Convenience wrappers
   // -----------------------------------------------------------------------
 
+  /**
+   * Create a class decorator. Shorthand for `createDecorator(['class'], ...)`.
+   *
+   * @param factory - The decorator factory. Serves as the metadata key.
+   * @param metadata - Typed metadata to store.
+   * @param extra - Additional decorators to compose. See {@link ComposeOptions}.
+   */
   createClassDecorator<T>(
     factory: ClassDecoratorFactory<T>,
     metadata: T,
@@ -426,6 +489,13 @@ export class MetadataManager {
     return this.createDecorator(['class'], factory, metadata, extra);
   }
 
+  /**
+   * Create a method decorator. Shorthand for `createDecorator(['method'], ...)`.
+   *
+   * @param factory - The decorator factory. Serves as the metadata key.
+   * @param metadata - Typed metadata to store.
+   * @param extra - Additional decorators to compose. See {@link ComposeOptions}.
+   */
   createMethodDecorator<T>(
     factory: MethodDecoratorFactory<T>,
     metadata: T,
@@ -434,6 +504,13 @@ export class MetadataManager {
     return this.createDecorator(['method'], factory, metadata, extra);
   }
 
+  /**
+   * Create a field decorator. Shorthand for `createDecorator(['field'], ...)`.
+   *
+   * @param factory - The decorator factory. Serves as the metadata key.
+   * @param metadata - Typed metadata to store.
+   * @param extra - Additional decorators to compose. See {@link ComposeOptions}.
+   */
   createFieldDecorator<T>(
     factory: FieldDecoratorFactory<T>,
     metadata: T,
@@ -446,6 +523,19 @@ export class MetadataManager {
   // Query API — all O(1) via Map lookups
   // -----------------------------------------------------------------------
 
+  /**
+   * Query class decorator entries.
+   *
+   * - `ofClass(factory)` — returns all classes decorated by this factory: `Map<AnyConstructor, entries[]>`
+   * - `ofClass(factory, target)` — returns entries for a specific class (or instance): `entries[]`
+   *
+   * @example
+   * ```ts
+   * Metadata.ofClass(Tag);           // Map of all @Tag-decorated classes
+   * Metadata.ofClass(Tag, Foo);      // entries for Foo
+   * Metadata.ofClass(Tag, fooInst);  // entries for fooInst's class
+   * ```
+   */
   ofClass<T>(
     factory: ClassDecoratorFactory<T>,
   ): Map<AnyConstructor, readonly ClassDecoratedEntry<T>[]>;
@@ -462,6 +552,18 @@ export class MetadataManager {
     return byTarget;
   }
 
+  /**
+   * Query method decorator entries.
+   *
+   * - `ofMethod(factory)` — all classes + methods: `Map<AnyConstructor, Map<Qualifier, entries[]>>`
+   * - `ofMethod(factory, target)` — methods on a class (or instance): `Map<Qualifier, entries[]>`
+   * - `ofMethod(factory, target, qualifier)` — entries for a specific method: `entries[]`
+   *
+   * @example
+   * ```ts
+   * Metadata.ofMethod(Marker, Foo, 'hello'); // entries for Foo.hello
+   * ```
+   */
   ofMethod<T>(
     factory: MethodDecoratorFactory<T>,
   ): Map<AnyConstructor, Map<Qualifier, readonly MethodDecoratedEntry<T>[]>>;
@@ -486,6 +588,18 @@ export class MetadataManager {
     return byKey;
   }
 
+  /**
+   * Query field decorator entries.
+   *
+   * - `ofField(factory)` — all classes + fields: `Map<AnyConstructor, Map<Qualifier, entries[]>>`
+   * - `ofField(factory, target)` — fields on a class (or instance): `Map<Qualifier, entries[]>`
+   * - `ofField(factory, target, qualifier)` — entries for a specific field: `entries[]`
+   *
+   * @example
+   * ```ts
+   * Metadata.ofField(FieldType, Foo, 'name'); // entries for Foo.name
+   * ```
+   */
   ofField<T>(
     factory: FieldDecoratorFactory<T>,
   ): Map<AnyConstructor, Map<Qualifier, readonly FieldDecoratedEntry<T>[]>>;
@@ -510,7 +624,21 @@ export class MetadataManager {
     return byKey;
   }
 
-  /** Find all decorated subclasses of superTarget for a given factory. O(1). */
+  /**
+   * Find all decorated subclasses of `superTarget` for a given class decorator factory.
+   * O(1) lookup — the index is built when decorators are applied.
+   *
+   * @param factory - The class decorator factory to filter by.
+   * @param superTarget - The ancestor class to search subclasses of.
+   * @returns Array of decorated subclass constructors.
+   *
+   * @example
+   * ```ts
+   * class Base {}
+   * @Component() class Child extends Base {}
+   * Metadata.subclassesOf(Component, Base); // [Child]
+   * ```
+   */
   subclassesOf<T, R>(
     factory: ClassDecoratorFactory<T>,
     superTarget: AnyConstructor<R>,
