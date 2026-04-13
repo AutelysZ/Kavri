@@ -112,7 +112,10 @@ function isTC39MemberContext(
 ): arg is ClassMethodDecoratorContext | ClassFieldDecoratorContext {
   if (typeof arg !== 'object' || arg === null) return false;
   const kind = (arg as any).kind;
-  return kind === 'method' || kind === 'field' || kind === 'getter' || kind === 'setter';
+  if (kind === 'getter' || kind === 'setter') {
+    throw new Error(`Decorators on ${kind}s are not supported`);
+  }
+  return kind === 'method' || kind === 'field';
 }
 
 // ---------------------------------------------------------------------------
