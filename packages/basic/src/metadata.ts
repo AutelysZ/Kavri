@@ -18,44 +18,68 @@ import type {
 // Decorated entries — query results
 // ---------------------------------------------------------------------------
 
-/** Base shape for all decorated entry query results. */
+/**
+ * Base shape for all decorated entry query results.
+ */
 export interface DecoratedEntryBase<T, R = any> {
-  /** The decorator kind: 'class', 'method', or 'field'. */
+  /**
+   * The decorator kind: 'class', 'method', or 'field'.
+   */
   kind: string;
-  /** The class constructor the decorator was applied to. */
+  /**
+   * The class constructor the decorator was applied to.
+   */
   target: AnyConstructor<R>;
-  /** The factory function that created this decorator. */
+  /**
+   * The factory function that created this decorator.
+   */
   factory: AnyDecoratorFactory<T>;
-  /** The metadata value stored by the decorator. */
+  /**
+   * The metadata value stored by the decorator.
+   */
   metadata: T;
 }
 
-/** Entry for a class decorator application. */
+/**
+ * Entry for a class decorator application.
+ */
 export interface ClassDecoratedEntry<T, R = any> extends DecoratedEntryBase<T, R> {
   kind: 'class';
 }
 
-/** Entry for a method decorator application. */
+/**
+ * Entry for a method decorator application.
+ */
 export interface MethodDecoratedEntry<T, R = any> extends DecoratedEntryBase<T, R> {
   kind: 'method';
-  /** The method name the decorator was applied to. */
+  /**
+   * The method name the decorator was applied to.
+   */
   method: keyof R;
 }
 
-/** Entry for a field decorator application. */
+/**
+ * Entry for a field decorator application.
+ */
 export interface FieldDecoratedEntry<T, R = any> extends DecoratedEntryBase<T, R> {
   kind: 'field';
-  /** The field name the decorator was applied to. */
+  /**
+   * The field name the decorator was applied to.
+   */
   field: keyof R;
 }
 
-/** Union of all decorated entry types. */
+/**
+ * Union of all decorated entry types.
+ */
 export type DecoratedEntry<T, R = any> =
   | ClassDecoratedEntry<T, R>
   | MethodDecoratedEntry<T, R>
   | FieldDecoratedEntry<T, R>;
 
-/** Extract a specific entry kind from {@link DecoratedEntry}. */
+/**
+ * Extract a specific entry kind from {@link DecoratedEntry}.
+ */
 export type DecoratedEntryOf<
   T,
   R = any,
@@ -70,19 +94,33 @@ export type DecoratedEntryOf<
  * Options for composing additional decorators alongside the primary one.
  */
 export interface ComposeOptions<T, Kind extends keyof DecoratorMap<T>> {
-  /** Additional same-kind decorators to apply on the same target. */
+  /**
+   * Additional same-kind decorators to apply on the same target.
+   */
   self?: readonly AnyDecorator<unknown, Kind>[];
-  /** Class decorators to apply on the same class. */
+  /**
+   * Class decorators to apply on the same class.
+   */
   classes?: readonly ClassDecorator<unknown>[];
-  /** Method decorators to apply on the same class: `[methodName, decorator]`. */
+  /**
+   * Method decorators to apply on the same class: `[methodName, decorator]`.
+   */
   methods?: readonly [Qualifier, MethodDecorator<unknown>][];
-  /** Field decorators to apply on the same class: `[fieldName, decorator]`. */
+  /**
+   * Field decorators to apply on the same class: `[fieldName, decorator]`.
+   */
   fields?: readonly [Qualifier, FieldDecorator<unknown>][];
-  /** Class decorators to apply on other classes: `[class, decorator]`. */
+  /**
+   * Class decorators to apply on other classes: `[class, decorator]`.
+   */
   otherClass?: readonly [AnyConstructor, ClassDecorator<unknown>][];
-  /** Method decorators to apply on other classes: `[class, methodName, decorator]`. */
+  /**
+   * Method decorators to apply on other classes: `[class, methodName, decorator]`.
+   */
   otherMethods?: readonly [AnyConstructor, Qualifier, MethodDecorator<unknown>][];
-  /** Field decorators to apply on other classes: `[class, fieldName, decorator]`. */
+  /**
+   * Field decorators to apply on other classes: `[class, fieldName, decorator]`.
+   */
   otherFields?: readonly [AnyConstructor, Qualifier, FieldDecorator<unknown>][];
   /**
    * Replace the original method with a wrapper (AOP).
@@ -163,7 +201,9 @@ function isTC39MemberContext(
  * ```
  */
 export class MetadataManager {
-  /** Class-level storage: factory → Map<constructor, entries[]> */
+  /**
+   * Class-level storage: factory → Map<constructor, entries[]>
+   */
   readonly #classStore = new Map<Function, Map<Function, ClassDecoratedEntry<any>[]>>();
   readonly #methodStore = new Map<
     Function,
@@ -179,7 +219,9 @@ export class MetadataManager {
   // Internal storage
   // -----------------------------------------------------------------------
 
-  /** Store a class decorator entry. Also indexes the class as a subclass of its ancestors. */
+  /**
+   * Store a class decorator entry. Also indexes the class as a subclass of its ancestors.
+   */
   #pushClass(factory: Function, target: Function, entry: ClassDecoratedEntry<any>): void {
     let byTarget = this.#classStore.get(factory);
     if (!byTarget) {
@@ -195,7 +237,9 @@ export class MetadataManager {
     this.#indexSubclass(factory, target);
   }
 
-  /** Store a method decorator entry. */
+  /**
+   * Store a method decorator entry.
+   */
   #pushMethod(
     factory: Function,
     target: Function,
@@ -220,7 +264,9 @@ export class MetadataManager {
     items.push(entry);
   }
 
-  /** Store a field decorator entry. */
+  /**
+   * Store a field decorator entry.
+   */
   #pushField(
     factory: Function,
     target: Function,
@@ -245,7 +291,9 @@ export class MetadataManager {
     items.push(entry);
   }
 
-  /** Walk the prototype chain and register target as a subclass of each ancestor under factory. */
+  /**
+   * Walk the prototype chain and register target as a subclass of each ancestor under factory.
+   */
   #indexSubclass(factory: Function, target: Function): void {
     let current = Object.getPrototypeOf(target.prototype);
     while (current && current !== Object.prototype) {
@@ -269,7 +317,9 @@ export class MetadataManager {
   // TC39 pending flush
   // -----------------------------------------------------------------------
 
-  /** Store a pending TC39 method/field entry in context.metadata for later flush. */
+  /**
+   * Store a pending TC39 method/field entry in context.metadata for later flush.
+   */
   #storePending(meta: DecoratorMetadata, entry: PendingEntry): void {
     const obj = meta as any;
     let pending = obj[PENDING] as PendingEntry[] | undefined;
@@ -280,7 +330,9 @@ export class MetadataManager {
     pending.push(entry);
   }
 
-  /** Flush all pending TC39 entries from context.metadata into the stores. Called when the class constructor becomes available. */
+  /**
+   * Flush all pending TC39 entries from context.metadata into the stores. Called when the class constructor becomes available.
+   */
   #flushPending(meta: DecoratorMetadata, target: Function): void {
     const obj = meta as any;
     const pending = obj[PENDING] as PendingEntry[] | undefined;
@@ -310,14 +362,18 @@ export class MetadataManager {
     obj[FLUSHED] = true;
   }
 
-  /** Resolve target to constructor. Returns undefined if target is undefined. */
+  /**
+   * Resolve target to constructor. Returns undefined if target is undefined.
+   */
   #resolve(target: any): Function | undefined {
     if (target === undefined) return undefined;
     if (typeof target === 'function') return target;
     return target.constructor;
   }
 
-  /** Ensure any pending TC39 entries for target are flushed. Checks Symbol.metadata. */
+  /**
+   * Ensure any pending TC39 entries for target are flushed. Checks Symbol.metadata.
+   */
   #ensureFlushed(target: Function): void {
     const meta = (target as any)[Symbol.metadata] as DecoratorMetadata | undefined;
     if (meta && !(meta as Record<symbol, unknown>)[FLUSHED]) {
@@ -329,7 +385,9 @@ export class MetadataManager {
   // Compose options processing
   // -----------------------------------------------------------------------
 
-  /** Apply all compose options: self, classes, methods, fields, other*, proxyMethod, proxyClass. */
+  /**
+   * Apply all compose options: self, classes, methods, fields, other*, proxyMethod, proxyClass.
+   */
   #applyCompose(
     compose: ComposeOptions<any, any>,
     target: Function,
@@ -671,17 +729,27 @@ export class MetadataManager {
 // Global instance + bound helpers
 // ---------------------------------------------------------------------------
 
-/** The global metadata manager instance. */
+/**
+ * The global metadata manager instance.
+ */
 export const Metadata = /* @__PURE__ */ new MetadataManager();
 
-/** Create a class decorator bound to the global {@link Metadata}. */
+/**
+ * Create a class decorator bound to the global {@link Metadata}.
+ */
 export const createClassDecorator = /* @__PURE__ */ Metadata.createClassDecorator.bind(Metadata);
 
-/** Create a method decorator bound to the global {@link Metadata}. */
+/**
+ * Create a method decorator bound to the global {@link Metadata}.
+ */
 export const createMethodDecorator = /* @__PURE__ */ Metadata.createMethodDecorator.bind(Metadata);
 
-/** Create a field decorator bound to the global {@link Metadata}. */
+/**
+ * Create a field decorator bound to the global {@link Metadata}.
+ */
 export const createFieldDecorator = /* @__PURE__ */ Metadata.createFieldDecorator.bind(Metadata);
 
-/** Create a multi-kind decorator bound to the global {@link Metadata}. */
+/**
+ * Create a multi-kind decorator bound to the global {@link Metadata}.
+ */
 export const createDecorator = /* @__PURE__ */ Metadata.createDecorator.bind(Metadata);

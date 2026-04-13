@@ -27,7 +27,7 @@ Every change must include:
 
 - **Code** — production code with precise types. Minimize `any` (keep it local with a comment when unavoidable). Use `#` private fields/methods instead of the `private` keyword. Mark global/static initializers and `.bind()` calls with `/* @__PURE__ */` for tree-shaking.
 - **Tests** — target 100% coverage. Cover normal paths, error paths, edge cases, lifecycle ordering, concurrency. Justify any coverage gaps. Test behavior, not implementation details.
-- **Documentation** — all exported APIs must have detailed JSDoc with `@param`, `@returns`, `@throws`, and `@example` where applicable. Document private/internal APIs where intent, invariants, or non-obvious behavior exists. Update design docs and README if public behavior changes. Do not document unimplemented behavior as existing.
+- **Documentation** — all exported APIs must have detailed multi-line JSDoc blocks (never single-line `/** ... */`) with `@param`, `@returns`, `@throws`, and `@example` where applicable. Document private/internal APIs where intent, invariants, or non-obvious behavior exists. Update design docs and README if public behavior changes. Do not document unimplemented behavior as existing.
 
 ## Error Design
 

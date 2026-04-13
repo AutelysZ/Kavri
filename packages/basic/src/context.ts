@@ -14,17 +14,27 @@ import type { Awaitable } from './types.js';
  * ```
  */
 export class Key<T> {
-  /** Optional name for debugging/error messages. */
+  /**
+   * Optional name for debugging/error messages.
+   */
   readonly name: string | undefined;
 
-  /** Phantom field for type-level tracking. Never set at runtime. */
+  /**
+
+   * Phantom field for type-level tracking. Never set at runtime.
+
+   */
   declare readonly __type: T | undefined;
 
   private constructor(name?: string) {
     this.name = name;
   }
 
-  /** Create a typed key. */
+  /**
+
+   * Create a typed key.
+
+   */
   static of<T>(name?: string): Key<T> {
     return new Key<T>(name);
   }
@@ -44,28 +54,58 @@ export class Key<T> {
  * {@link AsyncScope}, passing this context as the state parameter.
  */
 export interface Context {
-  /** Check if a key has a value (own or inherited from parent). */
+  /**
+   * Check if a key has a value (own or inherited from parent).
+   */
   has(key: Key<unknown>): boolean;
 
-  /** Get value. Checks own Map first, then parent chain. */
+  /**
+
+   * Get value. Checks own Map first, then parent chain.
+
+   */
   get<V>(key: Key<V>): V | undefined;
 
-  /** Get value or throw if absent in the entire chain. */
+  /**
+
+   * Get value or throw if absent in the entire chain.
+
+   */
   getOrThrow<V>(key: Key<V>): V;
 
-  /** Get value if present, otherwise set and return the provided value. */
+  /**
+
+   * Get value if present, otherwise set and return the provided value.
+
+   */
   getOrInsert<V>(key: Key<V>, value: V): V;
 
-  /** Get value if present, otherwise compute, set, and return. */
+  /**
+
+   * Get value if present, otherwise compute, set, and return.
+
+   */
   getOrInsertComputed<V>(key: Key<V>, callback: (key: Key<V>) => V): V;
 
-  /** Set a value in this context's own Map. Returns `this` for chaining. */
+  /**
+
+   * Set a value in this context's own Map. Returns `this` for chaining.
+
+   */
   set<V>(key: Key<V>, value: V): this;
 
-  /** Delete a key from this context's own Map only. Parent values become visible again. */
+  /**
+
+   * Delete a key from this context's own Map only. Parent values become visible again.
+
+   */
   delete(key: Key<unknown>): boolean;
 
-  /** Whether the owning AsyncScope currently has an active ALS scope. */
+  /**
+
+   * Whether the owning AsyncScope currently has an active ALS scope.
+
+   */
   isActive(): boolean;
 
   /**
@@ -86,7 +126,11 @@ export interface Context {
    */
   enter(): void;
 
-  /** Create a child context that inherits from this one. */
+  /**
+
+   * Create a child context that inherits from this one.
+
+   */
   extend(): Context;
 }
 
@@ -223,45 +267,77 @@ export class AsyncScope {
 
   // -- Delegated state methods (require active scope) --
 
-  /** @see {@link Context.has} */
+  /**
+
+   * @see {@link Context.has}
+
+   */
   has(key: Key<unknown>): boolean {
     return this.#current().has(key);
   }
 
-  /** @see {@link Context.get} */
+  /**
+
+   * @see {@link Context.get}
+
+   */
   get<V>(key: Key<V>): V | undefined {
     return this.#current().get(key);
   }
 
-  /** @see {@link Context.getOrThrow} */
+  /**
+
+   * @see {@link Context.getOrThrow}
+
+   */
   getOrThrow<V>(key: Key<V>): V {
     return this.#current().getOrThrow(key);
   }
 
-  /** @see {@link Context.getOrInsert} */
+  /**
+
+   * @see {@link Context.getOrInsert}
+
+   */
   getOrInsert<V>(key: Key<V>, value: V): V {
     return this.#current().getOrInsert(key, value);
   }
 
-  /** @see {@link Context.getOrInsertComputed} */
+  /**
+
+   * @see {@link Context.getOrInsertComputed}
+
+   */
   getOrInsertComputed<V>(key: Key<V>, callback: (key: Key<V>) => V): V {
     return this.#current().getOrInsertComputed(key, callback);
   }
 
-  /** @see {@link Context.set} */
+  /**
+
+   * @see {@link Context.set}
+
+   */
   set<V>(key: Key<V>, value: V): this {
     this.#current().set(key, value);
     return this;
   }
 
-  /** @see {@link Context.delete} */
+  /**
+
+   * @see {@link Context.delete}
+
+   */
   delete(key: Key<unknown>): boolean {
     return this.#current().delete(key);
   }
 
   // -- Scope methods --
 
-  /** Returns `true` if an ALS scope is active. */
+  /**
+
+   * Returns `true` if an ALS scope is active.
+
+   */
   isActive(): boolean {
     return this.#als?.getStore() !== undefined;
   }
@@ -319,7 +395,11 @@ export class AsyncScope {
     als.enterWith(ctx);
   }
 
-  /** Create a detached {@link Context} without entering an ALS scope. */
+  /**
+
+   * Create a detached {@link Context} without entering an ALS scope.
+
+   */
   create(): Context {
     return new ContextImpl(this);
   }
