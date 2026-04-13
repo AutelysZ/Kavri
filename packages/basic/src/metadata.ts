@@ -311,13 +311,14 @@ export class MetadataManager {
   // -----------------------------------------------------------------------
 
   createDecorator<T, Kind extends keyof DecoratorMap<T>>(
-    _kinds: readonly Kind[],
+    kinds: readonly Kind[],
     factory: AnyDecoratorFactory<T, Kind>,
     metadata: T,
     extra?: ComposeOptions<T, Kind>,
   ): AnyDecorator<T, Kind> {
     // eslint-disable-next-line @typescript-eslint/no-this-alias
     const mgr = this;
+    const allowed = new Set<string>(kinds);
 
     const decorator = function (
       target: any,
@@ -325,6 +326,9 @@ export class MetadataManager {
       descriptor?: PropertyDescriptor,
     ): any {
       if (isTC39ClassContext(contextOrKey)) {
+        if (!allowed.has('class')) {
+          throw new Error(`Decorator cannot be applied to a class`);
+        }
         // TC39 class
         mgr.#pushClass(factory as Function, target, {
           kind: 'class',
@@ -338,6 +342,9 @@ export class MetadataManager {
         // TC39 method/field
         const key = contextOrKey.name as Qualifier;
         const kind = contextOrKey.kind === 'field' ? 'field' : 'method';
+        if (!allowed.has(kind)) {
+          throw new Error(`Decorator cannot be applied to a ${kind}`);
+        }
         mgr.#storePending(contextOrKey.metadata, {
           factory: factory as Function,
           key,
@@ -349,6 +356,9 @@ export class MetadataManager {
           return (extra as any).aspect(target);
         }
       } else if (contextOrKey === undefined) {
+        if (!allowed.has('class')) {
+          throw new Error(`Decorator cannot be applied to a class`);
+        }
         // Legacy class
         mgr.#pushClass(factory as Function, target, {
           kind: 'class',
@@ -365,6 +375,9 @@ export class MetadataManager {
           throw new Error('Decorators on getters/setters are not supported');
         }
         const kind = descriptor ? 'method' : 'field';
+        if (!allowed.has(kind)) {
+          throw new Error(`Decorator cannot be applied to a ${kind}`);
+        }
         if (kind === 'method') {
           mgr.#pushMethod(factory as Function, ctor, key, {
             kind: 'method',
