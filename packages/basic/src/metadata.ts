@@ -361,6 +361,9 @@ export class MetadataManager {
         // Legacy method/field
         const key = contextOrKey as Qualifier;
         const ctor = typeof target === 'function' ? target : target.constructor;
+        if (descriptor && !('value' in descriptor)) {
+          throw new Error('Decorators on getters/setters are not supported');
+        }
         const kind = descriptor ? 'method' : 'field';
         if (kind === 'method') {
           mgr.#pushMethod(factory as Function, ctor, key, {
