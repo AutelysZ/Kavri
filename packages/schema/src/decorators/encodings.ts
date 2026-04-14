@@ -190,13 +190,14 @@ export const IsBase32: ((
 ) => SchemaFieldDecorator<IsBase32Options>) &
   SchemaFieldDecoratorFactoryStatic<IsBase32Options> = (() => {
   const factory = createSchemaFieldDecoratorFactory<any>(
+    'IsBase32',
     (options?: IsBase32Options, schema?: StringSchema): any => {
       return SchemaField(factory, { ...(options ?? {}), ...(schema ?? {}) } as any, undefined, [
         IsString(schema),
       ]);
     },
     {
-      rule: 'IsBase32',
+      message: '.label must be a valid base32 string',
       validate: (p: IsBase32Options, v: unknown) =>
         typeof v !== 'string' || isBase32Fn(v, { crockford: p.variant === 'crockford' }),
       parse: (p: IsBase32Options, v: unknown) => {
@@ -231,13 +232,14 @@ export const IsBase58: ((
 ) => SchemaFieldDecorator<IsBase58Options>) &
   SchemaFieldDecoratorFactoryStatic<IsBase58Options> = (() => {
   const factory = createSchemaFieldDecoratorFactory<any>(
+    'IsBase58',
     (options?: IsBase58Options, schema?: StringSchema): any => {
       return SchemaField(factory, { ...(options ?? {}), ...(schema ?? {}) } as any, undefined, [
         IsString(schema),
       ]);
     },
     {
-      rule: 'IsBase58',
+      message: '.label must be a valid base58 string',
       validate: (_: IsBase58Options, v: unknown) => typeof v !== 'string' || isBase58Fn(v),
       parse: (p: IsBase58Options, v: unknown) => {
         if (!p.transform || typeof v !== 'string') return v;
@@ -275,13 +277,14 @@ export const IsBase64: ((
 ) => SchemaFieldDecorator<IsBase64Options>) &
   SchemaFieldDecoratorFactoryStatic<IsBase64Options> = (() => {
   const factory = createSchemaFieldDecoratorFactory<any>(
+    'IsBase64',
     (options?: IsBase64Options, schema?: StringSchema): any => {
       return SchemaField(factory, { ...(options ?? {}), ...(schema ?? {}) } as any, undefined, [
         IsString(schema),
       ]);
     },
     {
-      rule: 'IsBase64',
+      message: '.label must be a valid base64 string',
       validate: (p: IsBase64Options, v: unknown) =>
         typeof v !== 'string' || isBase64Fn(v, { urlSafe: p.urlSafe ?? true }),
       parse: (p: IsBase64Options, v: unknown) => {
@@ -321,13 +324,14 @@ export const IsJSON: ((
 ) => SchemaFieldDecorator<IsJSONOptions>) &
   SchemaFieldDecoratorFactoryStatic<IsJSONOptions> = (() => {
   const factory = createSchemaFieldDecoratorFactory<any>(
+    'IsJSON',
     (options?: IsJSONOptions, schema?: StringSchema): any => {
       return SchemaField(factory, { ...(options ?? {}), ...(schema ?? {}) } as any, undefined, [
         IsString(schema),
       ]);
     },
     {
-      rule: 'IsJSON',
+      message: '.label must be valid JSON',
       validate: (_: IsJSONOptions, v: unknown) => typeof v !== 'string' || isJSONFn(v),
       parse: (p: IsJSONOptions, v: unknown) => {
         if (!(p.transform ?? true) || typeof v !== 'string') return v;

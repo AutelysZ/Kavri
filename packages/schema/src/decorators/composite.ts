@@ -8,7 +8,7 @@ import type {
   AnyOfSchema,
   ArraySchema,
   BaseSchema,
-  InferredSchema,
+  NestedFieldSchema,
   ObjectSchema,
   OneOfSchema,
   SchemaFieldDecorator,
@@ -26,7 +26,7 @@ function arrayConstraints<T>(schema?: ArraySchema<T>): SchemaFieldDecorator[] {
   const children: SchemaFieldDecorator[] = [];
   if (schema?.minItems !== undefined) children.push(MinItems(schema.minItems));
   if (schema?.maxItems !== undefined) children.push(MaxItems(schema.maxItems));
-  if (schema?.uniqueItems !== undefined) children.push(UniqueItems(schema.uniqueItems));
+  if (schema?.uniqueItems) children.push(UniqueItems());
   return children;
 }
 
@@ -43,20 +43,17 @@ function objectConstraints(schema?: ObjectSchema<any>): SchemaFieldDecorator[] {
 
 /** Array field. `items` specifies the element type decorator. */
 export const IsArray = createSchemaFieldDecoratorFactory(
-  <T>(
-    items: SchemaFieldDecorator,
-    schema?: ArraySchema<T>,
-  ): SchemaFieldDecorator<ArraySchema<T>> => {
-    return SchemaField(
-      IsArray,
-      { ...(schema ?? {}), items } as ArraySchema<T>,
-      arrayConstraints(schema),
-    ) as any;
+  'IsArray',
+  <T>(items: NestedFieldSchema, schema?: ArraySchema<T>): SchemaFieldDecorator<ArraySchema<T>> => {
+    return SchemaField<ArraySchema<T>>(IsArray, { items, ...schema }, arrayConstraints(schema));
   },
   {
-    rule: 'IsArray',
+    message: '.label is not an array.',
     validate: (_, v) => Array.isArray(v),
     toJsonSchema: () => ({ type: 'array' }),
+    fromJsonSchema: () => {
+      // todo
+    },
   },
 );
 
@@ -66,6 +63,7 @@ export const IsArray = createSchemaFieldDecoratorFactory(
 
 /** Object field with typed properties. */
 export const IsObject = createSchemaFieldDecoratorFactory(
+  'IsObject',
   <T extends object>(
     properties: { [K in keyof T]?: SchemaFieldDecorator },
     schema?: ObjectSchema<T>,
@@ -77,7 +75,7 @@ export const IsObject = createSchemaFieldDecoratorFactory(
     ) as any;
   },
   {
-    rule: 'IsObject',
+    message: '.label must be an object',
     validate: (_, v) => typeof v === 'object' && v !== null && !Array.isArray(v),
     toJsonSchema: () => ({ type: 'object' }),
   },
@@ -89,6 +87,7 @@ export const IsObject = createSchemaFieldDecoratorFactory(
 
 /** Record<string, V> field. `value` specifies the value type decorator. */
 export const IsRecord = createSchemaFieldDecoratorFactory(
+  'IsRecord',
   <V>(
     value: SchemaFieldDecorator,
     schema?: ObjectSchema<Record<string, V>>,
@@ -103,7 +102,7 @@ export const IsRecord = createSchemaFieldDecoratorFactory(
     ) as any;
   },
   {
-    rule: 'IsRecord',
+    message: '.label must be an object',
     validate: (_, v) => typeof v === 'object' && v !== null && !Array.isArray(v),
     toJsonSchema: () => ({ type: 'object' }),
   },
@@ -115,6 +114,7 @@ export const IsRecord = createSchemaFieldDecoratorFactory(
 
 /** Reference to a @Schema class. Always lazy (factory function) to handle circular refs. */
 export const Ref = createSchemaFieldDecoratorFactory(
+  'Ref',
   <T extends object>(
     ref: () => AnyConstructor<T>,
     schema?: ObjectSchema<T>,
@@ -124,7 +124,7 @@ export const Ref = createSchemaFieldDecoratorFactory(
     >) as any;
   },
   {
-    rule: 'Ref',
+    message: '.label must be an object',
     validate: (_, v) => typeof v === 'object' && v !== null,
     // toJsonSchema generates $ref at schema generation time (handled by toJsonSchema utility)
   },
@@ -136,6 +136,7 @@ export const Ref = createSchemaFieldDecoratorFactory(
 
 /** Union type: value must match at least one of the given schemas. */
 export const AnyOf = createSchemaFieldDecoratorFactory(
+  'AnyOf',
   <T>(
     anyOf: SchemaFieldDecorator[],
     schema?: BaseSchema<T>,
@@ -143,30 +144,32 @@ export const AnyOf = createSchemaFieldDecoratorFactory(
     return SchemaField(AnyOf, { ...(schema ?? {}), anyOf } as AnyOfSchema<T>) as any;
   },
   {
-    rule: 'AnyOf',
+    message: '.label does not match any of the allowed types',
   },
 );
 
 /** Exactly-one match: value must match exactly one of the given schemas. */
 export const OneOf = createSchemaFieldDecoratorFactory(
+  'OneOf',
   <T>(
     oneOf: SchemaFieldDecorator[],
     schema?: BaseSchema<T>,
   ): SchemaFieldDecorator<OneOfSchema<T>> => {
     return SchemaField(OneOf, { ...(schema ?? {}), oneOf } as OneOfSchema<T>) as any;
   },
-  { rule: 'OneOf' },
+  { message: '.label must match exactly one of the allowed types' },
 );
 
 /** Intersection: value must match all of the given schemas. */
 export const AllOf = createSchemaFieldDecoratorFactory(
+  'AllOf',
   <T>(
     allOf: SchemaFieldDecorator[],
     schema?: BaseSchema<T>,
   ): SchemaFieldDecorator<AllOfSchema<T>> => {
     return SchemaField(AllOf, { ...(schema ?? {}), allOf } as AllOfSchema<T>) as any;
   },
-  { rule: 'AllOf' },
+  { message: '.label does not match all required types' },
 );
 
 // ---------------------------------------------------------------------------
@@ -175,15 +178,15 @@ export const AllOf = createSchemaFieldDecoratorFactory(
 
 /** Enum field. Accepts a TypeScript enum object. */
 export const IsEnum = createSchemaFieldDecoratorFactory(
+  'IsEnum',
   <K extends string, V extends string | number, E extends Record<K, V>>(
     host: ValidateField<E>,
-    schema?: InferredSchema<V>,
   ): SchemaFieldDecorator<ValidateSchema<E>> => {
     const s = toValidateSchema(host);
-    return SchemaField(IsEnum, s as ValidateSchema<E>, schema?.decorators) as any;
+    return SchemaField(IsEnum, s as ValidateSchema<E>) as any;
   },
   {
-    rule: 'IsEnum',
+    message: '.label must be one of the allowed enum values',
     validate: (p, v) => Object.values(p.value).includes(v as string | number),
     toJsonSchema: (p) => ({ enum: Object.values(p.value) }),
   },
@@ -191,18 +194,14 @@ export const IsEnum = createSchemaFieldDecoratorFactory(
 
 /** Value must be one of the given values. */
 export const IsIn = createSchemaFieldDecoratorFactory(
+  'IsIn',
   <V extends readonly (string | number)[]>(
     values: ValidateField<V>,
-    schema?: InferredSchema<V[number]>,
   ): SchemaFieldDecorator<ValidateSchema<V>> => {
-    return SchemaField(
-      IsIn,
-      toValidateSchema(values) as ValidateSchema<V>,
-      schema?.decorators,
-    ) as any;
+    return SchemaField(IsIn, toValidateSchema(values) as ValidateSchema<V>) as any;
   },
   {
-    rule: 'IsIn',
+    message: '.label must be one of the allowed values',
     validate: (p, v) => (p.value as readonly (string | number)[]).includes(v as string | number),
     toJsonSchema: (p) => ({ enum: [...p.value] }),
   },
@@ -210,14 +209,12 @@ export const IsIn = createSchemaFieldDecoratorFactory(
 
 /** Value must be exactly the given constant. */
 export const IsConst = createSchemaFieldDecoratorFactory(
-  <V>(
-    value: ValidateField<V>,
-    schema?: InferredSchema<V>,
-  ): SchemaFieldDecorator<ValidateSchema<V>> => {
-    return SchemaField(IsConst, toValidateSchema(value), schema?.decorators) as any;
+  'IsConst',
+  <V>(value: ValidateField<V>): SchemaFieldDecorator<ValidateSchema<V>> => {
+    return SchemaField(IsConst, toValidateSchema(value)) as any;
   },
   {
-    rule: 'IsConst',
+    message: '.label must be .value',
     validate: (p, v) => v === p.value,
     toJsonSchema: (p) => ({ const: p.value }),
   },

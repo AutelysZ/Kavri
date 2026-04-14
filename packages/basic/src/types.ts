@@ -23,7 +23,9 @@ export type AnyConstructor<T = any> = abstract new (...args: any[]) => T;
  * Allows reading the metadata without applying the decorator:
  * `const meta = MyDecorator('arg').metadata;`
  */
-export type DecoratorStatic<T> = { readonly metadata: T };
+export interface DecoratorStatic<T> {
+  readonly metadata: T;
+}
 
 /**
  * A class decorator that supports both TC39 (stage 3) and legacy

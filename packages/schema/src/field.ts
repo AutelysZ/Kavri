@@ -1,13 +1,14 @@
 import type { AnyConstructor, FieldDecoratorFactory, Qualifier } from '@kavri/basic';
 import { createFieldDecorator, Metadata } from '@kavri/basic';
-import type {
-  SchemaFieldDecorator,
-  SchemaFieldDecoratorFactory,
-  SchemaFieldDecoratorFactoryStatic,
-  SchemaFieldDecoratorMetadata,
-  ValidateField,
-  ValidateOptions,
-  ValidateSchema,
+import {
+  type SchemaFieldDecorator,
+  type SchemaFieldDecoratorFactory,
+  type SchemaFieldDecoratorFactoryStatic,
+  type SchemaFieldDecoratorMetadata,
+  schemaFieldDecoratorName,
+  type ValidateField,
+  type ValidateOptions,
+  type ValidateSchema,
 } from './types.js';
 
 /**
@@ -35,6 +36,7 @@ export function toValidateSchema<T>(input: ValidateField<T>): ValidateSchema<T> 
  * The factory function defines how the decorator is called (e.g., `MinLength(3)`).
  * The statics define how the schema pipeline processes it (validate, parse, serialize, toJsonSchema).
  *
+ * @param name    - The decorator name
  * @param factory - The decorator factory function body. May self-reference via its name.
  * @param statics - Static methods for the schema pipeline.
  * @returns The factory function with statics attached.
@@ -55,10 +57,11 @@ export function toValidateSchema<T>(input: ValidateField<T>): ValidateSchema<T> 
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function createSchemaFieldDecoratorFactory<P = any, F extends (...args: any[]) => any = any>(
+  name: string,
   factory: F,
-  statics: SchemaFieldDecoratorFactoryStatic<P>,
+  statics: Omit<SchemaFieldDecoratorFactoryStatic<P>, typeof schemaFieldDecoratorName>,
 ): F & SchemaFieldDecoratorFactoryStatic<P> {
-  return Object.assign(factory, statics);
+  return Object.assign(factory, statics, { [schemaFieldDecoratorName]: name });
 }
 
 /**
@@ -77,16 +80,12 @@ export function SchemaField<P extends ValidateOptions>(
   children?: SchemaFieldDecorator[],
   deps?: SchemaFieldDecorator[],
 ): SchemaFieldDecorator<P> {
-  const allChildren = [
-    ...((params as { decorators?: SchemaFieldDecorator[] }).decorators ?? []),
-    ...(children ?? []),
-  ];
   const metadata: SchemaFieldDecoratorMetadata<P> = {
-    rule: factory.rule,
+    rule: factory[schemaFieldDecoratorName],
     factory,
     params,
     deps: deps ?? [],
-    children: allChildren,
+    children: children ?? [],
   };
   // Use SchemaField itself as the factory key for ALL schema field decorators.
   // This means Metadata.of(SchemaField, cls, key) returns metadata for any schema

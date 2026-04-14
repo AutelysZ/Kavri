@@ -175,30 +175,10 @@ function isTC39MemberContext(
 /**
  * Storage and query engine for decorator metadata.
  *
- * All decorators created via `createClassDecorator`, `createMethodDecorator`,
- * `createFieldDecorator`, or `createDecorator` store typed metadata that can
- * be queried through this class's `ofClass`/`ofMethod`/`ofField` methods.
- *
- * The decorator factory function itself serves as the metadata key.
- *
- * Supports both TC39 and legacy TypeScript decorator protocols. TC39 method/field
- * decorators store pending entries (since the class constructor isn't available at
- * decoration time), which are flushed when a class decorator runs or when a query
- * method is called.
- *
- * @example
- * ```ts
- * const Metadata = new MetadataManager();
- *
- * function Tag(tag: string) {
- *   return Metadata.createClassDecorator(Tag, { tag });
- * }
- *
- * @Tag('hello')
- * class Foo {}
- *
- * Metadata.ofClass(Tag, Foo); // [{ kind: 'class', target: Foo, metadata: { tag: 'hello' }, ... }]
- * ```
+ * Use the global {@link Metadata} instance and the bound helpers
+ * ({@link createClassDecorator}, {@link createMethodDecorator},
+ * {@link createFieldDecorator}, {@link createDecorator}) instead
+ * of instantiating this class directly.
  */
 export class MetadataManager {
   /**
@@ -425,23 +405,7 @@ export class MetadataManager {
   // -----------------------------------------------------------------------
 
   /**
-   * Create a decorator that works for the specified kinds (class/method/field).
-   *
-   * The returned decorator handles both TC39 and legacy protocols automatically.
-   * When applied, it stores a {@link DecoratedEntry} keyed by `factory`.
-   *
-   * @param kinds - Which kinds this decorator supports. Throws if applied to an unsupported kind.
-   * @param factory - The decorator factory function. Serves as the metadata key for queries.
-   * @param metadata - The typed metadata to store.
-   * @param extra - Additional decorators to compose. See {@link ComposeOptions}.
-   * @returns A decorator function with a readonly `metadata` static property.
-   *
-   * @example
-   * ```ts
-   * function Tag(tag: string) {
-   *   return Metadata.createDecorator(['class'], Tag, { tag });
-   * }
-   * ```
+   * @see {@link createDecorator}
    */
   createDecorator<T, Kind extends keyof DecoratorMap<T>>(
     kinds: readonly Kind[],
@@ -551,11 +515,7 @@ export class MetadataManager {
   // -----------------------------------------------------------------------
 
   /**
-   * Create a class decorator. Shorthand for `createDecorator(['class'], ...)`.
-   *
-   * @param factory - The decorator factory. Serves as the metadata key.
-   * @param metadata - Typed metadata to store.
-   * @param extra - Additional decorators to compose. See {@link ComposeOptions}.
+   * @see {@link createClassDecorator}
    */
   createClassDecorator<T>(
     factory: ClassDecoratorFactory<T>,
@@ -566,11 +526,7 @@ export class MetadataManager {
   }
 
   /**
-   * Create a method decorator. Shorthand for `createDecorator(['method'], ...)`.
-   *
-   * @param factory - The decorator factory. Serves as the metadata key.
-   * @param metadata - Typed metadata to store.
-   * @param extra - Additional decorators to compose. See {@link ComposeOptions}.
+   * @see {@link createMethodDecorator}
    */
   createMethodDecorator<T>(
     factory: MethodDecoratorFactory<T>,
@@ -581,11 +537,7 @@ export class MetadataManager {
   }
 
   /**
-   * Create a field decorator. Shorthand for `createDecorator(['field'], ...)`.
-   *
-   * @param factory - The decorator factory. Serves as the metadata key.
-   * @param metadata - Typed metadata to store.
-   * @param extra - Additional decorators to compose. See {@link ComposeOptions}.
+   * @see {@link createFieldDecorator}
    */
   createFieldDecorator<T>(
     factory: FieldDecoratorFactory<T>,
@@ -730,26 +682,135 @@ export class MetadataManager {
 // ---------------------------------------------------------------------------
 
 /**
- * The global metadata manager instance.
+ * The global {@link MetadataManager} instance.
+ *
+ * All decorator metadata in the application is stored and queried through
+ * this singleton. Use `Metadata.ofClass()`, `Metadata.ofMethod()`, and
+ * `Metadata.ofField()` to query decorated entries.
+ *
+ * For most use cases, use the global helpers (`createClassDecorator`, etc.)
+ * instead of calling `Metadata.createClassDecorator()` directly — they are
+ * equivalent but shorter.
+ *
+ * @example
+ * ```ts
+ * // Query all classes decorated with @Tag
+ * const all = Metadata.ofClass(Tag);
+ *
+ * // Query entries for a specific class
+ * const entries = Metadata.ofClass(Tag, Foo);
+ * ```
  */
 export const Metadata = /* @__PURE__ */ new MetadataManager();
 
 /**
- * Create a class decorator bound to the global {@link Metadata}.
+ * Create a class decorator that stores typed metadata in the global
+ * {@link Metadata} store.
+ *
+ * The returned decorator supports both TC39 and legacy protocols.
+ * The `factory` function serves as the metadata key for later queries
+ * via `Metadata.ofClass(factory, target)`.
+ *
+ * @param factory - The decorator factory function. Serves as the metadata key.
+ * @param metadata - The typed metadata value to store when the decorator is applied.
+ * @param extra - Additional decorators and composition options. See {@link ComposeOptions}.
+ * @returns A decorator with a readonly `metadata` static property.
+ *
+ * @example
+ * ```ts
+ * function Component(name?: string) {
+ *   return createClassDecorator(Component, { name });
+ * }
+ *
+ * @Component('user-service')
+ * class UserService {}
+ *
+ * Metadata.ofClass(Component, UserService);
+ * // [{ kind: 'class', target: UserService, metadata: { name: 'user-service' }, ... }]
+ * ```
  */
 export const createClassDecorator = /* @__PURE__ */ Metadata.createClassDecorator.bind(Metadata);
 
 /**
- * Create a method decorator bound to the global {@link Metadata}.
+ * Create a method decorator that stores typed metadata in the global
+ * {@link Metadata} store.
+ *
+ * The returned decorator supports both TC39 and legacy protocols.
+ * In TC39 mode, metadata is stored as pending and flushed when a class
+ * decorator runs or when a query method is called.
+ *
+ * @param factory - The decorator factory function. Serves as the metadata key.
+ * @param metadata - The typed metadata value to store.
+ * @param extra - Additional decorators and composition options. See {@link ComposeOptions}.
+ *   Supports `proxyMethod` for AOP wrapping.
+ * @returns A decorator with a readonly `metadata` static property.
+ *
+ * @example
+ * ```ts
+ * function Log(level: string) {
+ *   return createMethodDecorator(Log, { level });
+ * }
+ *
+ * class Service {
+ *   @Log('info')
+ *   process() {}
+ * }
+ *
+ * Metadata.ofMethod(Log, Service, 'process');
+ * // [{ kind: 'method', target: Service, method: 'process', metadata: { level: 'info' }, ... }]
+ * ```
  */
 export const createMethodDecorator = /* @__PURE__ */ Metadata.createMethodDecorator.bind(Metadata);
 
 /**
- * Create a field decorator bound to the global {@link Metadata}.
+ * Create a field decorator that stores typed metadata in the global
+ * {@link Metadata} store.
+ *
+ * The returned decorator supports both TC39 and legacy protocols.
+ * In TC39 mode, metadata is stored as pending and flushed when a class
+ * decorator runs or when a query method is called.
+ *
+ * @param factory - The decorator factory function. Serves as the metadata key.
+ * @param metadata - The typed metadata value to store.
+ * @param extra - Additional decorators and composition options. See {@link ComposeOptions}.
+ * @returns A decorator with a readonly `metadata` static property.
+ *
+ * @example
+ * ```ts
+ * function Column(type: string) {
+ *   return createFieldDecorator(Column, { type });
+ * }
+ *
+ * class User {
+ *   @Column('varchar')
+ *   name!: string;
+ * }
+ *
+ * Metadata.ofField(Column, User, 'name');
+ * // [{ kind: 'field', target: User, field: 'name', metadata: { type: 'varchar' }, ... }]
+ * ```
  */
 export const createFieldDecorator = /* @__PURE__ */ Metadata.createFieldDecorator.bind(Metadata);
 
 /**
- * Create a multi-kind decorator bound to the global {@link Metadata}.
+ * Create a multi-kind decorator that supports one or more of
+ * class/method/field targets. Bound to the global {@link Metadata} store.
+ *
+ * Use this when a single decorator factory should work on multiple
+ * target kinds. The `kinds` parameter controls which are allowed —
+ * applying to an unsupported kind throws at decoration time.
+ *
+ * @param kinds - Array of allowed kinds: `['class']`, `['method', 'field']`, etc.
+ * @param factory - The decorator factory function. Serves as the metadata key.
+ * @param metadata - The typed metadata value to store.
+ * @param extra - Additional decorators and composition options. See {@link ComposeOptions}.
+ * @returns A decorator with a readonly `metadata` static property.
+ *
+ * @example
+ * ```ts
+ * function Deprecated(reason: string) {
+ *   return createDecorator(['class', 'method'], Deprecated, { reason });
+ * }
+ * ```
  */
 export const createDecorator = /* @__PURE__ */ Metadata.createDecorator.bind(Metadata);

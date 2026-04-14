@@ -34,12 +34,16 @@ import { IsBoolean, IsInteger, IsNumber, IsString } from './primitives.js';
 type SS0 = ((schema?: StringSchema) => SchemaFieldDecorator<StringSchema>) &
   SchemaFieldDecoratorFactoryStatic<StringSchema>;
 
-function ss0(rule: string, transform: (v: string) => string): SS0 {
+function ss0(name: string, transform: (v: string) => string): SS0 {
   const factory = createSchemaFieldDecoratorFactory(
+    name,
     (schema?: StringSchema): any => {
       return SchemaField(factory, (schema ?? {}) as any);
     },
-    { rule, parse: (_: any, v: unknown) => (typeof v === 'string' ? transform(v) : v) },
+    {
+      message: '.label is invalid',
+      parse: (_: any, v: unknown) => (typeof v === 'string' ? transform(v) : v),
+    },
   );
   return factory as any;
 }
@@ -51,12 +55,16 @@ type SSR = ((
 ) => SchemaFieldDecorator<ValidateSchema<string>>) &
   SchemaFieldDecoratorFactoryStatic<ValidateSchema<string>>;
 
-function ssr(rule: string, transform: (v: string, chars: string) => string): SSR {
+function ssr(name: string, transform: (v: string, chars: string) => string): SSR {
   const factory = createSchemaFieldDecoratorFactory<any>(
+    name,
     (chars: string, schema?: StringSchema): any => {
       return SchemaField(factory, { value: chars, ...(schema ?? {}) } as any);
     },
-    { rule, parse: (p: any, v: unknown) => (typeof v === 'string' ? transform(v, p.value) : v) },
+    {
+      message: '.label is invalid',
+      parse: (p: any, v: unknown) => (typeof v === 'string' ? transform(v, p.value) : v),
+    },
   );
   return factory as any;
 }
@@ -102,11 +110,12 @@ export const NormalizeEmail: ((
 ) => SchemaFieldDecorator<NormalizeEmailOptions>) &
   SchemaFieldDecoratorFactoryStatic<NormalizeEmailOptions> = (() => {
   const factory = createSchemaFieldDecoratorFactory<any>(
+    'NormalizeEmail',
     (options?: NormalizeEmailOptions, schema?: StringSchema): any => {
       return SchemaField(factory, { ...(options ?? {}), ...(schema ?? {}) } as any);
     },
     {
-      rule: 'NormalizeEmail',
+      message: '.label is invalid',
       parse: (p: any, v: unknown) => (typeof v === 'string' ? normalizeEmailFn(v, p) || v : v),
     },
   );
@@ -124,11 +133,12 @@ export const NormalizeEmail: ((
 export const ToString: ((schema?: StringSchema) => SchemaFieldDecorator<StringSchema>) &
   SchemaFieldDecoratorFactoryStatic<StringSchema> = (() => {
   const factory = createSchemaFieldDecoratorFactory(
+    'ToString',
     (schema?: StringSchema): any => {
       return SchemaField(factory, (schema ?? {}) as any, [IsString(schema)]);
     },
     {
-      rule: 'ToString',
+      message: '.label is invalid',
       parse: (_: any, v: unknown) => (v == null ? v : String(v)),
     },
   );
@@ -143,11 +153,12 @@ export const ToString: ((schema?: StringSchema) => SchemaFieldDecorator<StringSc
 export const ToNumber: ((schema?: NumericSchema) => SchemaFieldDecorator<NumericSchema>) &
   SchemaFieldDecoratorFactoryStatic<NumericSchema> = (() => {
   const factory = createSchemaFieldDecoratorFactory(
+    'ToNumber',
     (schema?: NumericSchema): any => {
       return SchemaField(factory, (schema ?? {}) as any, [IsNumber(schema)]);
     },
     {
-      rule: 'ToNumber',
+      message: '.label is invalid',
       parse: (_: any, v: unknown) => {
         if (typeof v !== 'string') return v;
         const n = Number(v);
@@ -166,11 +177,12 @@ export const ToNumber: ((schema?: NumericSchema) => SchemaFieldDecorator<Numeric
 export const ToInteger: ((schema?: NumericSchema) => SchemaFieldDecorator<NumericSchema>) &
   SchemaFieldDecoratorFactoryStatic<NumericSchema> = (() => {
   const factory = createSchemaFieldDecoratorFactory(
+    'ToInteger',
     (schema?: NumericSchema): any => {
       return SchemaField(factory, (schema ?? {}) as any, [IsInteger(schema)]);
     },
     {
-      rule: 'ToInteger',
+      message: '.label is invalid',
       parse: (_: any, v: unknown) => {
         if (typeof v !== 'string') return v;
         const n = Number(v);
@@ -190,11 +202,12 @@ export const ToBoolean: ((
 ) => SchemaFieldDecorator<BaseSchema<boolean>>) &
   SchemaFieldDecoratorFactoryStatic<BaseSchema<boolean>> = (() => {
   const factory = createSchemaFieldDecoratorFactory(
+    'ToBoolean',
     (schema?: BaseSchema<boolean>): any => {
       return SchemaField(factory, (schema ?? {}) as any, [IsBoolean(schema)]);
     },
     {
-      rule: 'ToBoolean',
+      message: '.label is invalid',
       parse: (_: any, v: unknown) => {
         if (typeof v === 'string') {
           const lower = v.toLowerCase();

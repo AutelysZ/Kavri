@@ -91,7 +91,7 @@ class SwaggerInterceptor extends Interceptor {
 
 ## 4. OpenAPI generation
 
-Uses `generateOpenAPI()` from `@kavri/schema` for each route, then merges:
+Uses `toOpenAPI()` from `@kavri/schema` for each route, then merges:
 
 ```ts
 declare function mergeOpenAPI(

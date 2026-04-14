@@ -1,4 +1,9 @@
 import type { FieldDecorator, FieldDecoratorFactory } from '@kavri/basic';
+import type { SchemaValidationError } from './schema';
+
+export type StringKeyOf<T> = keyof T & string;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type PartialRecord<K extends keyof any, V> = { [P in K]?: V };
 
 // ---------------------------------------------------------------------------
 // JSON Schema types
@@ -68,6 +73,10 @@ export interface JsonSchema {
 /** Options for custom validation messages. */
 export interface ValidateOptions {
   title?: string;
+  /**
+   * The label for formatting error message, if not set, will use title.
+   */
+  label?: string;
   message?: string;
 }
 
@@ -101,9 +110,9 @@ export interface BaseSchema<S = unknown, V = S> extends ValidateOptions {
   nullable?: boolean;
   const?: ValidateField<V>;
   enum?: ValidateField<V[]>;
-  /** Additional inline decorators to compose. */
-  decorators?: SchemaFieldDecorator[];
 }
+
+export type NestedFieldSchema = SchemaFieldDecorator | readonly SchemaFieldDecorator[];
 
 // ---------------------------------------------------------------------------
 // Concrete schema types
@@ -117,7 +126,9 @@ export interface StringSchema<V = string> extends BaseSchema<string, V> {
   format?: string;
   contentEncoding?: string;
   contentMediaType?: string;
-  contentSchema?: SchemaFieldDecorator;
+  // how to implement? shorthand for AnyOf empty string and other rules?
+  allowEmpty?: ValidateField<boolean>;
+  contentSchema?: NestedFieldSchema;
 }
 
 /** Schema options for numeric fields (integer, number, bigint). */
@@ -130,45 +141,45 @@ export interface NumericSchema<V = number> extends BaseSchema<number, V> {
 }
 
 /** Schema options for object fields. */
-export interface ObjectSchema<T = object> extends BaseSchema<T> {
-  properties?: { [K in keyof T]?: SchemaFieldDecorator };
-  patternProperties?: Record<string, SchemaFieldDecorator>;
-  additionalProperties?: SchemaFieldDecorator | false;
-  unevaluatedProperties?: SchemaFieldDecorator | false;
-  propertyNames?: SchemaFieldDecorator;
+export interface ObjectSchema<T extends object = object> extends BaseSchema<T> {
+  properties?: PartialRecord<StringKeyOf<T>, NestedFieldSchema>;
+  patternProperties?: Record<string, NestedFieldSchema>;
+  additionalProperties?: NestedFieldSchema | false;
+  unevaluatedProperties?: NestedFieldSchema | false;
+  propertyNames?: NestedFieldSchema;
   maxProperties?: ValidateField<number>;
   minProperties?: ValidateField<number>;
-  required?: ValidateField<(keyof T & string)[]>;
-  dependentRequired?: Partial<Record<keyof T & string, (keyof T & string)[]>>;
-  dependentSchemas?: Partial<Record<keyof T & string, SchemaFieldDecorator>>;
+  required?: ValidateField<StringKeyOf<T>[]>;
+  dependentRequired?: PartialRecord<StringKeyOf<T>, StringKeyOf<T>[]>;
+  dependentSchemas?: PartialRecord<StringKeyOf<T>, NestedFieldSchema>;
 }
 
 /** Schema options for array fields. */
 export interface ArraySchema<T = unknown> extends BaseSchema<T[]> {
-  items?: SchemaFieldDecorator;
-  prefixItems?: SchemaFieldDecorator[];
-  contains?: SchemaFieldDecorator;
+  items?: NestedFieldSchema;
+  prefixItems?: NestedFieldSchema[];
+  contains?: NestedFieldSchema;
   minContains?: ValidateField<number>;
   maxContains?: ValidateField<number>;
   minItems?: ValidateField<number>;
   maxItems?: ValidateField<number>;
   uniqueItems?: ValidateField<boolean>;
-  unevaluatedItems?: SchemaFieldDecorator | false;
+  unevaluatedItems?: NestedFieldSchema | false;
 }
 
 /** Schema options for anyOf (union) fields. */
 export interface AnyOfSchema<T = unknown> extends BaseSchema<T> {
-  anyOf: SchemaFieldDecorator[];
+  anyOf: NestedFieldSchema[];
 }
 
 /** Schema options for oneOf (exactly one match) fields. */
 export interface OneOfSchema<T = unknown> extends BaseSchema<T> {
-  oneOf: SchemaFieldDecorator[];
+  oneOf: NestedFieldSchema[];
 }
 
 /** Schema options for allOf (intersection) fields. */
 export interface AllOfSchema<T = unknown> extends BaseSchema<T> {
-  allOf: SchemaFieldDecorator[];
+  allOf: NestedFieldSchema[];
 }
 
 // ---------------------------------------------------------------------------
@@ -201,26 +212,67 @@ export interface SchemaFieldDecoratorMetadata<P = any> {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type SchemaFieldDecorator<P = any> = FieldDecorator<SchemaFieldDecoratorMetadata<P>>;
 
+export const schemaFieldDecoratorName = Symbol('schema:name');
+
 /**
  * Static methods attached to a schema field decorator factory.
  * Used by the schema pipeline for validation, parsing, serialization, and JSON Schema generation.
  */
 export interface SchemaFieldDecoratorFactoryStatic<P> {
-  /** Decorator rule name for validation error messages. */
-  rule: string;
-  /** Default validation error message template. */
-  message?: string;
-  /** Parse raw input into the target type. */
+  /**
+   * The schema name, must be unique in the entire schema system.
+   *
+   * It's used for:
+   *
+   * 1. represent the rule name to display error message
+   * 2. check if a factory is schema field decorator factory
+   */
+  [schemaFieldDecoratorName]: string;
+
+  /**
+   * The default error message, .xxx will be replaced with corresponding value, like .label, .value.
+   *
+   * .xxx include: the params of the decorator, include base {@link ValidateOptions}. And a few
+   * special values:
+   *
+   * - .label is options.label ?? options.title
+   * - .key is the current field name
+   * - .data is the current field's value, note it's not .value. .value is used by
+   *    {@link ValidateSchema}, which is used by primitive param decorators.
+   * - .this is the current input object, can use like .this.foo to get a field.
+   */
+  message: string | ((params: P) => string);
+
+  /**
+   * parse the plain data to target object. eg: parse a string to bigint
+   */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   parse?: (params: P, plain: any) => any;
-  /** Serialize a value back to a plain representation. */
+  /**
+   * convert the target object to string, eg: convert bigint to string
+   */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   serialize?: (params: P, value: any) => any;
-  /** Validate a value against the constraint. Return true if valid. */
+  /**
+   * validate if the plain data is valid., eg: for bigint, it's the string to validate.
+   *
+   * You may use {@link validateJsonSchema} to validate your nested rules.
+   */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  validate?: (params: P, value: any) => boolean;
-  /** Generate JSON Schema keywords for this constraint. */
-  toJsonSchema?: (params: P) => JsonSchema;
+  validate?: (params: P, plain: any, obj: any) => boolean | [boolean, SchemaValidationError];
+
+  /**
+   * Convert the decorator to JSON schema.
+   * This is required for all decorators.
+   * You may use {@link toJsonSchema} to convert your nested rules.
+   */
+  toJsonSchema?: (params: P) => JsonSchema | undefined;
+
+  /**
+   * build from JSON schema.
+   * You may use {@link fromJsonSchema} to convert your nested rules.
+   */
+  fromJsonSchema?: (params: P, schema: JsonSchema) => SchemaFieldDecorator | undefined;
 }
 
 /**

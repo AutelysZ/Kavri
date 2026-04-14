@@ -517,7 +517,7 @@ interface RouteDefinition<T extends Record<string, Endpoint>> {
 ### OpenAPI generation
 
 ```ts
-declare function generateOpenAPI(route: RouteDefinition<any>, options: { title: string; version: string }): object;
+declare function toOpenAPI(route: RouteDefinition<any>, options: { title: string; version: string }): object;
 ```
 
 ### Examples

@@ -7,6 +7,7 @@ import type {
   SchemaFieldDecoratorMetadata,
   ValidateSchema,
 } from './types.js';
+import { schemaFieldDecoratorName } from './types.js';
 
 // Dummy class decorator to flush TC39 metadata
 function Tag(): ClassDecorator<object> {
@@ -55,18 +56,18 @@ describe('createSchemaFieldDecoratorFactory', () => {
     const toJsonSchema = (params: any) => ({ minLength: params.value });
 
     const MinLength = createSchemaFieldDecoratorFactory(
+      'MinLength',
       (options: ValidateSchema<number>): SchemaFieldDecorator<ValidateSchema<number>> => {
         return SchemaField(MinLength, options);
       },
       {
-        rule: 'MinLength',
         message: '.label must be at least .value characters',
         validate,
         toJsonSchema,
       },
     );
 
-    expect(MinLength.rule).toBe('MinLength');
+    expect(MinLength[schemaFieldDecoratorName]).toBe('MinLength');
     expect(MinLength.message).toBe('.label must be at least .value characters');
     expect(MinLength.validate).toBe(validate);
     expect(MinLength.toJsonSchema).toBe(toJsonSchema);
@@ -75,12 +76,15 @@ describe('createSchemaFieldDecoratorFactory', () => {
 
   it('factory returns a working decorator', () => {
     const MinLength = createSchemaFieldDecoratorFactory(
+      'MinLength',
       (options: ValidateSchema<number>): SchemaFieldDecorator<ValidateSchema<number>> => {
         return SchemaField(MinLength, options);
       },
       {
-        rule: 'MinLength',
-        validate: (params, value) => typeof value !== 'string' || value.length >= params.value,
+        message: '.label must be at least .value characters',
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        validate: (params: any, value: any) =>
+          typeof value !== 'string' || value.length >= params.value,
       },
     );
 
@@ -105,12 +109,14 @@ describe('createSchemaFieldDecoratorFactory', () => {
 describe('SchemaField', () => {
   it('creates a decorator with metadata', () => {
     const IsString = createSchemaFieldDecoratorFactory(
+      'IsString',
       (options: ValidateSchema<string>): SchemaFieldDecorator<ValidateSchema<string>> => {
         return SchemaField(IsString, options);
       },
       {
-        rule: 'IsString',
-        validate: (_, value) => typeof value === 'string',
+        message: '.label must be a string',
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        validate: (_: any, value: any) => typeof value === 'string',
         toJsonSchema: () => ({ type: 'string' }),
       },
     );
@@ -124,29 +130,42 @@ describe('SchemaField', () => {
 
   it('collects children', () => {
     const MinLength = createSchemaFieldDecoratorFactory(
+      'MinLength',
       (options: ValidateSchema<number>): SchemaFieldDecorator<ValidateSchema<number>> => {
         return SchemaField(MinLength, options);
       },
-      { rule: 'MinLength', validate: (p, v) => typeof v !== 'string' || v.length >= p.value },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      {
+        message: '.label must be at least .value characters',
+        validate: (p: any, v: any) => typeof v !== 'string' || v.length >= p.value,
+      },
     );
 
     const MaxLength = createSchemaFieldDecoratorFactory(
+      'MaxLength',
       (options: ValidateSchema<number>): SchemaFieldDecorator<ValidateSchema<number>> => {
         return SchemaField(MaxLength, options);
       },
-      { rule: 'MaxLength', validate: (p, v) => typeof v !== 'string' || v.length <= p.value },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      {
+        message: '.label must be at most .value characters',
+        validate: (p: any, v: any) => typeof v !== 'string' || v.length <= p.value,
+      },
     );
 
     const IsString = createSchemaFieldDecoratorFactory(
+      'IsString',
       (options: { minLength?: number; maxLength?: number }): SchemaFieldDecorator => {
         const children: SchemaFieldDecorator[] = [];
         if (options.minLength !== undefined) children.push(MinLength({ value: options.minLength }));
         if (options.maxLength !== undefined) children.push(MaxLength({ value: options.maxLength }));
-        return SchemaField(IsString, options, children);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return SchemaField(IsString, options as any, children);
       },
       {
-        rule: 'IsString',
-        validate: (_, value) => typeof value === 'string',
+        message: '.label must be a string',
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        validate: (_: any, value: any) => typeof value === 'string',
         toJsonSchema: () => ({ type: 'string' }),
       },
     );
@@ -170,37 +189,20 @@ describe('SchemaField', () => {
     expect(max.metadata.params.value).toBe(100);
   });
 
-  it('merges params.decorators with explicit children', () => {
-    const A = createSchemaFieldDecoratorFactory((): SchemaFieldDecorator => SchemaField(A, {}), {
-      rule: 'A',
-    });
-    const B = createSchemaFieldDecoratorFactory((): SchemaFieldDecorator => SchemaField(B, {}), {
-      rule: 'B',
-    });
-    const C = createSchemaFieldDecoratorFactory(
-      (): SchemaFieldDecorator => SchemaField(C, { decorators: [A()] }, [B()]),
-      { rule: 'C' },
-    );
-
-    const dec = C();
-    expect(dec.metadata.children).toHaveLength(2);
-    expect(dec.metadata.children[0].metadata.rule).toBe('A');
-    expect(dec.metadata.children[1].metadata.rule).toBe('B');
-  });
-
   it('statics are callable on the factory', () => {
     const IsEmail = createSchemaFieldDecoratorFactory(
+      'IsEmail',
       (): SchemaFieldDecorator => SchemaField(IsEmail, {}),
       {
-        rule: 'IsEmail',
         message: 'must be a valid email',
-        validate: (_, value) => typeof value === 'string' && value.includes('@'),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        validate: (_: any, value: any) => typeof value === 'string' && value.includes('@'),
         toJsonSchema: () => ({ type: 'string', format: 'email' }),
       },
     );
 
-    expect(IsEmail.validate?.({}, 'test@example.com')).toBe(true);
-    expect(IsEmail.validate?.({}, 'not-email')).toBe(false);
+    expect(IsEmail.validate?.({}, 'test@example.com', {})).toBe(true);
+    expect(IsEmail.validate?.({}, 'not-email', {})).toBe(false);
     expect(IsEmail.toJsonSchema?.({})).toEqual({ type: 'string', format: 'email' });
   });
 });

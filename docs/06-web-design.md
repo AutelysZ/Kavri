@@ -531,7 +531,7 @@ class PaymentService {
 
 ## 7. OpenAPI Generation
 
-See [09-schema-design.md](./09-schema-design.md#openapi-generation). `generateOpenAPI(route, options)` in `@kavri/schema` generates OpenAPI 3.x from route definitions. Static — no running container needed.
+See [09-schema-design.md](./09-schema-design.md#openapi-generation). `toOpenAPI(route, options)` in `@kavri/schema` generates OpenAPI 3.x from route definitions. Static — no running container needed.
 
 ## 8. Static Assets
 

@@ -5,22 +5,73 @@
 import { lookup } from 'mime-types';
 import type { BaseSchema, SchemaFieldDecorator, StringSchema, ValidateOptions } from '../types.js';
 import { createSchemaFieldDecoratorFactory, SchemaField } from '../field.js';
-import { IsString } from './primitives.js';
+import { IsInteger, IsString } from './primitives.js';
 import { IsArray, Ref } from './composite.js';
+import { Schema } from '../schema';
+import { IsMimeType } from './validators';
+
+// ---------------------------------------------------------------------------
+// IsFilename
+// ---------------------------------------------------------------------------
+
+/** Options for filename fields. */
+export interface IsFilenameOptions extends ValidateOptions {
+  /**
+   * - name_only: only allow filename, no special chars like /
+   * - nested: allow dir, like a/b.png, but no /, and no ../ or ./
+   * - absolute: must be like /a/b/c.png
+   * - relative: all name, nested, absolute style, and also allow ./ and ../
+   * default is name_only
+   */
+  type?: 'name_only' | 'nested' | 'absolute' | 'relative';
+  /** Accepted file extensions or MIME patterns. E.g., ['.png', '.jpg', 'image/*']. */
+  accept?: string[];
+}
+
+/**
+ * Marks a field as a filename for binary uploads.
+ * Validates against accept patterns if provided.
+ * Use in binary request schemas alongside @IsBody.
+ */
+export const IsFilename = createSchemaFieldDecoratorFactory(
+  'IsFilename',
+  (
+    options: IsFilenameOptions = {},
+    schema?: StringSchema,
+  ): SchemaFieldDecorator<IsFilenameOptions> => {
+    return SchemaField(IsFilename, options, undefined, [IsString(schema)]);
+  },
+  {
+    message: '.label should be a filename',
+    validate: (p, v) => {
+      if (typeof v !== 'string' || !p.accept?.length) return true;
+      const mimeType = lookup(v) || '';
+      return p.accept.some((pattern: string) => {
+        if (pattern.startsWith('.')) return v.endsWith(pattern);
+        return matchAccept([pattern], mimeType);
+      });
+    },
+  },
+);
 
 // ---------------------------------------------------------------------------
 // MultipartFile
 // ---------------------------------------------------------------------------
 
 /** Represents an uploaded file in a multipart request. */
+@Schema()
 export class MultipartFile {
   /** Original uploaded filename. */
+  @IsString()
   readonly name!: string;
   /** File size in bytes. */
+  @IsInteger()
   readonly size!: number;
   /** MIME type. */
+  @IsMimeType()
   readonly type!: string;
   /** Temp file path on disk. */
+  @IsFilename({ type: 'absolute' })
   readonly path!: string;
 }
 
@@ -48,13 +99,14 @@ export interface IsFileOptions extends ValidateOptions {
  * - `maxSize`: checks file size in bytes.
  */
 export const IsFile = createSchemaFieldDecoratorFactory(
+  'IsFile',
   (options?: IsFileOptions): SchemaFieldDecorator<IsFileOptions> => {
     const fileRef = Ref(() => MultipartFile);
     const dep = options?.array ? IsArray(fileRef) : fileRef;
     return SchemaField(IsFile, (options ?? {}) as IsFileOptions, undefined, [dep]);
   },
   {
-    rule: 'IsFile',
+    message: '.label should be a file',
     validate: (p, v) => {
       if (v == null) return true; // handled by required/optional
       const files: MultipartFile[] = Array.isArray(v) ? v : [v];
@@ -89,45 +141,11 @@ function matchAccept(accept: string[], mimeType: string): boolean {
  * Use in binary request schemas only. At most one @IsBody per schema.
  */
 export const IsBody = createSchemaFieldDecoratorFactory(
+  'IsBody',
   (schema?: BaseSchema<ReadableStream>): SchemaFieldDecorator<BaseSchema<ReadableStream>> => {
     return SchemaField(IsBody, (schema ?? {}) as BaseSchema<ReadableStream>);
   },
   {
-    rule: 'IsBody',
-  },
-);
-
-// ---------------------------------------------------------------------------
-// IsFilename
-// ---------------------------------------------------------------------------
-
-/** Options for filename fields. */
-export interface IsFilenameOptions extends ValidateOptions {
-  /** Accepted file extensions or MIME patterns. E.g., ['.png', '.jpg', 'image/*']. */
-  accept?: string[];
-}
-
-/**
- * Marks a field as a filename for binary uploads.
- * Validates against accept patterns if provided.
- * Use in binary request schemas alongside @IsBody.
- */
-export const IsFilename = createSchemaFieldDecoratorFactory(
-  (options?: IsFilenameOptions, schema?: StringSchema): SchemaFieldDecorator<IsFilenameOptions> => {
-    return SchemaField(IsFilename, (options ?? {}) as IsFilenameOptions, undefined, [
-      IsString(schema),
-    ]);
-  },
-  {
-    rule: 'IsFilename',
-    validate: (p, v) => {
-      if (typeof v !== 'string' || !p.accept?.length) return true;
-      const mimeType = lookup(v) || '';
-      return p.accept.some((pattern: string) => {
-        if (pattern.startsWith('.')) return v.endsWith(pattern);
-        return matchAccept([pattern], mimeType);
-      });
-    },
-    toJsonSchema: () => ({ type: 'string' }),
+    message: '.label should be a stream/blob/buffer',
   },
 );

@@ -88,30 +88,39 @@ export class SchemaValidationError extends Error {
 function validateNode(
   meta: SchemaFieldDecoratorMetadata,
   value: unknown,
+  obj: unknown,
   path: string[],
   issues: ValidationIssue[],
 ): boolean {
   // 1. Deps — if any fail, skip self
   for (const dep of meta.deps) {
-    if (!validateNode(dep.metadata, value, path, issues)) {
+    if (!validateNode(dep.metadata, value, obj, path, issues)) {
       return false;
     }
   }
 
   // 2. Self validation
-  if (meta.factory.validate && !meta.factory.validate(meta.params, value)) {
-    issues.push({
-      path: [...path],
-      message: meta.factory.message ?? `${meta.rule} validation failed`,
-      rule: meta.rule,
-    });
-    return false;
+  if (meta.factory.validate) {
+    const result = meta.factory.validate(meta.params, value, obj);
+    const valid = Array.isArray(result) ? result[0] : result;
+    if (!valid) {
+      const msg =
+        typeof meta.factory.message === 'function'
+          ? meta.factory.message(meta.params)
+          : meta.factory.message;
+      issues.push({
+        path: [...path],
+        message: msg ?? `${meta.rule} validation failed`,
+        rule: meta.rule,
+      });
+      return false;
+    }
   }
 
   // 3. Children — continue even if some fail
   let allValid = true;
   for (const child of meta.children) {
-    if (!validateNode(child.metadata, value, path, issues)) {
+    if (!validateNode(child.metadata, value, obj, path, issues)) {
       allValid = false;
     }
   }
@@ -166,7 +175,7 @@ export function validate(clazz: AnyConstructor<any>, data: unknown): SchemaValid
     const presence = checkPresence(meta.params, value, fieldPath, issues);
     if (presence === 'skip') continue;
 
-    validateNode(meta, value, fieldPath, issues);
+    validateNode(meta, value, data, fieldPath, issues);
   }
 
   return issues.length > 0 ? new SchemaValidationError(clazz, issues) : null;
