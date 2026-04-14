@@ -2,10 +2,10 @@
 import type { AnyConstructor, ClassDecorator, Qualifier } from '@kavri/basic';
 /**
  * @Schema class decorator, getSchema, defineSchema, and schema utilities:
- * validate, parse, serialize, toJsonSchema.
+ * validate, parse, serialize.
  */
-import { createClassDecorator, Metadata } from '@kavri/basic';
-import type { JsonSchema, ObjectSchema, SchemaFieldDecoratorMetadata } from './types.js';
+import { createClassDecorator } from '@kavri/basic';
+import type { ObjectSchema, SchemaFieldDecoratorMetadata } from './types.js';
 import { getSchemaFields } from './field.js';
 
 // ---------------------------------------------------------------------------
@@ -269,80 +269,6 @@ export function serialize<T extends object>(instance: T): Record<string, unknown
     if (value === undefined && meta.params.optional) continue;
     result[k] = serializeNode(meta, value);
   }
-
-  return result;
-}
-
-// ---------------------------------------------------------------------------
-// toJsonSchema
-// ---------------------------------------------------------------------------
-
-/** Collect JSON Schema keywords from a decorator tree. */
-function nodeToJsonSchema(meta: SchemaFieldDecoratorMetadata): JsonSchema {
-  let schema: JsonSchema = {};
-
-  // Deps contribute first
-  for (const dep of meta.deps) {
-    schema = { ...schema, ...nodeToJsonSchema(dep.metadata) };
-  }
-
-  // Self
-  if (meta.factory.toJsonSchema) {
-    schema = { ...schema, ...meta.factory.toJsonSchema(meta.params) };
-  }
-
-  // Children
-  for (const child of meta.children) {
-    schema = { ...schema, ...nodeToJsonSchema(child.metadata) };
-  }
-
-  return schema;
-}
-
-/**
- * Generate JSON Schema 2020-12 from a @Schema class.
- */
-export function toJsonSchema(clazz: AnyConstructor<any>): JsonSchema {
-  const schemaMeta = Metadata.ofClass(Schema, clazz);
-  const options = schemaMeta.length > 0 ? schemaMeta[0].metadata.options : {};
-
-  const fields = getSchema(clazz);
-  const properties: Record<string, JsonSchema> = {};
-  const required: string[] = [];
-
-  for (const [key, meta] of fields) {
-    const k = String(key);
-    const fieldSchema = nodeToJsonSchema(meta);
-
-    // Handle nullable
-    if (meta.params.nullable && fieldSchema.type) {
-      fieldSchema.type = Array.isArray(fieldSchema.type)
-        ? [...fieldSchema.type, 'null']
-        : [fieldSchema.type, 'null'];
-    }
-
-    // Description from params
-    if (meta.params.description) fieldSchema.description = meta.params.description;
-    if (meta.params.default !== undefined) fieldSchema.default = meta.params.default;
-    if (meta.params.examples) fieldSchema.examples = meta.params.examples;
-    if (meta.params.deprecated) fieldSchema.deprecated = meta.params.deprecated;
-    if (meta.params.readOnly) fieldSchema.readOnly = meta.params.readOnly;
-    if (meta.params.writeOnly) fieldSchema.writeOnly = meta.params.writeOnly;
-
-    properties[k] = fieldSchema;
-
-    // Required unless optional
-    if (!meta.params.optional) {
-      required.push(k);
-    }
-  }
-
-  const result: JsonSchema = {
-    type: 'object',
-    properties,
-    ...(required.length > 0 ? { required } : {}),
-    ...(options.description ? { description: options.description } : {}),
-  };
 
   return result;
 }

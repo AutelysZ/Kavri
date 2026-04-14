@@ -3,8 +3,8 @@
  * OpenAPI 3.1 types and generation from route definitions.
  */
 import type { AnyConstructor } from '@kavri/basic';
-import type { JsonSchema } from './types.js';
-import { toJsonSchema } from './schema.js';
+import type { JsonSchema } from './jsonschema.js';
+import { toJsonSchema } from './jsonschema.js';
 import type { Endpoint, RequestInput, ResponseOutput, RouteDefinition } from './route.js';
 
 // ---------------------------------------------------------------------------

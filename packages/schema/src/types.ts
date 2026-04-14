@@ -1,70 +1,11 @@
 import type { FieldDecorator, FieldDecoratorFactory } from '@kavri/basic';
 import type { SchemaValidationError } from './schema';
+import type { JsonSchema } from './jsonschema.js';
 
+export type { JsonSchema } from './jsonschema.js';
 export type StringKeyOf<T> = keyof T & string;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type PartialRecord<K extends keyof any, V> = { [P in K]?: V };
-
-// ---------------------------------------------------------------------------
-// JSON Schema types
-// ---------------------------------------------------------------------------
-
-/** JSON Schema 2020-12 keywords (subset used by field decorators). */
-export interface JsonSchema {
-  title?: string;
-  description?: string;
-  type?: string | string[];
-  format?: string;
-  minLength?: number;
-  maxLength?: number;
-  minimum?: number;
-  maximum?: number;
-  exclusiveMinimum?: number;
-  exclusiveMaximum?: number;
-  multipleOf?: number;
-  pattern?: string;
-  enum?: unknown[];
-  const?: unknown;
-  default?: unknown;
-  examples?: unknown[];
-  deprecated?: boolean;
-  readOnly?: boolean;
-  writeOnly?: boolean;
-  items?: JsonSchema;
-  prefixItems?: JsonSchema[];
-  contains?: JsonSchema;
-  minContains?: number;
-  maxContains?: number;
-  minItems?: number;
-  maxItems?: number;
-  uniqueItems?: boolean;
-  unevaluatedItems?: JsonSchema | boolean;
-  properties?: Record<string, JsonSchema>;
-  patternProperties?: Record<string, JsonSchema>;
-  additionalProperties?: JsonSchema | boolean;
-  unevaluatedProperties?: JsonSchema | boolean;
-  propertyNames?: JsonSchema;
-  minProperties?: number;
-  maxProperties?: number;
-  required?: string[];
-  anyOf?: JsonSchema[];
-  oneOf?: JsonSchema[];
-  allOf?: JsonSchema[];
-  not?: JsonSchema;
-  if?: JsonSchema;
-  then?: JsonSchema;
-  else?: JsonSchema;
-  dependentRequired?: Record<string, string[]>;
-  dependentSchemas?: Record<string, JsonSchema>;
-  contentEncoding?: string;
-  contentMediaType?: string;
-  contentSchema?: JsonSchema;
-  $id?: string;
-  $schema?: string;
-  $anchor?: string;
-  $ref?: string;
-  $defs?: Record<string, JsonSchema>;
-}
 
 // ---------------------------------------------------------------------------
 // Validation types

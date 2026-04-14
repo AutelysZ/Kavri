@@ -1,5 +1,4 @@
 export type {
-  JsonSchema,
   ValidateOptions,
   ValidateSchema,
   ValidateField,
@@ -35,7 +34,6 @@ export {
   validate,
   parse,
   serialize,
-  toJsonSchema,
 } from './schema.js';
 export type { ValidationIssue } from './schema.js';
 
@@ -52,6 +50,9 @@ export type {
   WebSocketOptions,
   WebSocketProtocol,
 } from './route.js';
+
+export { toJsonSchema } from './jsonschema.js';
+export type { JsonSchema } from './jsonschema.js';
 
 export { toOpenAPIv3 } from './openapi.js';
 export type {
