@@ -39,17 +39,7 @@ export {
 } from './schema.js';
 export type { ValidationIssue } from './schema.js';
 
-export {
-  defineRoute,
-  defineWebSocket,
-  toOpenAPIv3,
-  get,
-  post,
-  put,
-  del,
-  patch,
-  head,
-} from './route.js';
+export { defineRoute, defineWebSocket, get, post, put, del, patch, head } from './route.js';
 export type {
   HttpMethod,
   RequestInput,
@@ -61,6 +51,10 @@ export type {
   MessageType,
   WebSocketOptions,
   WebSocketProtocol,
+} from './route.js';
+
+export { toOpenAPIv3 } from './openapi.js';
+export type {
   ToOpenAPIOptions,
   OpenAPIv3,
   OpenAPIv3Info,
@@ -73,4 +67,4 @@ export type {
   OpenAPIv3Response,
   OpenAPIv3Operation,
   OpenAPIv3PathItem,
-} from './route.js';
+} from './openapi.js';
