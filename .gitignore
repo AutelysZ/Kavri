@@ -20,5 +20,6 @@ coverage/
 .env
 .env.*
 !.env.example
-.tsbuildinfo
 temp/
+.cache/
+packages/**/*.js

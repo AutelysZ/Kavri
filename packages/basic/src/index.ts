@@ -1,41 +1,13 @@
-// ---------------------------------------------------------------------------
-// Global decorator creators (most common API — use these directly)
-// ---------------------------------------------------------------------------
-
 export {
   Metadata,
   createClassDecorator,
   createMethodDecorator,
   createFieldDecorator,
   createDecorator,
-} from './metadata.js';
-
-// ---------------------------------------------------------------------------
-// Metadata manager & entry types
-// ---------------------------------------------------------------------------
-
-export { MetadataManager } from './metadata.js';
-export type {
-  DecoratedEntryBase,
-  ClassDecoratedEntry,
-  MethodDecoratedEntry,
-  FieldDecoratedEntry,
-  DecoratedEntry,
-  DecoratedEntryOf,
-  ComposeOptions,
-} from './metadata.js';
-
-// ---------------------------------------------------------------------------
-// Async context
-// ---------------------------------------------------------------------------
-
-export { Key, AsyncScope } from './context.js';
-export type { Context } from './context.js';
-
-// ---------------------------------------------------------------------------
-// Core types
-// ---------------------------------------------------------------------------
-
+  type ComposeOptions,
+} from './Metadata.js';
+export { Key } from './Key.js';
+export type { Context } from './Context.js';
 export type {
   Qualifier,
   Awaitable,
@@ -52,3 +24,6 @@ export type {
   AnyDecorator,
   AnyDecoratorFactory,
 } from './types.js';
+export { AsyncScope } from './AsyncScope.js';
+export { KeyMap } from './KeyMap.js';
+export { ChainKeyMap } from './ChainKeyMap.js';

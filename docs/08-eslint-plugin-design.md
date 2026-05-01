@@ -2,7 +2,9 @@
 
 ## 1. Purpose
 
-Kavri's `inject()`, `injectAll()`, `injectRef()`, and `injectConfig()` must only be called inside designated inject points. Calling them elsewhere is a runtime error. This ESLint plugin catches violations at lint time.
+Kavri's `inject()`, `injectAll()`, `injectRef()`, and `injectConfig()` must only be called inside
+designated inject points. Calling them elsewhere is a runtime error. This ESLint plugin catches
+violations at lint time.
 
 Package name: `@kavri/eslint-plugin`
 
@@ -88,7 +90,8 @@ class Service {
 
 // inside a non-@Component class constructor
 class PlainClass {
-    constructor(private readonly db = inject(Database)) {} // error
+    constructor(private readonly db = inject(Database)) {
+    } // error
 }
 
 // inside an arrow function that is not a token/provide/conditional factory
@@ -104,13 +107,13 @@ The rule walks the AST upward from each inject call and checks:
 
 1. **Is the call a default parameter value?** If not, report.
 2. **What is the enclosing function?**
-   - Constructor of a class decorated with `@Component` → valid.
-   - Arrow/function passed as argument to `token()` → valid.
-   - Arrow/function passed as 2nd argument of a `@Provide(target, factory)` decorator → valid.
-   - Arrow/function passed as argument to `@Conditional(predicate)` → valid.
-   - Method decorated with `@OnConstruct()` or `@OnDestroy()` → valid.
-   - Arrow/function in `onConstruct`/`onDestroy` of `ProvideOptions` → valid.
-   - Anything else → report.
+    - Constructor of a class decorated with `@Component` → valid.
+    - Arrow/function passed as argument to `token()` → valid.
+    - Arrow/function passed as 2nd argument of a `@Provide(target, factory)` decorator → valid.
+    - Arrow/function passed as argument to `@Conditional(predicate)` → valid.
+    - Method decorated with `@OnConstruct()` or `@OnDestroy()` → valid.
+    - Arrow/function in `onConstruct`/`onDestroy` of `ProvideOptions` → valid.
+    - Anything else → report.
 
 ### Affected functions
 
@@ -149,7 +152,9 @@ The rule applies to these function names (configurable):
 
 ## 3. Rule: `@kavri/no-inject-after-side-effect`
 
-Warns when inject calls appear in default parameters **after** parameters that could have side effects. This catches subtle bugs with the Suspense-style retry mechanism — if a factory has side effects before an inject call, those side effects will re-execute on retry.
+Warns when inject calls appear in default parameters **after** parameters that could have side
+effects. This catches subtle bugs with the Suspense-style retry mechanism — if a factory has side
+effects before an inject call, those side effects will re-execute on retry.
 
 ### Examples
 
@@ -164,7 +169,9 @@ const T = token<Conn>((id = crypto.randomUUID(), db = inject(Database)) => db.ge
 
 ### Detection logic
 
-In a factory function's parameter list, if a default parameter calls an inject function, all preceding default parameters must also be inject calls (or pure expressions). A parameter with a function call that isn't `inject*` preceding an inject call triggers the warning.
+In a factory function's parameter list, if a default parameter calls an inject function, all
+preceding default parameters must also be inject calls (or pure expressions). A parameter with a
+function call that isn't `inject*` preceding an inject call triggers the warning.
 
 ### Configuration
 
@@ -186,7 +193,9 @@ will re-execute. Move inject() calls before side-effecting defaults.
 
 ## 4. Rule: `@kavri/no-conditional-override`
 
-Prevents `@Conditional` and `@OverrideConfiguration` from coexisting on the same class. Configuration must resolve before conditions are evaluated, so a class that provides config overrides cannot itself be conditional.
+Prevents `@Conditional` and `@OverrideConfiguration` from coexisting on the same class.
+Configuration must resolve before conditions are evaluated, so a class that provides config
+overrides cannot itself be conditional.
 
 ### Examples
 
@@ -210,7 +219,8 @@ class GoodConditionalService {}
 
 ### Detection logic
 
-The rule checks each class declaration for the presence of both `@Conditional` and `@OverrideConfiguration` decorators. If both are found, report an error.
+The rule checks each class declaration for the presence of both `@Conditional` and
+`@OverrideConfiguration` decorators. If both are found, report an error.
 
 ### Error message
 

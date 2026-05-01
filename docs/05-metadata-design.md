@@ -2,7 +2,10 @@
 
 ## 1. Purpose
 
-All decorators in Kavri are built on a unified metadata system. Every decorator — `@Component`, `@Provide`, `@OnEvent`, user-defined decorators — is a function that returns a typed `ClassDecorator<T>` or `MethodDecorator<T>`, where `T` is the metadata it carries. This replaces reflect-metadata with an explicit, type-safe mechanism.
+All decorators in Kavri are built on a unified metadata system. Every decorator — `@Component`,
+`@Provide`, `@OnEvent`, user-defined decorators — is a function that returns a typed
+`ClassDecorator<T>` or `MethodDecorator<T>`, where `T` is the metadata it carries. This replaces
+reflect-metadata with an explicit, type-safe mechanism.
 
 ## 2. Core types
 
@@ -11,61 +14,65 @@ All decorators in Kavri are built on a unified metadata system. Every decorator 
 type DecoratorStatic<T> = { readonly metadata: T };
 
 type ClassDecorator<T> =
-  globalThis.ClassDecorator
-  & ((target: Function, context: ClassDecoratorContext) => void)
-  & DecoratorStatic<T>;
+    globalThis.ClassDecorator
+    & ((target: Function, context: ClassDecoratorContext) => void)
+    & DecoratorStatic<T>;
 
 type MethodDecorator<T> =
-  globalThis.MethodDecorator
-  & ((target: Function, context: ClassMethodDecoratorContext) => void)
-  & DecoratorStatic<T>;
+    globalThis.MethodDecorator
+    & ((target: Function, context: ClassMethodDecoratorContext) => void)
+    & DecoratorStatic<T>;
 
 type FieldDecorator<T> =
-  globalThis.MethodDecorator
-  & ((value: any, context: ClassFieldDecoratorContext) => void)
-  & DecoratorStatic<T>;
+    globalThis.MethodDecorator
+    & ((value: any, context: ClassFieldDecoratorContext) => void)
+    & DecoratorStatic<T>;
 
 type ClassDecoratorFactory<T> = (...args: any[]) => ClassDecorator<T>;
 type MethodDecoratorFactory<T> = (...args: any[]) => MethodDecorator<T>;
 type FieldDecoratorFactory<T> = (...args: any[]) => FieldDecorator<T>;
 ```
 
-Every decorator is both a decorator and a metadata carrier. The factory function that creates it serves as the metadata key.
+Every decorator is both a decorator and a metadata carrier. The factory function that creates it
+serves as the metadata key.
 
 ## 3. Reading metadata -- `Metadata.of()` and `Metadata.entries()`
 
 ```ts
 declare const Metadata: {
-  // Class-level: get all metadata of a decorator type on a class
-  of<T>(factory: ClassDecoratorFactory<T>, target: Injectable<any>): readonly T[];
-  of<T>(factory: ClassDecoratorFactory<T>, instance: object): readonly T[];
+    // Class-level: get all metadata of a decorator type on a class
+    of<T>(factory: ClassDecoratorFactory<T>, target: Injectable<any>): readonly T[];
+    of<T>(factory: ClassDecoratorFactory<T>, instance: object): readonly T[];
 
-  // Method-level: by class + method name
-  of<T>(factory: MethodDecoratorFactory<T>, target: Injectable<any>, key: Qualifier): readonly T[];
-  of<T>(factory: MethodDecoratorFactory<T>, instance: object, key: Qualifier): readonly T[];
+    // Method-level: by class + method name
+    of<T>(factory: MethodDecoratorFactory<T>, target: Injectable<any>, key: Qualifier): readonly T[];
+    of<T>(factory: MethodDecoratorFactory<T>, instance: object, key: Qualifier): readonly T[];
 
-  // Programmatic write (push, not replace)
-  apply<T>(factory: ClassDecoratorFactory<T>, target: Injectable<any>, metadata: T): void;
-  apply<T>(factory: MethodDecoratorFactory<T>, target: Injectable<any>, key: Qualifier, metadata: T): void;
+    // Programmatic write (push, not replace)
+    apply<T>(factory: ClassDecoratorFactory<T>, target: Injectable<any>, metadata: T): void;
+    apply<T>(factory: MethodDecoratorFactory<T>, target: Injectable<any>, key: Qualifier, metadata: T): void;
 
-  // Get all registered [injectable, metadata] pairs for a class decorator
-  entries<T>(factory: ClassDecoratorFactory<T>): readonly [Injectable<any>, T][];
+    // Get all registered [injectable, metadata] pairs for a class decorator
+    entries<T>(factory: ClassDecoratorFactory<T>): readonly [Injectable<any>, T][];
 
-  // Get all registered [injectable, key, metadata] triples for a method decorator
-  entries<T>(factory: MethodDecoratorFactory<T>): readonly [Injectable<any>, Qualifier, T][];
+    // Get all registered [injectable, key, metadata] triples for a method decorator
+    entries<T>(factory: MethodDecoratorFactory<T>): readonly [Injectable<any>, Qualifier, T][];
 
-  // Lookup metadata on a class and its entire prototype chain (walks up inheritance)
-  lookup<T>(factory: ClassDecoratorFactory<T>, clazz: AnyConstructor<any>): readonly T[];
-  lookup<T>(factory: MethodDecoratorFactory<T>, clazz: AnyConstructor<any>, key: Qualifier): readonly T[];
-  lookup<T>(factory: FieldDecoratorFactory<T>, clazz: AnyConstructor<any>, key: Qualifier): readonly T[];
+    // Lookup metadata on a class and its entire prototype chain (walks up inheritance)
+    lookup<T>(factory: ClassDecoratorFactory<T>, clazz: AnyConstructor): readonly T[];
+    lookup<T>(factory: MethodDecoratorFactory<T>, clazz: AnyConstructor, key: Qualifier): readonly T[];
+    lookup<T>(factory: FieldDecoratorFactory<T>, clazz: AnyConstructor, key: Qualifier): readonly T[];
 };
 ```
 
-`Metadata.of()` returns metadata on the exact target only. Returns `readonly T[]` because a decorator can be applied multiple times.
+`Metadata.of()` returns metadata on the exact target only. Returns `readonly T[]` because a
+decorator can be applied multiple times.
 
-`Metadata.lookup()` walks the prototype chain — returns metadata from the class and all its ancestors, merged. Useful when a base class has decorators that subclasses should inherit.
+`Metadata.lookup()` walks the prototype chain — returns metadata from the class and all its
+ancestors, merged. Useful when a base class has decorators that subclasses should inherit.
 
-`Metadata.entries()` returns all registered pairs/triples for a decorator factory. This is how subsystems discover all classes decorated with a given decorator without a central registry.
+`Metadata.entries()` returns all registered pairs/triples for a decorator factory. This is how
+subsystems discover all classes decorated with a given decorator without a central registry.
 
 ### Examples
 
@@ -98,27 +105,30 @@ Metadata.entries(RateLimit);
 
 ```ts
 declare function createClassDecorator<T>(
-  factory: ClassDecoratorFactory<T>,
-  metadata: T,
-  extra?: ClassDecorator<any>[],
+    factory: ClassDecoratorFactory<T>,
+    metadata: T,
+    extra?: ClassDecorator<any>[],
 ): ClassDecorator<T>;
 ```
 
-The `extra` parameter composes additional decorators. This is how composite decorators work — e.g., a `@Scheduled` that also applies `@Component`.
+The `extra` parameter composes additional decorators. This is how composite decorators work — e.g.,
+a `@Scheduled` that also applies `@Component`.
 
 ```ts
 // Example: @Scheduled is a @Component that also stores a cron expression
 interface ScheduledMetadata {
-  cron: string;
+    cron: string;
 }
 
 function Scheduled(cron: string): ClassDecorator<ScheduledMetadata> {
-  return createClassDecorator(Scheduled, { cron }, [Component()]);
+    return createClassDecorator(Scheduled, {cron}, [Component()]);
 }
 
 // Usage
 @Scheduled('0 * * * *')
-class HourlyCleanup { ... }
+class HourlyCleanup {
+...
+}
 
 // Read
 Metadata.of(Scheduled, HourlyCleanup);  // [{ cron: '0 * * * *' }]
@@ -129,9 +139,9 @@ Metadata.of(Component, HourlyCleanup);  // [{ ... }]  ← also a Component
 
 ```ts
 declare function createMethodDecorator<T>(
-  factory: MethodDecoratorFactory<T>,
-  metadata: T,
-  extra?: MethodDecorator<any>[],
+    factory: MethodDecoratorFactory<T>,
+    metadata: T,
+    extra?: MethodDecorator<any>[],
 ): MethodDecorator<T>;
 ```
 
@@ -141,46 +151,50 @@ Same pattern for method-level metadata.
 
 ```ts
 declare function createFieldDecorator<T>(
-  factory: FieldDecoratorFactory<T>,
-  metadata: T,
-  extra?: FieldDecorator<any>[],
+    factory: FieldDecoratorFactory<T>,
+    metadata: T,
+    extra?: FieldDecorator<any>[],
 ): FieldDecorator<T>;
 ```
 
-Used by `@kavri/schema` for schema field decorators (`@IsString`, `@IsInteger`, etc.). See [09-schema-design.md](./09-schema-design.md).
+Used by `@kavri/schema` for schema field decorators (`@IsString`, `@IsInteger`, etc.).
+See [09-schema-design.md](./09-schema-design.md).
 
 ## 5. Built-in decorators as metadata
 
 All built-in decorators carry typed metadata and can be read via `Metadata.of()`:
 
-| Decorator | Metadata type | Example read |
-|---|---|---|
-| `Component(opts?)` | `ComponentMetadata` | `Metadata.of(Component, cls)` |
-| `Provide(target, fn, opts?)` | `ProvideMetadata<T>` | `Metadata.of(Provide, cls)` |
-| `Touch(...injectables)` | `readonly Injectable<any>[]` | `Metadata.of(Touch, cls)` |
-| `Use(...injectables)` | `readonly Injectable<any>[]` | `Metadata.of(Use, cls)` |
-| `EventType(name?)` | `{ name: string \| undefined }` | `Metadata.of(EventType, cls)` |
-| `OnEvent(event)` | `{ event: ... }` | `Metadata.of(OnEvent, cls, 'method')` |
-| `OnConstruct()` | `{}` | `Metadata.of(OnConstruct, cls, 'init')` |
-| `OnDestroy()` | `{}` | `Metadata.of(OnDestroy, cls, 'dispose')` |
-| `Configuration(prefix, schema)` | `ConfigurationMetadata<T>` | `Metadata.of(Configuration, token)` |
+| Decorator                          | Metadata type                      | Example read                              |
+|------------------------------------|------------------------------------|-------------------------------------------|
+| `Component(opts?)`                 | `ComponentMetadata`                | `Metadata.of(Component, cls)`             |
+| `Provide(target, fn, opts?)`       | `ProvideMetadata<T>`               | `Metadata.of(Provide, cls)`               |
+| `Import(...injectables)`            | `readonly Injectable<any>[]`       | `Metadata.of(Import, cls)`                 |
+| `Inject(...injectables)`              | `readonly Injectable<any>[]`       | `Metadata.of(Use, cls)`                   |
+| `EventType(name?)`                 | `{ name: string \| undefined }`    | `Metadata.of(EventType, cls)`             |
+| `OnEvent(event)`                   | `{ event: ... }`                   | `Metadata.of(OnEvent, cls, 'method')`     |
+| `OnConstruct()`                    | `{}`                               | `Metadata.of(OnConstruct, cls, 'init')`   |
+| `OnDestroy()`                      | `{}`                               | `Metadata.of(OnDestroy, cls, 'dispose')`  |
+| `Configuration(prefix, schema)`    | `ConfigurationMetadata<T>`         | `Metadata.of(Configuration, token)`       |
 | `OverrideConfiguration(token, fn)` | `OverrideConfigurationMetadata<T>` | `Metadata.of(OverrideConfiguration, cls)` |
 
 ## 6. Programmatic metadata — `Metadata.apply()`
 
-Attach metadata to a class or method without using decorator syntax. `apply()` uses push semantics — it appends to the metadata array rather than replacing it. Useful for dynamic registration or testing.
+Attach metadata to a class or method without using decorator syntax. `apply()` uses push semantics —
+it appends to the metadata array rather than replacing it. Useful for dynamic registration or
+testing.
 
 ```ts
 // Programmatically mark a class as a Component
-Metadata.apply(Component, MyClass, { options: { name: 'dynamic' } });
+Metadata.apply(Component, MyClass, {options: {name: 'dynamic'}});
 
 // Programmatically add an OnEvent handler
-Metadata.apply(OnEvent, MyClass, 'handleOrder', { event: OrderCreatedEvent });
+Metadata.apply(OnEvent, MyClass, 'handleOrder', {event: OrderCreatedEvent});
 ```
 
 ## 7. Collection injection via decorator
 
-`injectAll()` accepts a `ClassDecoratorFactory` to collect all classes decorated with a specific decorator:
+`injectAll()` accepts a `ClassDecoratorFactory` to collect all classes decorated with a specific
+decorator:
 
 ```ts
 // Inject all @Scheduled-decorated classes
@@ -194,18 +208,21 @@ This is how subsystems discover decorated classes without a central registry.
 
 ## 8. AsyncScope (`@kavri/basic`)
 
-Async-scoped key-value store backed by `AsyncLocalStorage`. Each usage scenario creates its own `AsyncScope` instance — there is no global singleton.
+Async-scoped key-value store backed by `AsyncLocalStorage`. Each usage scenario creates its own
+`AsyncScope` instance — there is no global singleton.
 
 - `@kavri/web` creates `RequestContext` for HTTP/WebSocket request state
 - `@kavri/web` creates `TransactionContext` for the transaction stack
 
 ### Key
 
-A thin typed wrapper around a unique symbol. Keys carry no methods — all operations go through the `AsyncScope` instance.
+A thin typed wrapper around a unique symbol. Keys carry no methods — all operations go through the
+`AsyncScope` instance.
 
 ```ts
 declare class Key<T> {
     readonly symbol: symbol;
+
     constructor(name?: string);
 }
 ```
@@ -251,12 +268,16 @@ declare class AsyncScope {
 }
 ```
 
-The internal `AsyncLocalStorage` is created lazily on first `enter()`/`run()`/`fork()` call. State is `Record<symbol, any>`. `has()` uses `symbol in state` so `set(key, undefined)` is distinguishable from absence. `delete()` uses `delete state[key.symbol]` on the current scope only — does not affect parent scopes.
+The internal `AsyncLocalStorage` is created lazily on first `enter()`/`run()`/`fork()` call. State
+is `Record<symbol, any>`. `has()` uses `symbol in state` so `set(key, undefined)` is distinguishable
+from absence. `delete()` uses `delete state[key.symbol]` on the current scope only — does not affect
+parent scopes.
 
 ### Usage
 
 ```ts
-import { AsyncScope, Key } from '@kavri/basic';
+import {AsyncScope} from '@kavri/basic';
+import {Key} from "./key";
 
 // Each module creates its own context
 const MyContext = new AsyncScope();
@@ -287,29 +308,31 @@ await MyContext.fork(async () => {
 
 ```ts
 import {
-  Component,
-  Metadata,
-  createClassDecorator,
-  createMethodDecorator,
-  inject,
-  injectAll,
+    Component,
+    Metadata,
+    createClassDecorator,
+    createMethodDecorator,
+    inject,
+    injectAll,
 } from '@kavri/container';
 
 // ---- Custom class decorator ----
 
 interface CacheableOptions {
-  ttl: number;
-  key?: string;
+    ttl: number;
+    key?: string;
 }
 
 function Cacheable(options: CacheableOptions): ClassDecorator<CacheableOptions> {
-  return createClassDecorator(Cacheable, options);
+    return createClassDecorator(Cacheable, options);
 }
 
 @Component()
-@Cacheable({ ttl: 3600 })
+@Cacheable({ttl: 3600})
 class UserService {
-  getUser(id: string) { return { id }; }
+    getUser(id: string) {
+        return {id};
+    }
 }
 
 Metadata.of(Cacheable, UserService); // [{ ttl: 3600 }]
@@ -317,18 +340,20 @@ Metadata.of(Cacheable, UserService); // [{ ttl: 3600 }]
 // ---- Custom method decorator ----
 
 interface RateLimitOptions {
-  maxRequests: number;
-  windowMs: number;
+    maxRequests: number;
+    windowMs: number;
 }
 
 function RateLimit(options: RateLimitOptions): MethodDecorator<RateLimitOptions> {
-  return createMethodDecorator(RateLimit, options);
+    return createMethodDecorator(RateLimit, options);
 }
 
 @Component()
 class ApiService {
-  @RateLimit({ maxRequests: 100, windowMs: 60000 })
-  search(query: string) { return []; }
+    @RateLimit({maxRequests: 100, windowMs: 60000})
+    search(query: string) {
+        return [];
+    }
 }
 
 Metadata.of(RateLimit, ApiService, 'search'); // [{ maxRequests: 100, windowMs: 60000 }]
@@ -336,17 +361,18 @@ Metadata.of(RateLimit, ApiService, 'search'); // [{ maxRequests: 100, windowMs: 
 // ---- Composite decorator ----
 
 interface ScheduledOptions {
-  cron: string;
+    cron: string;
 }
 
 function Scheduled(cron: string): ClassDecorator<ScheduledOptions> {
-  return createClassDecorator(Scheduled, { cron }, [Component()]);
+    return createClassDecorator(Scheduled, {cron}, [Component()]);
 }
 
 @Scheduled('0 * * * *')
 class HourlyJob {
-  @OnConstruct()
-  async run() { /* ... */ }
+    @OnConstruct()
+    async run() { /* ... */
+    }
 }
 
 Metadata.of(Scheduled, HourlyJob);  // [{ cron: '0 * * * *' }]

@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /**
- * OpenAPI 3.1 types and generation from route definitions.
+ * OpenAPI 3.1 utils and generation from route definitions.
  */
 import type { AnyConstructor } from '@kavri/basic';
 import type { JsonSchema } from './jsonschema.js';
@@ -8,7 +8,7 @@ import { toJsonSchema } from './jsonschema.js';
 import type { Endpoint, RequestInput, ResponseOutput, RouteDefinition } from './route.js';
 
 // ---------------------------------------------------------------------------
-// OpenAPI 3.1 types
+// OpenAPI 3.1 utils
 // ---------------------------------------------------------------------------
 
 export interface OpenAPIv3Info {

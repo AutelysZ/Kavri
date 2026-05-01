@@ -1,0 +1,62 @@
+import {
+  BinaryUnion,
+  FileUnion,
+  IsBody,
+  IsFile,
+  IsFilename,
+  IsQuery,
+} from '../decorators/route.js';
+import { Schema } from '../schema.js';
+
+@Schema({ description: 'Upload file request' })
+export class UploadRequest {
+  @IsFile({
+    array: {
+      maxItems: { value: 10, message: 'Upload up to 10 files at a time.' },
+      minItems: { value: 1, message: 'Upload files cannot be empty.' },
+    },
+    accept: ['image/*', '.pdf'],
+    maxSize: { value: 1 << 22, message: 'Max file size is 4MB.' },
+  })
+  files!: FileUnion[];
+}
+
+// the outgoing message's type is determined by sender
+// the runtime client should support all format supported by the env
+export const uploadRequest: UploadRequest = {
+  files: [
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    FileUnion.ofWebFile(HTMLInputElement.prototype.files!.item(0)!),
+    FileUnion.ofMultipart({
+      path: './tmp/received/xxx.png',
+      size: 1,
+      name: 'file.png',
+      type: 'image/png',
+    }),
+    FileUnion.ofNodePath('./tmp/received/xx.png'),
+  ],
+};
+
+export class BinaryUploadRequest {
+  @IsQuery()
+  @IsFilename({ accept: ['image/*', '.pdf'] })
+  name!: string;
+  @IsBody()
+  file!: BinaryUnion;
+}
+
+export const binaryUploadRequest: BinaryUploadRequest = {
+  name: 'test.png',
+  file: BinaryUnion.ofWebBlob(new Blob(['hello world'])),
+};
+
+export class UploadController {
+  async binaryUpload(req: BinaryUploadRequest) {
+    // the incoming message type is determined by the runtime
+    req.file.asNodeStream();
+  }
+
+  async upload(req: UploadRequest) {
+    req.files.forEach((f) => f.asMultipart());
+  }
+}

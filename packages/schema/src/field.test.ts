@@ -1,13 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import type { ClassDecorator } from '@kavri/basic';
 import { createClassDecorator, Metadata } from '@kavri/basic';
-import { createSchemaFieldDecoratorFactory, SchemaField, toValidateSchema } from './field.js';
-import type {
-  SchemaFieldDecorator,
-  SchemaFieldDecoratorMetadata,
-  ValidateSchema,
-} from './types.js';
-import { schemaFieldDecoratorName } from './types.js';
+import {
+  createFieldSchemaDecoratorFactory,
+  FieldSchema,
+  type FieldSchemaDecorator,
+  type FieldSchemaDecoratorMetadata,
+  FieldSchemaDecoratorName,
+  toValidateSchema,
+  type ValidateSchema,
+} from './field.js';
 
 // Dummy class decorator to flush TC39 metadata
 function Tag(): ClassDecorator<object> {
@@ -47,7 +49,7 @@ describe('toValidateSchema', () => {
   });
 });
 
-describe('createSchemaFieldDecoratorFactory', () => {
+describe('createFieldSchemaDecoratorFactory', () => {
   it('attaches statics to factory function', () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const validate = (_params: any, value: unknown) =>
@@ -55,10 +57,10 @@ describe('createSchemaFieldDecoratorFactory', () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const toJsonSchema = (params: any) => ({ minLength: params.value });
 
-    const MinLength = createSchemaFieldDecoratorFactory(
+    const MinLength = createFieldSchemaDecoratorFactory(
       'MinLength',
-      (options: ValidateSchema<number>): SchemaFieldDecorator<ValidateSchema<number>> => {
-        return SchemaField(MinLength, options);
+      (options: ValidateSchema<number>): FieldSchemaDecorator<ValidateSchema<number>> => {
+        return FieldSchema(MinLength, options);
       },
       {
         message: '.label must be at least .value characters',
@@ -67,7 +69,7 @@ describe('createSchemaFieldDecoratorFactory', () => {
       },
     );
 
-    expect(MinLength[schemaFieldDecoratorName]).toBe('MinLength');
+    expect(MinLength[FieldSchemaDecoratorName]).toBe('MinLength');
     expect(MinLength.message).toBe('.label must be at least .value characters');
     expect(MinLength.validate).toBe(validate);
     expect(MinLength.toJsonSchema).toBe(toJsonSchema);
@@ -75,10 +77,10 @@ describe('createSchemaFieldDecoratorFactory', () => {
   });
 
   it('factory returns a working decorator', () => {
-    const MinLength = createSchemaFieldDecoratorFactory(
+    const MinLength = createFieldSchemaDecoratorFactory(
       'MinLength',
-      (options: ValidateSchema<number>): SchemaFieldDecorator<ValidateSchema<number>> => {
-        return SchemaField(MinLength, options);
+      (options: ValidateSchema<number>): FieldSchemaDecorator<ValidateSchema<number>> => {
+        return FieldSchema(MinLength, options);
       },
       {
         message: '.label must be at least .value characters',
@@ -95,9 +97,9 @@ describe('createSchemaFieldDecoratorFactory', () => {
     }
 
     const entries = // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      Metadata.ofField(SchemaField as any, Foo, 'name' as any);
+      Metadata.ofField(FieldSchema as any, Foo, 'name' as any);
     expect(entries).toHaveLength(1);
-    const meta = entries[0].metadata as SchemaFieldDecoratorMetadata<ValidateSchema<number>>;
+    const meta = entries[0].metadata as FieldSchemaDecoratorMetadata<ValidateSchema<number>>;
     expect(meta.rule).toBe('MinLength');
     expect(meta.factory).toBe(MinLength);
     expect(meta.params).toEqual({ value: 3 });
@@ -106,12 +108,12 @@ describe('createSchemaFieldDecoratorFactory', () => {
   });
 });
 
-describe('SchemaField', () => {
+describe('FieldSchema', () => {
   it('creates a decorator with metadata', () => {
-    const IsString = createSchemaFieldDecoratorFactory(
+    const IsString = createFieldSchemaDecoratorFactory(
       'IsString',
-      (options: ValidateSchema<string>): SchemaFieldDecorator<ValidateSchema<string>> => {
-        return SchemaField(IsString, options);
+      (options: ValidateSchema<string>): FieldSchemaDecorator<ValidateSchema<string>> => {
+        return FieldSchema(IsString, options);
       },
       {
         message: '.label must be a string',
@@ -129,38 +131,38 @@ describe('SchemaField', () => {
   });
 
   it('collects children', () => {
-    const MinLength = createSchemaFieldDecoratorFactory(
+    const MinLength = createFieldSchemaDecoratorFactory(
       'MinLength',
-      (options: ValidateSchema<number>): SchemaFieldDecorator<ValidateSchema<number>> => {
-        return SchemaField(MinLength, options);
+      (options: ValidateSchema<number>): FieldSchemaDecorator<ValidateSchema<number>> => {
+        return FieldSchema(MinLength, options);
       },
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       {
         message: '.label must be at least .value characters',
         validate: (p: any, v: any) => typeof v !== 'string' || v.length >= p.value,
       },
     );
 
-    const MaxLength = createSchemaFieldDecoratorFactory(
+    const MaxLength = createFieldSchemaDecoratorFactory(
       'MaxLength',
-      (options: ValidateSchema<number>): SchemaFieldDecorator<ValidateSchema<number>> => {
-        return SchemaField(MaxLength, options);
+      (options: ValidateSchema<number>): FieldSchemaDecorator<ValidateSchema<number>> => {
+        return FieldSchema(MaxLength, options);
       },
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       {
         message: '.label must be at most .value characters',
         validate: (p: any, v: any) => typeof v !== 'string' || v.length <= p.value,
       },
     );
 
-    const IsString = createSchemaFieldDecoratorFactory(
+    const IsString = createFieldSchemaDecoratorFactory(
       'IsString',
-      (options: { minLength?: number; maxLength?: number }): SchemaFieldDecorator => {
-        const children: SchemaFieldDecorator[] = [];
+      (options: { minLength?: number; maxLength?: number }): FieldSchemaDecorator => {
+        const children: FieldSchemaDecorator[] = [];
         if (options.minLength !== undefined) children.push(MinLength({ value: options.minLength }));
         if (options.maxLength !== undefined) children.push(MaxLength({ value: options.maxLength }));
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        return SchemaField(IsString, options as any, children);
+        return FieldSchema(IsString, options as any, children);
       },
       {
         message: '.label must be a string',
@@ -177,9 +179,9 @@ describe('SchemaField', () => {
     }
 
     const entries = // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      Metadata.ofField(SchemaField as any, Foo, 'name' as any);
+      Metadata.ofField(FieldSchema as any, Foo, 'name' as any);
     expect(entries).toHaveLength(1);
-    const meta = entries[0].metadata as SchemaFieldDecoratorMetadata;
+    const meta = entries[0].metadata as FieldSchemaDecoratorMetadata;
     expect(meta.children).toHaveLength(2);
 
     const [min, max] = meta.children;
@@ -190,9 +192,9 @@ describe('SchemaField', () => {
   });
 
   it('statics are callable on the factory', () => {
-    const IsEmail = createSchemaFieldDecoratorFactory(
+    const IsEmail = createFieldSchemaDecoratorFactory(
       'IsEmail',
-      (): SchemaFieldDecorator => SchemaField(IsEmail, {}),
+      (): FieldSchemaDecorator => FieldSchema(IsEmail, {}),
       {
         message: 'must be a valid email',
         // eslint-disable-next-line @typescript-eslint/no-explicit-any

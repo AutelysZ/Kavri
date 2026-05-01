@@ -32,7 +32,7 @@ export interface DecoratorStatic<T> {
  * TypeScript decorator protocols. Carries typed metadata `T`
  * via the {@link DecoratorStatic.metadata} property.
  */
-export type ClassDecorator<T> = globalThis.ClassDecorator &
+export type ClassDecorator<T = any> = globalThis.ClassDecorator &
   ((target: Function, context: ClassDecoratorContext) => void) &
   DecoratorStatic<T>;
 
@@ -41,7 +41,7 @@ export type ClassDecorator<T> = globalThis.ClassDecorator &
  * TypeScript decorator protocols. Carries typed metadata `T`
  * via the {@link DecoratorStatic.metadata} property.
  */
-export type MethodDecorator<T> = globalThis.MethodDecorator &
+export type MethodDecorator<T = any> = globalThis.MethodDecorator &
   ((target: Function, context: ClassMethodDecoratorContext) => void) &
   DecoratorStatic<T>;
 
@@ -51,8 +51,8 @@ export type MethodDecorator<T> = globalThis.MethodDecorator &
  * `(target, key, descriptor?)` signature as method decorators.
  * Carries typed metadata `T` via the {@link DecoratorStatic.metadata} property.
  */
-export type FieldDecorator<T> = globalThis.MethodDecorator &
-  ((value: any, context: ClassFieldDecoratorContext) => void) &
+export type FieldDecorator<T = any> = globalThis.MethodDecorator &
+  ((value: undefined, context: ClassFieldDecoratorContext) => void) &
   DecoratorStatic<T>;
 
 /**
@@ -60,28 +60,28 @@ export type FieldDecorator<T> = globalThis.MethodDecorator &
  * The factory itself serves as the metadata key for querying
  * via `Metadata.ofClass(factory, target)`.
  */
-export type ClassDecoratorFactory<T> = (...args: any[]) => ClassDecorator<T>;
+export type ClassDecoratorFactory<T = any> = (...args: any[]) => ClassDecorator<T>;
 
 /**
  * Factory function that creates a {@link MethodDecorator}.
  * The factory itself serves as the metadata key for querying
  * via `Metadata.ofMethod(factory, target, qualifier)`.
  */
-export type MethodDecoratorFactory<T> = (...args: any[]) => MethodDecorator<T>;
+export type MethodDecoratorFactory<T = any> = (...args: any[]) => MethodDecorator<T>;
 
 /**
  * Factory function that creates a {@link FieldDecorator}.
  * The factory itself serves as the metadata key for querying
  * via `Metadata.ofField(factory, target, qualifier)`.
  */
-export type FieldDecoratorFactory<T> = (...args: any[]) => FieldDecorator<T>;
+export type FieldDecoratorFactory<T = any> = (...args: any[]) => FieldDecorator<T>;
 
 /**
- * Maps decorator kind names to their corresponding decorator types.
- * Used by {@link AnyDecorator} to compute intersection types for
+ * Maps decorator kind names to their corresponding decorator utils.
+ * Used by {@link AnyDecorator} to compute intersection utils for
  * multi-kind decorators.
  */
-export interface DecoratorMap<T> {
+export interface DecoratorMap<T = any> {
   class: ClassDecorator<T>;
   method: MethodDecorator<T>;
   field: FieldDecorator<T>;
@@ -89,7 +89,7 @@ export interface DecoratorMap<T> {
 
 /**
  * Converts a union type `A | B | C` to an intersection type `A & B & C`.
- * Used internally to build multi-kind decorator types.
+ * Used internally to build multi-kind decorator utils.
  */
 export type UnionToIntersection<U> = (U extends any ? (arg: U) => void : never) extends (
   arg: infer I,
@@ -100,14 +100,14 @@ export type UnionToIntersection<U> = (U extends any ? (arg: U) => void : never) 
 /**
  * A decorator that supports one or more kinds (class, method, field).
  * When multiple kinds are specified, the type is the intersection of
- * all corresponding decorator types, allowing it to be applied to
+ * all corresponding decorator utils, allowing it to be applied to
  * any of the specified targets.
  *
  * @typeParam T - The metadata type.
  * @typeParam Kind - Which kinds this decorator supports. Defaults to all.
  */
 export type AnyDecorator<
-  T,
+  T = any,
   Kind extends keyof DecoratorMap<T> = keyof DecoratorMap<T>,
 > = UnionToIntersection<DecoratorMap<T>[Kind]>;
 
@@ -118,6 +118,7 @@ export type AnyDecorator<
  * @typeParam T - The metadata type.
  * @typeParam Kind - Which kinds this decorator supports. Defaults to all.
  */
-export type AnyDecoratorFactory<T, Kind extends keyof DecoratorMap<T> = keyof DecoratorMap<T>> = (
-  ...args: any[]
-) => AnyDecorator<T, Kind>;
+export type AnyDecoratorFactory<
+  T = any,
+  Kind extends keyof DecoratorMap<T> = keyof DecoratorMap<T>,
+> = (...args: any[]) => AnyDecorator<T, Kind>;

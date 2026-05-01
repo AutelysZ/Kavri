@@ -4,14 +4,18 @@ Package: `@kavri/schema` — depends on `@kavri/basic` only.
 
 ## 1. Principles
 
-- **Class-based schemas.** Define schemas with classes and decorators. No `z.object()`, no `z.infer<>`.
-- **No reflect-metadata.** Uses `@kavri/basic` metadata system (`FieldDecorator`, `createFieldDecorator`).
+- **Class-based schemas.** Define schemas with classes and decorators. No `z.object()`, no
+  `z.infer<>`.
+- **No reflect-metadata.** Uses `@kavri/basic` metadata system (`FieldDecorator`,
+  `createFieldDecorator`).
 - **Full JSON Schema 2020-12 coverage.** All standard keywords. No non-standard extensions.
 - **Full validator.js coverage.** All validators available as decorator factories.
-- **Required by default.** Fields are required unless `{ optional: true }` or `{ nullable: true }`. Prefer `nullable`.
+- **Required by default.** Fields are required unless `{ optional: true }` or `{ nullable: true }`.
+  Prefer `nullable`.
 - **Minimal.** Field-level only. No structural transforms.
-- **Bidirectional.** Class → JSON Schema. JSON Schema → class. Parse and validate.
-- **Messages + Routes.** `@Schema` defines messages. `defineRoute` defines HTTP routes. Both shareable.
+- **Bidirectional.** Class → JSON Schema. JSON Schema → class. Parse and decode.
+- **Messages + Routes.** `@Schema` defines messages. `defineRoute` defines HTTP routes. Both
+  shareable.
 
 ## 2. Schema Field Decorator System
 
@@ -63,68 +67,69 @@ interface BaseSchema<S = any, V = S> extends ValidateOptions {
     const?: ValidateField<V>;
     enum?: ValidateField<V[]>;
     /** Additional inline decorators to compose. */
-    decorators?: SchemaFieldDecorator[];
+    decorators?: FieldSchemaDecorator[];
 }
 ```
 
-### SchemaFieldDecorator
+### FieldSchemaDecorator
 
-A `SchemaFieldDecorator` is a `FieldDecorator` carrying schema metadata. Created by `SchemaField()`.
+A `FieldSchemaDecorator` is a `FieldDecorator` carrying schema metadata. Created by `FieldSchema()`.
 
 ```ts
-type SchemaFieldDecorator<P = any> = FieldDecorator<SchemaFieldDecoratorMetadata<P>>;
+type FieldSchemaDecorator<P = any> = FieldDecorator<FieldSchemaDecoratorMetadata<P>>;
 
-interface SchemaFieldDecoratorMetadata<P> {
-    factory: SchemaFieldDecoratorFactory<P>;
+interface FieldSchemaDecoratorMetadata<P> {
+    factory: FieldSchemaDecoratorFactory<P>;
     params: P;
-    decorators: SchemaFieldDecorator[];  // composed child decorators
+    decorators: FieldSchemaDecorator[];  // composed child decorators
 }
 ```
 
-### SchemaFieldDecoratorFactory
+### FieldSchemaDecoratorFactory
 
-Every decorator factory (`IsString`, `IsEmail`, `MinLength`, etc.) carries static methods for validation, parsing, serialization, and JSON Schema generation:
+Every decorator factory (`IsString`, `IsEmail`, `MinLength`, etc.) carries static methods for
+validation, parsing, serialization, and JSON Schema generation:
 
 ```ts
-interface SchemaFieldDecoratorFactoryStatic<P> {
+interface FieldSchemaDecoratorFactoryStatic<P> {
     message?: string;
     parse?: (params: P, plain: any) => any;
-    serialize?: (params: P, value: any) => any;
-    validate?: (params: P, value: any) => boolean;
+    json?: (params: P, value: any) => any;
+    decode?: (params: P, value: any) => boolean;
     toJsonSchema?: (params: P) => JsonSchema;
 }
 
-type SchemaFieldDecoratorFactory<P> =
-    FieldDecoratorFactory<SchemaFieldDecoratorMetadata<P>>
-    & SchemaFieldDecoratorFactoryStatic<P>;
+type FieldSchemaDecoratorFactory<P> =
+    FieldDecoratorFactory<FieldSchemaDecoratorMetadata<P>>
+    & FieldSchemaDecoratorFactoryStatic<P>;
 ```
 
 ### Creating field decorator factories
 
 ```ts
-declare function createSchemaFieldDecoratorFactory<P extends ValidateOptions>(
-    factory: FieldDecoratorFactory<SchemaFieldDecoratorMetadata<P>>,
-    statics: SchemaFieldDecoratorFactoryStatic<P>,
-): SchemaFieldDecoratorFactory<P>;
+declare function createFieldSchemaDecoratorFactory<P extends ValidateOptions>(
+    factory: FieldDecoratorFactory<FieldSchemaDecoratorMetadata<P>>,
+    statics: FieldSchemaDecoratorFactoryStatic<P>,
+): FieldSchemaDecoratorFactory<P>;
 
-declare function SchemaField<P extends ValidateOptions>(
-    factory: SchemaFieldDecoratorFactory<P>,
+declare function FieldSchema<P extends ValidateOptions>(
+    factory: FieldSchemaDecoratorFactory<P>,
     params: P,
-    decorators?: SchemaFieldDecorator[],
-): SchemaFieldDecorator<P>;
+    decorators?: FieldSchemaDecorator[],
+): FieldSchemaDecorator<P>;
 ```
 
 ### Example: building a custom decorator
 
 ```ts
-const MinLength = createSchemaFieldDecoratorFactory(
-    function (options: ValidateField<number>): SchemaFieldDecorator<ValidateSchema<number>> {
-        return SchemaField(MinLength, toValidateSchema(options));
+const MinLength = createFieldSchemaDecoratorFactory(
+    function (options: ValidateField<number>): FieldSchemaDecorator<ValidateSchema<number>> {
+        return FieldSchema(MinLength, toValidateSchema(options));
     },
     {
         message: '.label must be at least .value characters',
-        validate: (params, value) => typeof value !== 'string' || value.length >= params.value,
-        toJsonSchema: params => ({ minLength: params.value }),
+        decode: (params, value) => typeof value !== 'string' || value.length >= params.value,
+        toJsonSchema: params => ({minLength: params.value}),
     },
 );
 ```
@@ -141,10 +146,11 @@ interface StringSchema<V = string> extends BaseSchema<string, V> {
     format?: string;
 }
 
-declare function IsString<V = string>(schema?: StringSchema<V>): SchemaFieldDecorator<StringSchema<V>>;
+declare function IsString<V = string>(schema?: StringSchema<V>): FieldSchemaDecorator<StringSchema<V>>;
 ```
 
-`IsString({ minLength: 3 })` internally pushes `MinLength(3)` into the decorator chain. All inline validation fields become child decorators.
+`IsString({ minLength: 3 })` internally pushes `MinLength(3)` into the decorator chain. All inline
+validation fields become child decorators.
 
 ### Numeric
 
@@ -157,17 +163,20 @@ interface NumericSchema<V = number> extends BaseSchema<number, V> {
     multipleOf?: ValidateField<V>;
 }
 
-declare function IsInteger(schema?: NumericSchema): SchemaFieldDecorator<NumericSchema>;
-declare function IsNumber(schema?: NumericSchema): SchemaFieldDecorator<NumericSchema>;
-declare function IsBigInt(schema?: NumericSchema<bigint>): SchemaFieldDecorator<NumericSchema<bigint>>;
+declare function IsInteger(schema?: NumericSchema): FieldSchemaDecorator<NumericSchema>;
+
+declare function IsNumber(schema?: NumericSchema): FieldSchemaDecorator<NumericSchema>;
+
+declare function IsBigInt(schema?: NumericSchema<bigint>): FieldSchemaDecorator<NumericSchema<bigint>>;
 ```
 
-`IsBigInt` → JSON Schema: `{ type: 'string', pattern: '^-?\\d+$' }`. Parsed from string, serialized to string.
+`IsBigInt` → JSON Schema: `{ type: 'string', pattern: '^-?\\d+$' }`. Parsed from string, serialized
+to string.
 
 ### Boolean
 
 ```ts
-declare function IsBoolean(schema?: BaseSchema<boolean>): SchemaFieldDecorator<BaseSchema<boolean>>;
+declare function IsBoolean(schema?: BaseSchema<boolean>): FieldSchemaDecorator<BaseSchema<boolean>>;
 ```
 
 ### Date
@@ -179,20 +188,25 @@ interface DateOptions extends ValidateOptions {
     after?: Date;
 }
 
-declare function IsDate(options?: DateOptions, schema?: StringSchema<Date>): SchemaFieldDecorator<DateOptions>;
+declare function IsDate(options?: DateOptions, schema?: StringSchema<Date>): FieldSchemaDecorator<DateOptions>;
 ```
 
-Composes `IsString` internally. Parse: `new Date(value)`. Serialize: `.toISOString()`. JSON Schema: `{ type: 'string', format: 'date-time' | 'date' }`.
+Composes `IsString` internally. Parse: `new Date(value)`. Serialize: `.toISOString()`. JSON Schema:
+`{ type: 'string', format: 'date-time' | 'date' }`.
 
 ### String format decorators (validator.js)
 
-Each composes `IsString` and adds a `validate` function from `validator`:
+Each composes `IsString` and adds a `decode` function from `validator`:
 
 ```ts
-declare function IsEmail(options?: EmailOptions, schema?: StringSchema): SchemaFieldDecorator<EmailOptions>;
-declare function IsUrl(options?: ValidateOptions, schema?: StringSchema): SchemaFieldDecorator;
-declare function IsUUID(options?: { version?: 3 | 4 | 5 } & ValidateOptions): SchemaFieldDecorator;
-declare function IsIP(options?: { version?: 4 | 6 } & ValidateOptions): SchemaFieldDecorator;
+declare function IsEmail(options?: EmailOptions, schema?: StringSchema): FieldSchemaDecorator<EmailOptions>;
+
+declare function IsUrl(options?: ValidateOptions, schema?: StringSchema): FieldSchemaDecorator;
+
+declare function IsUUID(options?: { version?: 3 | 4 | 5 } & ValidateOptions): FieldSchemaDecorator;
+
+declare function IsIP(options?: { version?: 4 | 6 } & ValidateOptions): FieldSchemaDecorator;
+
 // ... all other validator.js validators follow the same pattern
 ```
 
@@ -202,74 +216,75 @@ declare function IsIP(options?: { version?: 4 | 6 } & ValidateOptions): SchemaFi
 declare function IsEnum<K extends string, V extends string | number, E extends Record<K, V>>(
     host: ValidateField<E>,
     schema?: InferredSchema<V>,
-): SchemaFieldDecorator<ValidateSchema<E>>;
+): FieldSchemaDecorator<ValidateSchema<E>>;
 
 declare function IsIn<V extends readonly (string | number)[]>(
     values: ValidateField<V>,
     schema?: InferredSchema<V[number]>,
-): SchemaFieldDecorator<ValidateSchema<V>>;
+): FieldSchemaDecorator<ValidateSchema<V>>;
 
 declare function IsConst<V>(
     value: ValidateField<V>,
     schema?: InferredSchema<V>,
-): SchemaFieldDecorator<ValidateSchema<V>>;
+): FieldSchemaDecorator<ValidateSchema<V>>;
 ```
 
-`InferredSchema<V>` resolves to `NumericSchema` for numbers, `StringSchema` for strings, `ObjectSchema` for objects.
+`InferredSchema<V>` resolves to `NumericSchema` for numbers, `StringSchema` for strings,
+`ObjectSchema` for objects.
 
 ### Composite types
 
 ```ts
 // Object with properties
 interface ObjectSchema<T = object> extends BaseSchema<T> {
-    properties?: { [K in keyof T]?: SchemaFieldDecorator };
-    patternProperties?: Record<string, SchemaFieldDecorator>;
-    additionalProperties?: SchemaFieldDecorator;
-    propertyNames?: SchemaFieldDecorator;
+    properties?: { [K in keyof T]?: FieldSchemaDecorator };
+    patternProperties?: Record<string, FieldSchemaDecorator>;
+    additionalProperties?: FieldSchemaDecorator;
+    propertyNames?: FieldSchemaDecorator;
     maxProperties?: ValidateField<number>;
     minProperties?: ValidateField<number>;
     required?: ValidateField<Array<keyof T>>;
 }
 
 declare function IsObject<T extends object>(
-    properties: { [K in keyof T]?: SchemaFieldDecorator },
+    properties: { [K in keyof T]?: FieldSchemaDecorator },
     schema?: ObjectSchema<T>,
-): SchemaFieldDecorator<ObjectSchema<T>>;
+): FieldSchemaDecorator<ObjectSchema<T>>;
 
 // Record<string, V>
 declare function IsRecord<V>(
-    value: SchemaFieldDecorator,
+    value: FieldSchemaDecorator,
     schema?: ObjectSchema<Record<string, V>>,
-): SchemaFieldDecorator<ObjectSchema<Record<string, V>>>;
+): FieldSchemaDecorator<ObjectSchema<Record<string, V>>>;
 
 // Array
 interface ArraySchema<T = any> extends BaseSchema<T[]> {
-    items?: SchemaFieldDecorator;
+    items?: FieldSchemaDecorator;
     minItems?: ValidateField<number>;
     maxItems?: ValidateField<number>;
     uniqueItems?: ValidateField<boolean>;
 }
 
 declare function IsArray<T>(
-    items: SchemaFieldDecorator,
+    items: FieldSchemaDecorator,
     schema?: ArraySchema<T>,
-): SchemaFieldDecorator<ArraySchema<T>>;
+): FieldSchemaDecorator<ArraySchema<T>>;
 
 // Reference to @Schema class (always lazy)
 declare function Ref<T extends object>(
     ref: ValidateField<() => AnyConstructor<T>>,
     schema?: ObjectSchema<T>,
-): SchemaFieldDecorator<ValidateSchema<() => AnyConstructor<T>>>;
+): FieldSchemaDecorator<ValidateSchema<() => AnyConstructor<T>>>;
 
 // Union
 interface AnyOfSchema<T = any> extends BaseSchema<T> {
-    anyOf: SchemaFieldDecorator[];
+    anyOf: FieldSchemaDecorator[];
 }
 
 declare function AnyOf<T>(
-    anyOf: SchemaFieldDecorator[],
+    anyOf: FieldSchemaDecorator[],
     schema?: BaseSchema<T>,
-): SchemaFieldDecorator<AnyOfSchema<T>>;
+): FieldSchemaDecorator<AnyOfSchema<T>>;
 ```
 
 ## 4. @Schema Decorator
@@ -278,7 +293,8 @@ declare function AnyOf<T>(
 declare function Schema<T>(schema?: ObjectSchema<T>): ClassDecorator<ObjectSchema<T>>;
 ```
 
-`@Schema()` aggregates all field decorator metadata from the class. If `schema.properties` is provided inline, those definitions are used directly.
+`@Schema()` aggregates all field decorator metadata from the class. If `schema.properties` is
+provided inline, those definitions are used directly.
 
 Fields without decorators are ignored — not parsed, validated, or serialized.
 
@@ -286,25 +302,25 @@ Fields without decorators are ignored — not parsed, validated, or serialized.
 
 ```ts
 /** Get schema metadata from a @Schema class. */
-declare function getSchema(clazz: AnyConstructor<any>): ObjectSchema<any>;
+declare function getSchema(clazz: AnyConstructor): ObjectSchema<any>;
 
 /** Generate JSON Schema 2020-12 from a @Schema class. */
-declare function toJsonSchema(clazz: AnyConstructor<any>): object;
+declare function toJsonSchema(clazz: AnyConstructor): object;
 
 /** Reverse-engineer JSON Schema into inline field decorators. */
-declare function fromJsonSchema(jsonSchema: object): Record<string, SchemaFieldDecorator>;
+declare function fromJsonSchema(jsonSchema: object): Record<string, FieldSchemaDecorator>;
 
 /** Programmatically register schema on a class. */
-declare function defineSchema(clazz: AnyConstructor<any>, schema: ObjectSchema<any>): void;
+declare function defineSchema(clazz: AnyConstructor, schema: ObjectSchema<any>): void;
 
 /** Parse raw data into a @Schema class instance. Validates and applies parsers. */
 declare function parse<T>(clazz: AnyConstructor<T>, data: unknown): T;
 
 /** Validate without creating instance. Returns null if valid. */
-declare function validate(clazz: AnyConstructor<any>, data: unknown): SchemaValidationError | null;
+declare function decode(clazz: AnyConstructor, data: unknown): TransformResult | null;
 
 /** Serialize instance to plain object. Applies serializers, excludes @Ignore fields. */
-declare function serialize<T>(instance: T): object;
+declare function json<T>(instance: T): object;
 
 /** Convert ValidateField<T> to ValidateSchema<T>. */
 declare function toValidateSchema<T>(options: ValidateField<T>): ValidateSchema<T>;
@@ -313,8 +329,8 @@ declare function toValidateSchema<T>(options: ValidateField<T>): ValidateSchema<
 ## 6. Error Types
 
 ```ts
-declare class SchemaValidationError extends Error {
-    readonly clazz: AnyConstructor<any>;
+declare class TransformResult extends Error {
+    readonly clazz: AnyConstructor;
     readonly issues: ValidationIssue[];
 }
 
@@ -329,7 +345,8 @@ interface ValidationIssue {
 
 ## 7. Route Definitions
 
-Like protobuf: `@Schema` classes are messages, `defineRoute` defines HTTP endpoints. Both shareable between frontend and backend.
+Like protobuf: `@Schema` classes are messages, `defineRoute` defines HTTP endpoints. Both shareable
+between frontend and backend.
 
 ### Core types
 
@@ -385,7 +402,8 @@ interface Endpoint<TReq = any, TRes = any> {
 
 ### Route-specific field decorators
 
-These decorators are exclusive to route request schemas. They auto-set the field's schema — do NOT compose with other schema decorators (`@IsString`, `@IsInteger`, etc.).
+These decorators are exclusive to route request schemas. They auto-set the field's schema — do NOT
+compose with other schema decorators (`@IsString`, `@IsInteger`, etc.).
 
 ```ts
 /** Represents an uploaded file in a multipart request. */
@@ -407,12 +425,14 @@ interface MultipartFile {
 interface IsFileOptions extends ValidateOptions {
     /** If true, field type is MultipartFile[]. Default: false (single file). */
     array?: boolean;
-    /** Accepted MIME types. E.g., ['image/*', 'application/pdf']. */
+    /** Accepted MIME utils. E.g., ['image/*', 'application/pdf']. */
     accept?: string[];
     /** Max file size in bytes. */
     maxSize?: number;
 }
-declare function IsFile(options?: IsFileOptions): SchemaFieldDecorator;
+
+declare function IsFile(options?: IsFileOptions): FieldSchemaDecorator;
+
 // @IsFile()                                → MultipartFile
 // @IsFile({ array: true })                 → MultipartFile[]
 // @IsFile({ accept: ['image/*'], maxSize: 5_000_000 })
@@ -423,7 +443,7 @@ declare function IsFile(options?: IsFileOptions): SchemaFieldDecorator;
  * Auto-sets schema to ReadableStream.
  * Do NOT combine with other schema decorators.
  */
-declare function IsBody(options?: ValidateOptions): SchemaFieldDecorator;
+declare function IsBody(options?: ValidateOptions): FieldSchemaDecorator;
 
 /**
  * Marks a field as a filename for binary uploads.
@@ -435,7 +455,8 @@ interface IsFilenameOptions extends ValidateOptions {
     /** Accepted file extensions or MIME patterns. E.g., ['.png', '.jpg', 'image/*']. */
     accept?: string[];
 }
-declare function IsFilename(options?: IsFilenameOptions, schema?: StringSchema): SchemaFieldDecorator;
+
+declare function IsFilename(options?: IsFilenameOptions, schema?: StringSchema): FieldSchemaDecorator;
 ```
 
 Usage:
@@ -452,14 +473,14 @@ class AvatarUpload {
 @Schema()
 class BulkUpload {
     @IsString() batchId!: string;
-    @IsFile({ array: true }) files!: MultipartFile[];
+    @IsFile({array: true}) files!: MultipartFile[];
 }
 
 // Binary body with filename
 @Schema()
 class RawUploadParams {
     @IsInteger() id!: number;                                    // from path/query
-    @IsFilename({ accept: ['.png', '.jpg', 'image/*'] }) filename!: string;
+    @IsFilename({accept: ['.png', '.jpg', 'image/*']}) filename!: string;
     @IsBody() body!: ReadableStream;
 }
 
@@ -470,7 +491,7 @@ class RawUploadParams {
 All helpers share the signature: `method(request, response, pathOrOptions?, options?)`.
 
 - `request` and `response` are **required**. Use `'void'` or `'stream'` for non-structured.
-- `path` is optional. If omitted, the method name is used as the path (e.g., `getUser` → `/getUser`).
+- `path` is optional. If omitted, the method name is used as the path (e.g., `getUser` →`/getUser`).
 - `options` for advanced settings (idempotency, requestType, multipart/binary limits).
 
 ```ts
@@ -482,9 +503,13 @@ declare function get<TReq, TRes>(
 ): Endpoint<TReq, TRes>;
 
 declare function post<TReq, TRes>(request: RequestInput<TReq>, response: ResponseOutput<TRes>, pathOrOptions?: string | EndpointOptions, options?: EndpointOptions): Endpoint<TReq, TRes>;
+
 declare function put<TReq, TRes>(request: RequestInput<TReq>, response: ResponseOutput<TRes>, pathOrOptions?: string | EndpointOptions, options?: EndpointOptions): Endpoint<TReq, TRes>;
+
 declare function del<TReq, TRes>(request: RequestInput<TReq>, response: ResponseOutput<TRes>, pathOrOptions?: string | EndpointOptions, options?: EndpointOptions): Endpoint<TReq, TRes>;
+
 declare function patch<TReq, TRes>(request: RequestInput<TReq>, response: ResponseOutput<TRes>, pathOrOptions?: string | EndpointOptions, options?: EndpointOptions): Endpoint<TReq, TRes>;
+
 declare function head<TReq, TRes>(request: RequestInput<TReq>, response: ResponseOutput<TRes>, pathOrOptions?: string | EndpointOptions, options?: EndpointOptions): Endpoint<TReq, TRes>;
 ```
 
@@ -517,7 +542,10 @@ interface RouteDefinition<T extends Record<string, Endpoint>> {
 ### OpenAPI generation
 
 ```ts
-declare function toOpenAPI(route: RouteDefinition<any>, options: { title: string; version: string }): object;
+declare function toOpenAPI(route: RouteDefinition<any>, options: {
+    title: string;
+    version: string
+}): object;
 ```
 
 ### Examples
@@ -578,7 +606,7 @@ const DownloadRoute = defineRoute('DownloadRoute', '/download', {
     healthCheck: get('void', 'void', '/health'),
 });
 
-// Client types:
+// Client utils:
 // client.uploadAvatar({ description: '...', avatar: file })  → Promise<AvatarResponse>
 // client.putFile({ id: 1, body: stream })                     → Promise<void>
 // client.downloadFile({ id: 1 })                              → Promise<ReadableStream>
@@ -587,17 +615,18 @@ const DownloadRoute = defineRoute('DownloadRoute', '/download', {
 
 ### defineWebSocket
 
-WebSocket definitions also live in `@kavri/schema`. See [13-websocket-design.md](./13-websocket-design.md) for full design.
+WebSocket definitions also live in `@kavri/schema`.
+See [13-websocket-design.md](./13-websocket-design.md) for full design.
 
 ```ts
 /** Message type: a @Schema class, or 'binary' for raw Uint8Array. */
-type MessageType = AnyConstructor<any> | 'binary';
+type MessageType = AnyConstructor | 'binary';
 
 interface WebSocketOptions {
     /** WebSocket endpoint path. */
     path: string;
     /** Request params schema (path + query merged). Validated on upgrade. */
-    request?: AnyConstructor<any>;
+    request?: AnyConstructor;
     /** Title (for documentation). */
     title?: string;
     /** Description (for documentation). */
@@ -630,14 +659,17 @@ interface WebSocketProtocol<
 Example:
 
 ```ts
+
 @Schema()
 class ChatParams {
     @IsString() roomId!: string;
-    @IsString({ optional: true }) token?: string;
+    @IsString({optional: true}) token?: string;
 }
 
 @Schema()
-class SendMessage { @IsString({ minLength: 1 }) text!: string; }
+class SendMessage {
+    @IsString({minLength: 1}) text!: string;
+}
 
 @Schema()
 class ChatMessage {
@@ -646,20 +678,20 @@ class ChatMessage {
     @IsInteger() timestamp!: number;
 }
 
-const ChatProtocol = defineWebSocket('ChatProtocol', { path: '/chat/:roomId', request: ChatParams }, {
-    inbound: { send: SendMessage, upload: 'binary' },
-    outbound: { message: ChatMessage, file: 'binary' },
+const ChatProtocol = defineWebSocket('ChatProtocol', {path: '/chat/:roomId', request: ChatParams}, {
+    inbound: {send: SendMessage, upload: 'binary'},
+    outbound: {message: ChatMessage, file: 'binary'},
 });
 ```
 
 ## 8. Required vs Optional vs Nullable
 
-| Declaration | JSON Schema | Parse behavior |
-|---|---|---|
-| `@IsString()` | `required`, `type: 'string'` | Missing → error. `null` → error. |
-| `@IsString({ optional: true })` | Not in `required` | Missing → omitted. `null` → error. |
-| `@IsString({ nullable: true })` | `required`, `type: ['string', 'null']` | Missing → error. `null` → ok. |
-| `@IsString({ optional: true, nullable: true })` | Not in `required`, `type: ['string', 'null']` | Missing → omitted. `null` → ok. |
+| Declaration                                     | JSON Schema                                   | Parse behavior                     |
+|-------------------------------------------------|-----------------------------------------------|------------------------------------|
+| `@IsString()`                                   | `required`, `type: 'string'`                  | Missing → error. `null` → error.   |
+| `@IsString({ optional: true })`                 | Not in `required`                             | Missing → omitted. `null` → error. |
+| `@IsString({ nullable: true })`                 | `required`, `type: ['string', 'null']`        | Missing → error. `null` → ok.      |
+| `@IsString({ optional: true, nullable: true })` | Not in `required`, `type: ['string', 'null']` | Missing → omitted. `null` → ok.    |
 
 ## 9. Full Example
 
@@ -667,7 +699,7 @@ const ChatProtocol = defineWebSocket('ChatProtocol', { path: '/chat/:roomId', re
 import {
     Schema, IsString, IsInteger, IsBigInt, IsEmail, IsDate,
     IsEnum, IsArray, IsBoolean, IsRecord, Ref, AnyOf,
-    parse, validate, serialize, toJsonSchema, defineRoute, get, post, del,
+    parse, decode, json, toJsonSchema, defineRoute, get, post, del,
 } from '@kavri/schema';
 
 enum Gender {
@@ -675,39 +707,39 @@ enum Gender {
     Female = 2,
 }
 
-@Schema({ description: 'User model' })
+@Schema({description: 'User model'})
 class User {
-    @IsInteger({ minimum: 1 })
+    @IsInteger({minimum: 1})
     id!: number;
 
-    @IsString({ minLength: 1, maxLength: 100 })
+    @IsString({minLength: 1, maxLength: 100})
     name!: string;
 
-    @IsEnum(Gender, { nullable: true })
+    @IsEnum(Gender, {nullable: true})
     gender!: Gender | null;
 
     @IsEmail()
     email!: string;
 
-    @IsArray(Ref(() => Post), { optional: true })
+    @IsArray(Ref(() => Post), {optional: true})
     posts?: Post[];
 }
 
 @Schema()
 class Post {
-    @IsBigInt({ minimum: 1n })
+    @IsBigInt({minimum: 1n})
     id!: bigint;
 
-    @IsString({ minLength: 1, maxLength: 100 })
+    @IsString({minLength: 1, maxLength: 100})
     title!: string;
 
-    @IsString({ minLength: 1, maxLength: 10000 })
+    @IsString({minLength: 1, maxLength: 10000})
     content!: string;
 
     @IsInteger()
     authorId!: number;
 
-    @Ref(() => User, { optional: true })
+    @Ref(() => User, {optional: true})
     author?: User;
 
     @IsDate()

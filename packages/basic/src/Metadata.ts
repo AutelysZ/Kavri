@@ -15,78 +15,6 @@ import type {
 } from './types.js';
 
 // ---------------------------------------------------------------------------
-// Decorated entries — query results
-// ---------------------------------------------------------------------------
-
-/**
- * Base shape for all decorated entry query results.
- */
-export interface DecoratedEntryBase<T, R = any> {
-  /**
-   * The decorator kind: 'class', 'method', or 'field'.
-   */
-  kind: string;
-  /**
-   * The class constructor the decorator was applied to.
-   */
-  target: AnyConstructor<R>;
-  /**
-   * The factory function that created this decorator.
-   */
-  factory: AnyDecoratorFactory<T>;
-  /**
-   * The metadata value stored by the decorator.
-   */
-  metadata: T;
-}
-
-/**
- * Entry for a class decorator application.
- */
-export interface ClassDecoratedEntry<T, R = any> extends DecoratedEntryBase<T, R> {
-  kind: 'class';
-}
-
-/**
- * Entry for a method decorator application.
- */
-export interface MethodDecoratedEntry<T, R = any> extends DecoratedEntryBase<T, R> {
-  kind: 'method';
-  /**
-   * The method name the decorator was applied to.
-   */
-  method: keyof R;
-}
-
-/**
- * Entry for a field decorator application.
- */
-export interface FieldDecoratedEntry<T, R = any> extends DecoratedEntryBase<T, R> {
-  kind: 'field';
-  /**
-   * The field name the decorator was applied to.
-   */
-  field: keyof R;
-}
-
-/**
- * Union of all decorated entry types.
- */
-export type DecoratedEntry<T, R = any> =
-  | ClassDecoratedEntry<T, R>
-  | MethodDecoratedEntry<T, R>
-  | FieldDecoratedEntry<T, R>;
-
-/**
- * Extract a specific entry kind from {@link DecoratedEntry}.
- */
-export type DecoratedEntryOf<
-  T,
-  R = any,
-  Kind extends DecoratedEntry<T, R>['kind'] = DecoratedEntry<T, R>['kind'],
-> = Extract<DecoratedEntry<T, R>, { kind: Kind }>;
-
-// ---------------------------------------------------------------------------
 // Compose options
 // ---------------------------------------------------------------------------
 
@@ -143,7 +71,7 @@ export interface ComposeOptions<T, Kind extends keyof DecoratorMap<T>> {
 // ---------------------------------------------------------------------------
 
 interface PendingEntry {
-  factory: Function;
+  factory: MethodDecoratorFactory | FieldDecoratorFactory;
   key: Qualifier;
   metadata: unknown;
   kind: 'method' | 'field';
@@ -184,16 +112,20 @@ export class MetadataManager {
   /**
    * Class-level storage: factory → Map<constructor, entries[]>
    */
-  readonly #classStore = new Map<Function, Map<Function, ClassDecoratedEntry<any>[]>>();
+  readonly #classStore = new Map<ClassDecoratorFactory, Map<AnyConstructor, unknown[]>>();
   readonly #methodStore = new Map<
-    Function,
-    Map<Function, Map<Qualifier, MethodDecoratedEntry<any>[]>>
+    MethodDecoratorFactory,
+    Map<AnyConstructor, Map<Qualifier, unknown[]>>
   >();
   readonly #fieldStore = new Map<
-    Function,
-    Map<Function, Map<Qualifier, FieldDecoratedEntry<any>[]>>
+    FieldDecoratorFactory,
+    Map<AnyConstructor, Map<Qualifier, unknown[]>>
   >();
-  readonly #subclassIndex = new Map<Function, Map<Function, Function[]>>();
+  // NOTE: include self; include Object
+  readonly #subclassIndex = new Map<
+    AnyConstructor,
+    Map<ClassDecoratorFactory, Set<AnyConstructor>>
+  >();
 
   // -----------------------------------------------------------------------
   // Internal storage
@@ -202,18 +134,11 @@ export class MetadataManager {
   /**
    * Store a class decorator entry. Also indexes the class as a subclass of its ancestors.
    */
-  #pushClass(factory: Function, target: Function, entry: ClassDecoratedEntry<any>): void {
-    let byTarget = this.#classStore.get(factory);
-    if (!byTarget) {
-      byTarget = new Map();
-      this.#classStore.set(factory, byTarget);
-    }
-    let items = byTarget.get(target);
-    if (!items) {
-      items = [];
-      byTarget.set(target, items);
-    }
-    items.push(entry);
+  #pushClass(factory: ClassDecoratorFactory, target: AnyConstructor, metadata: unknown): void {
+    this.#classStore
+      .getOrInsertComputed(factory, () => new Map())
+      .getOrInsertComputed(target, () => [])
+      .push(metadata);
     this.#indexSubclass(factory, target);
   }
 
@@ -221,74 +146,44 @@ export class MetadataManager {
    * Store a method decorator entry.
    */
   #pushMethod(
-    factory: Function,
-    target: Function,
+    factory: MethodDecoratorFactory,
+    target: AnyConstructor,
     key: Qualifier,
-    entry: MethodDecoratedEntry<any>,
+    metadata: unknown,
   ): void {
-    let byTarget = this.#methodStore.get(factory);
-    if (!byTarget) {
-      byTarget = new Map();
-      this.#methodStore.set(factory, byTarget);
-    }
-    let byKey = byTarget.get(target);
-    if (!byKey) {
-      byKey = new Map();
-      byTarget.set(target, byKey);
-    }
-    let items = byKey.get(key);
-    if (!items) {
-      items = [];
-      byKey.set(key, items);
-    }
-    items.push(entry);
+    this.#methodStore
+      .getOrInsertComputed(factory, () => new Map())
+      .getOrInsertComputed(target, () => new Map())
+      .getOrInsertComputed(key, () => [])
+      .push(metadata);
   }
 
   /**
    * Store a field decorator entry.
    */
   #pushField(
-    factory: Function,
-    target: Function,
+    factory: FieldDecoratorFactory,
+    target: AnyConstructor,
     key: Qualifier,
-    entry: FieldDecoratedEntry<any>,
+    metadata: unknown,
   ): void {
-    let byTarget = this.#fieldStore.get(factory);
-    if (!byTarget) {
-      byTarget = new Map();
-      this.#fieldStore.set(factory, byTarget);
-    }
-    let byKey = byTarget.get(target);
-    if (!byKey) {
-      byKey = new Map();
-      byTarget.set(target, byKey);
-    }
-    let items = byKey.get(key);
-    if (!items) {
-      items = [];
-      byKey.set(key, items);
-    }
-    items.push(entry);
+    this.#fieldStore
+      .getOrInsertComputed(factory, () => new Map())
+      .getOrInsertComputed(target, () => new Map())
+      .getOrInsertComputed(key, () => [])
+      .push(metadata);
   }
 
   /**
    * Walk the prototype chain and register target as a subclass of each ancestor under factory.
    */
-  #indexSubclass(factory: Function, target: Function): void {
-    let current = Object.getPrototypeOf(target.prototype);
-    while (current && current !== Object.prototype) {
-      const superCtor = current.constructor;
-      let byFactory = this.#subclassIndex.get(superCtor);
-      if (!byFactory) {
-        byFactory = new Map();
-        this.#subclassIndex.set(superCtor, byFactory);
-      }
-      let subs = byFactory.get(factory);
-      if (!subs) {
-        subs = [];
-        byFactory.set(factory, subs);
-      }
-      if (!subs.includes(target)) subs.push(target);
+  #indexSubclass(factory: ClassDecoratorFactory, target: AnyConstructor): void {
+    let current = target.prototype;
+    while (current?.constructor) {
+      this.#subclassIndex
+        .getOrInsertComputed(current.constructor, () => new Map())
+        .getOrInsertComputed(factory, () => new Set())
+        .add(target);
       current = Object.getPrototypeOf(current);
     }
   }
@@ -313,27 +208,15 @@ export class MetadataManager {
   /**
    * Flush all pending TC39 entries from context.metadata into the stores. Called when the class constructor becomes available.
    */
-  #flushPending(meta: DecoratorMetadata, target: Function): void {
+  #flushPending(meta: DecoratorMetadata, target: AnyConstructor): void {
     const obj = meta as any;
     const pending = obj[PENDING] as PendingEntry[] | undefined;
     if (pending) {
       for (const p of pending) {
         if (p.kind === 'method') {
-          this.#pushMethod(p.factory, target, p.key, {
-            kind: 'method',
-            target: target as AnyConstructor,
-            factory: p.factory as any,
-            metadata: p.metadata,
-            method: p.key as any,
-          });
+          this.#pushMethod(p.factory as MethodDecoratorFactory, target, p.key, p.metadata);
         } else {
-          this.#pushField(p.factory, target, p.key, {
-            kind: 'field',
-            target: target as AnyConstructor,
-            factory: p.factory as any,
-            metadata: p.metadata,
-            field: p.key as any,
-          });
+          this.#pushField(p.factory as FieldDecoratorFactory, target, p.key, p.metadata);
         }
         if (p.compose) this.#applyCompose(p.compose, target, p.kind, p.key);
       }
@@ -345,7 +228,7 @@ export class MetadataManager {
   /**
    * Resolve target to constructor. Returns undefined if target is undefined.
    */
-  #resolve(target: any): Function | undefined {
+  #resolve(target: any): AnyConstructor | undefined {
     if (target === undefined) return undefined;
     if (typeof target === 'function') return target;
     return target.constructor;
@@ -354,7 +237,7 @@ export class MetadataManager {
   /**
    * Ensure any pending TC39 entries for target are flushed. Checks Symbol.metadata.
    */
-  #ensureFlushed(target: Function): void {
+  #ensureFlushed(target: AnyConstructor): void {
     const meta = (target as any)[Symbol.metadata] as DecoratorMetadata | undefined;
     if (meta && !(meta as Record<symbol, unknown>)[FLUSHED]) {
       this.#flushPending(meta, target);
@@ -406,6 +289,7 @@ export class MetadataManager {
 
   /**
    * @see {@link createDecorator}
+   * @internal
    */
   createDecorator<T, Kind extends keyof DecoratorMap<T>>(
     kinds: readonly Kind[],
@@ -427,12 +311,7 @@ export class MetadataManager {
           throw new Error(`Decorator cannot be applied to a class`);
         }
         // TC39 class
-        mgr.#pushClass(factory as Function, target, {
-          kind: 'class',
-          target: target as AnyConstructor,
-          factory: factory as any,
-          metadata,
-        });
+        mgr.#pushClass(factory as ClassDecoratorFactory<T>, target, metadata);
         mgr.#flushPending(contextOrKey.metadata, target);
         if (extra) mgr.#applyCompose(extra, target, 'class');
         if ((extra as any)?.proxyClass) {
@@ -446,10 +325,10 @@ export class MetadataManager {
           throw new Error(`Decorator cannot be applied to a ${kind}`);
         }
         mgr.#storePending(contextOrKey.metadata, {
-          factory: factory as Function,
+          factory: factory as MethodDecoratorFactory,
           key,
           metadata,
-          kind: kind as 'method' | 'field',
+          kind: kind,
           compose: extra,
         });
         if ((extra as any)?.proxyMethod && kind === 'method') {
@@ -460,12 +339,7 @@ export class MetadataManager {
           throw new Error(`Decorator cannot be applied to a class`);
         }
         // Legacy class
-        mgr.#pushClass(factory as Function, target, {
-          kind: 'class',
-          target: target as AnyConstructor,
-          factory: factory as any,
-          metadata,
-        });
+        mgr.#pushClass(factory as ClassDecoratorFactory, target, metadata);
         if (extra) mgr.#applyCompose(extra, target, 'class');
         if ((extra as any)?.proxyClass) {
           return (extra as any).proxyClass(target);
@@ -482,25 +356,13 @@ export class MetadataManager {
           throw new Error(`Decorator cannot be applied to a ${kind}`);
         }
         if (kind === 'method') {
-          mgr.#pushMethod(factory as Function, ctor, key, {
-            kind: 'method',
-            target: ctor as AnyConstructor,
-            factory: factory as any,
-            metadata,
-            method: key as any,
-          });
+          mgr.#pushMethod(factory as MethodDecoratorFactory, ctor, key, metadata);
           if (extra) mgr.#applyCompose(extra, ctor, 'method', key);
           if ((extra as any)?.proxyMethod && descriptor) {
             descriptor.value = (extra as any).proxyMethod(descriptor.value);
           }
         } else {
-          mgr.#pushField(factory as Function, ctor, key, {
-            kind: 'field',
-            target: ctor as AnyConstructor,
-            factory: factory as any,
-            metadata,
-            field: key as any,
-          });
+          mgr.#pushField(factory as FieldDecoratorFactory, ctor, key, metadata);
           if (extra) mgr.#applyCompose(extra, ctor, 'field', key);
         }
       }
@@ -516,6 +378,7 @@ export class MetadataManager {
 
   /**
    * @see {@link createClassDecorator}
+   * @internal
    */
   createClassDecorator<T>(
     factory: ClassDecoratorFactory<T>,
@@ -527,6 +390,7 @@ export class MetadataManager {
 
   /**
    * @see {@link createMethodDecorator}
+   * @internal
    */
   createMethodDecorator<T>(
     factory: MethodDecoratorFactory<T>,
@@ -538,6 +402,7 @@ export class MetadataManager {
 
   /**
    * @see {@link createFieldDecorator}
+   * @internal
    */
   createFieldDecorator<T>(
     factory: FieldDecoratorFactory<T>,
@@ -564,19 +429,17 @@ export class MetadataManager {
    * Metadata.ofClass(Tag, fooInst);  // entries for fooInst's class
    * ```
    */
-  ofClass<T>(
-    factory: ClassDecoratorFactory<T>,
-  ): Map<AnyConstructor, readonly ClassDecoratedEntry<T>[]>;
+  ofClass<T>(factory: ClassDecoratorFactory<T>): ReadonlyMap<AnyConstructor, readonly T[]> | undefined;
   ofClass<T, R extends object>(
     factory: ClassDecoratorFactory<T>,
     target: AnyConstructor<R> | R,
-  ): readonly ClassDecoratedEntry<T, R>[];
-  ofClass(factory: Function, target?: any): any {
+  ): readonly T[] | undefined;
+  ofClass(factory: ClassDecoratorFactory, target?: any): any {
     const ctor = this.#resolve(target);
     if (ctor) this.#ensureFlushed(ctor);
     const byTarget = this.#classStore.get(factory);
-    if (!byTarget) return ctor ? [] : new Map();
-    if (ctor) return byTarget.get(ctor) ?? [];
+    if (!byTarget) return void 0;
+    if (ctor) return byTarget.get(ctor);
     return byTarget;
   }
 
@@ -594,25 +457,25 @@ export class MetadataManager {
    */
   ofMethod<T>(
     factory: MethodDecoratorFactory<T>,
-  ): Map<AnyConstructor, Map<Qualifier, readonly MethodDecoratedEntry<T>[]>>;
+  ): ReadonlyMap<AnyConstructor, Map<Qualifier, readonly T[]>> | undefined;
   ofMethod<T, R extends object>(
     factory: MethodDecoratorFactory<T>,
     target: AnyConstructor<R> | R,
-  ): Map<Qualifier, readonly MethodDecoratedEntry<T, R>[]>;
+  ): ReadonlyMap<Qualifier, readonly T[]> | undefined;
   ofMethod<T, R extends object>(
     factory: MethodDecoratorFactory<T>,
     target: AnyConstructor<R> | R,
     qualifier: Qualifier,
-  ): readonly MethodDecoratedEntry<T, R>[];
-  ofMethod(factory: Function, target?: any, qualifier?: Qualifier): any {
+  ): readonly T[] | undefined;
+  ofMethod(factory: MethodDecoratorFactory, target?: any, qualifier?: Qualifier): any {
     const ctor = this.#resolve(target);
     if (ctor) this.#ensureFlushed(ctor);
     const byTarget = this.#methodStore.get(factory);
-    if (!byTarget) return ctor ? (qualifier !== undefined ? [] : new Map()) : new Map();
+    if (!byTarget) return void 0;
     if (!ctor) return byTarget;
     const byKey = byTarget.get(ctor);
-    if (!byKey) return qualifier !== undefined ? [] : new Map();
-    if (qualifier !== undefined) return byKey.get(qualifier) ?? [];
+    if (!byKey) return void 0;
+    if (qualifier !== undefined) return byKey.get(qualifier);
     return byKey;
   }
 
@@ -630,25 +493,25 @@ export class MetadataManager {
    */
   ofField<T>(
     factory: FieldDecoratorFactory<T>,
-  ): Map<AnyConstructor, Map<Qualifier, readonly FieldDecoratedEntry<T>[]>>;
+  ): ReadonlyMap<AnyConstructor, Map<Qualifier, readonly T[]>> | undefined;
   ofField<T, R extends object>(
     factory: FieldDecoratorFactory<T>,
     target: AnyConstructor<R> | R,
-  ): Map<Qualifier, readonly FieldDecoratedEntry<T, R>[]>;
+  ): ReadonlyMap<Qualifier, readonly T[]> | undefined;
   ofField<T, R extends object>(
     factory: FieldDecoratorFactory<T>,
     target: AnyConstructor<R> | R,
     qualifier: Qualifier,
-  ): readonly FieldDecoratedEntry<T, R>[];
-  ofField(factory: Function, target?: any, qualifier?: Qualifier): any {
+  ): readonly T[] | undefined;
+  ofField(factory: FieldDecoratorFactory, target?: any, qualifier?: Qualifier): any {
     const ctor = this.#resolve(target);
     if (ctor) this.#ensureFlushed(ctor);
     const byTarget = this.#fieldStore.get(factory);
-    if (!byTarget) return ctor ? (qualifier !== undefined ? [] : new Map()) : new Map();
+    if (!byTarget) return void 0;
     if (!ctor) return byTarget;
     const byKey = byTarget.get(ctor);
-    if (!byKey) return qualifier !== undefined ? [] : new Map();
-    if (qualifier !== undefined) return byKey.get(qualifier) ?? [];
+    if (!byKey) return void 0;
+    if (qualifier !== undefined) return byKey.get(qualifier);
     return byKey;
   }
 
@@ -670,10 +533,39 @@ export class MetadataManager {
   subclassesOf<T, R>(
     factory: ClassDecoratorFactory<T>,
     superTarget: AnyConstructor<R>,
-  ): readonly AnyConstructor<R>[] {
+  ): ReadonlySet<AnyConstructor<R>> | undefined {
     const byFactory = this.#subclassIndex.get(superTarget);
-    if (!byFactory) return [];
-    return (byFactory.get(factory) ?? []) as AnyConstructor<R>[];
+    if (!byFactory) return void 0;
+    return (byFactory.get(factory) ) ;
+  }
+
+  // find all decorators on self and super classes
+  // if a field has target decorators on child class, will not use super class's decorators
+  // there is no lookup class, it doesn't make sense.
+  lookupMethod<T, R extends object>(factory: MethodDecoratorFactory<T>, target: AnyConstructor<R> | R): ReadonlyMap<keyof R, readonly T[]> | undefined
+  lookupMethod<T, R extends object>(factory: MethodDecoratorFactory<T>, target: AnyConstructor<R> | R, key: keyof R): readonly T[] | undefined
+  lookupMethod(factory: MethodDecoratorFactory, target: any, key?: any): any {
+    let current = this.#resolve(target)?.prototype;
+    while(current?.constructor) {
+      const result = this.ofMethod(factory, current.constructor, key);
+      if(result) return result;
+      current = Object.getPrototypeOf(current);
+    }
+    return void 0;
+  }
+
+  // find all decorators on self and super classes
+  // if a field has target decorators on child class, will not use super class's decorators
+  lookupField<T, R extends object>(factory: FieldDecoratorFactory<T>, target: AnyConstructor<R> | R): ReadonlyMap<keyof R, readonly T[]> | undefined
+  lookupField<T, R extends object>(factory: FieldDecoratorFactory<T>, target: AnyConstructor<R> | R, key: keyof R): readonly T[] | undefined
+  lookupField(factory: FieldDecoratorFactory, target: any, key?: any): any {
+    let current = this.#resolve(target)?.prototype;
+    while(current?.constructor) {
+      const result = this.ofField(factory, current.constructor, key);
+      if(result) return result;
+      current = Object.getPrototypeOf(current);
+    }
+    return void 0;
   }
 }
 

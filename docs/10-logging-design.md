@@ -1,14 +1,17 @@
 # Logging Module Design
 
-Package: `@kavri/logging` — depends on `@kavri/container` and `@kavri/config`. Does NOT depend on `@kavri/web`.
+Package: `@kavri/logging` — depends on `@kavri/container` and `@kavri/config`. Does NOT depend on
+`@kavri/web`.
 
 ## 1. Principles
 
 - **Structured logging.** JSON by default. Pretty-print for development.
 - **Contextual loggers.** `injectLogger(context?)` creates named child loggers.
-- **Provider-based.** `LoggingProvider` creates `RawLogger` — the minimal output interface. Built-in `kavri` provider included.
+- **Provider-based.** `LoggingProvider` creates `RawLogger` — the minimal output interface. Built-in
+  `kavri` provider included.
 - **Interceptable.** `LoggingInterceptor` modifies log entries before they reach the `RawLogger`.
-- **Configurable.** Format, level, output destinations, redaction — all via `@Configuration('kavri.logging')`.
+- **Configurable.** Format, level, output destinations, redaction — all via
+  `@Configuration('kavri.logging')`.
 
 ## 2. Configuration
 
@@ -31,30 +34,30 @@ enum Level {
 @Configuration('kavri.logging')
 class LoggingOptions {
     /** Logging provider name. Default: 'kavri' (built-in). */
-    @IsString({ default: 'kavri' })
+    @IsString({default: 'kavri'})
     provider!: string;
 
     /** Log format. */
-    @IsEnum(Format, { default: Format.JSON })
+    @IsEnum(Format, {default: Format.JSON})
     format!: Format;
 
     /** Minimum log level. */
-    @IsEnum(Level, { default: Level.Info })
+    @IsEnum(Level, {default: Level.Info})
     level!: Level;
 
     /** Default output destinations. 'stdout', 'stderr', or file paths. */
-    @IsArray(IsString(), { default: ['stdout'] })
+    @IsArray(IsString(), {default: ['stdout']})
     output!: string[];
 
     /**
      * Per-level output overrides. Key = level name, value = destinations.
      * Levels not listed use `output`.
      */
-    @IsRecord(IsArray(IsString()), { optional: true })
+    @IsRecord(IsArray(IsString()), {optional: true})
     outputs?: Record<string, string[]>;
 
     /** Paths to redact from log output. Supports wildcards. */
-    @IsArray(IsString(), { optional: true })
+    @IsArray(IsString(), {optional: true})
     redact?: string[];
 }
 ```
@@ -90,13 +93,14 @@ interface Logger {
     error(msg: string, ...args: unknown[]): void;
     fatal(msg: string, ...args: unknown[]): void;
 
-    child(context?: string | object | AnyConstructor<any>): Logger;
+    child(context?: string | object | AnyConstructor): Logger;
 }
 ```
 
 ### RawLogger (interface)
 
-The minimal output interface. Created by `LoggingProvider`. Receives finalized `LoggingContext` after interceptors.
+The minimal output interface. Created by `LoggingProvider`. Receives finalized `LoggingContext`
+after interceptors.
 
 ```ts
 interface RawLogger {
@@ -130,7 +134,8 @@ class KavriLoggingProvider extends LoggingProvider {
 
 ## 5. LoggingInterceptor
 
-Modifies log entries before they reach the `RawLogger`. Discovered via `injectAll(LoggingInterceptor)`.
+Modifies log entries before they reach the `RawLogger`. Discovered via
+`injectAll(LoggingInterceptor)`.
 
 ```ts
 abstract class LoggingInterceptor {
@@ -173,7 +178,8 @@ class HealthCheckFilter extends LoggingInterceptor {
 
 ## 6. LoggerWrapper
 
-Not a `@Component`. Created by `LoggerFactory` for each `injectLogger()` call. Implements `Logger`. Wraps a `RawLogger` and runs interceptors.
+Not a `@Component`. Created by `LoggerFactory` for each `injectLogger()` call. Implements `Logger`.
+Wraps a `RawLogger` and runs interceptors.
 
 ```ts
 class LoggerWrapper implements Logger {
@@ -181,18 +187,20 @@ class LoggerWrapper implements Logger {
         private readonly raw: RawLogger,
         private readonly interceptors: readonly LoggingInterceptor[],
         private readonly fields: Record<string, unknown> = {},
-    ) {}
+    ) {
+    }
 
     info(msg: string, ...args: unknown[]) {
         this.dispatch(Level.Info, msg, args);
     }
+
     // trace, debug, warn, error, fatal — same pattern
 
-    child(context?: string | object | AnyConstructor<any>): Logger {
+    child(context?: string | object | AnyConstructor): Logger {
         if (!context) return this;
-        const extra = typeof context === 'string' ? { name: context }
-            : typeof context === 'function' ? { name: context.name }
-            : context;
+        const extra = typeof context === 'string' ? {name: context}
+            : typeof context === 'function' ? {name: context.name}
+                : context;
         return new LoggerWrapper(this.raw, this.interceptors, {
             ...this.fields,
             ...extra,
@@ -204,7 +212,7 @@ class LoggerWrapper implements Logger {
             level,
             message,
             args,
-            fields: { ...this.fields },
+            fields: {...this.fields},
             timestamp: Date.now(),
         };
 
@@ -223,6 +231,7 @@ class LoggerWrapper implements Logger {
 Internal `@Component`. Creates the root `LoggerWrapper`.
 
 ```ts
+
 @Component()
 class LoggerFactory {
     private wrapper!: LoggerWrapper;
@@ -231,7 +240,8 @@ class LoggerFactory {
         private readonly config = injectConfig(LoggingOptions),
         private readonly provider = inject(LoggingProvider, injectConfig(LoggingOptions).provider),
         private readonly interceptors = injectAll(LoggingInterceptor),
-    ) {}
+    ) {
+    }
 
     @OnConstruct()
     async init() {
@@ -239,7 +249,7 @@ class LoggerFactory {
         this.wrapper = new LoggerWrapper(raw, this.interceptors);
     }
 
-    getLogger(context?: string | object | AnyConstructor<any>): Logger {
+    getLogger(context?: string | object | AnyConstructor): Logger {
         return this.wrapper.child(context);
     }
 }
@@ -248,7 +258,7 @@ class LoggerFactory {
 ## 8. Injection
 
 ```ts
-declare function injectLogger(context?: string | object | AnyConstructor<any>): Logger;
+declare function injectLogger(context?: string | object | AnyConstructor): Logger;
 ```
 
 - `injectLogger()` → root logger
@@ -259,9 +269,11 @@ declare function injectLogger(context?: string | object | AnyConstructor<any>): 
 `injectLogger` is an inject point. Internally calls `LoggerFactory.getLogger(context)`.
 
 ```ts
+
 @Component()
 class PaymentService {
-    constructor(private readonly logger = injectLogger(PaymentService)) {}
+    constructor(private readonly logger = injectLogger(PaymentService)) {
+    }
 
     async process(orderId: string) {
         this.logger.info('processing payment for order %s', orderId);
@@ -276,15 +288,16 @@ class PaymentService {
 ## 10. Example
 
 ```ts
-import { Component, inject } from '@kavri/container';
-import { injectLogger } from '@kavri/logging';
+import {Component, inject} from '@kavri/container';
+import {injectLogger} from '@kavri/logging';
 
 @Component()
 class OrderService {
     constructor(
         private readonly logger = injectLogger(OrderService),
         private readonly paymentService = inject(PaymentService),
-    ) {}
+    ) {
+    }
 
     async createOrder(userId: string) {
         this.logger.info('creating order for user %s', userId);

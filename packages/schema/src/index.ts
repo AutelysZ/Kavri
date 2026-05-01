@@ -1,43 +1,22 @@
 export type {
-  ValidateOptions,
-  ValidateSchema,
-  ValidateField,
-  BaseSchema,
-  StringSchema,
-  NumericSchema,
-  ObjectSchema,
-  ArraySchema,
   AnyOfSchema,
   OneOfSchema,
   AllOfSchema,
-  SchemaFieldDecoratorMetadata,
-  SchemaFieldDecorator,
-  SchemaFieldDecoratorFactory,
-  SchemaFieldDecoratorFactoryStatic,
   InferredSchema,
-} from './types.js';
+} from './utils/types.js';
 
 export {
-  createSchemaFieldDecoratorFactory,
-  SchemaField,
+  createFieldSchemaDecoratorFactory,
+  FieldSchema,
   toValidateSchema,
-  getSchemaFields,
+  getFieldSchema,
 } from './field.js';
 
-export * from './decorators/index.js';
+export * from './decorators/registry.jsonschema';
 
-export {
-  Schema,
-  getSchema,
-  defineSchema,
-  SchemaValidationError,
-  validate,
-  parse,
-  serialize,
-} from './schema.js';
-export type { ValidationIssue } from './schema.js';
+export { Schema, getSchema } from './schema.js';
 
-export { defineRoute, defineWebSocket, get, post, put, del, patch, head } from './route.js';
+export { defineRoute, get, post, put, del, patch, head } from './route.js';
 export type {
   HttpMethod,
   RequestInput,
@@ -46,9 +25,6 @@ export type {
   Endpoint,
   RouteOptions,
   RouteDefinition,
-  MessageType,
-  WebSocketOptions,
-  WebSocketProtocol,
 } from './route.js';
 
 export { toJsonSchema } from './jsonschema.js';
@@ -69,3 +45,24 @@ export type {
   OpenAPIv3Operation,
   OpenAPIv3PathItem,
 } from './openapi.js';
+export { decode } from './decode.js';
+export { parse } from './parse.js';
+export { json } from './json.js';
+export { defineWebSocket } from './websocket.js';
+export type { WebSocketProtocol } from './websocket.js';
+export type { WebSocketOptions } from './websocket.js';
+export type { MessageType } from './websocket.js';
+
+export type { BaseSchema } from './decorators/base.js';
+export type { StringOptions } from './decorators/string.js';
+export type { NumericSchema } from './decorators/number.js';
+export type { ObjectOptions } from './decorators/object.js';
+export type { ArrayOptions } from './decorators/array.js';
+export type { FieldSchemaDecoratorFactory } from './field.js';
+export type { FieldSchemaDecoratorFactoryStatic } from './field.js';
+export type { FieldSchemaDecorator } from './field.js';
+export type { FieldSchemaDecoratorMetadata } from './field.js';
+export type { ValidateField } from './field.js';
+export type { ValidateOptions } from './field.js';
+export { DecodeResult } from './decode.js';
+export type { DecodeIssue } from './decode.js';

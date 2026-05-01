@@ -4,23 +4,25 @@ Package: `@kavri/swagger` — depends on `@kavri/web` and `@kavri/schema`.
 
 ## 1. Purpose
 
-Serve OpenAPI JSON and Swagger UI from a running `@kavri/web` application. No build step — generated at startup from registered route definitions.
+Serve OpenAPI JSON and Swagger UI from a running `@kavri/web` application. No build step — generated
+at startup from registered route definitions.
 
 ## 2. Configuration
 
 ```ts
+
 @Configuration('kavri.swagger')
 class SwaggerOptions {
     /** Enable swagger endpoints. Default: true. */
-    @IsBoolean({ default: true }) enabled!: boolean;
+    @IsBoolean({default: true}) enabled!: boolean;
     /** Path prefix for swagger endpoints. */
-    @IsString({ default: '/swagger' }) path!: string;
+    @IsString({default: '/swagger'}) path!: string;
     /** OpenAPI info.title. */
-    @IsString({ default: 'API' }) title!: string;
+    @IsString({default: 'API'}) title!: string;
     /** OpenAPI info.version. */
-    @IsString({ default: '1.0.0' }) version!: string;
+    @IsString({default: '1.0.0'}) version!: string;
     /** OpenAPI info.description. */
-    @IsString({ optional: true }) description?: string;
+    @IsString({optional: true}) description?: string;
 }
 ```
 
@@ -32,6 +34,7 @@ Serves two endpoints under the configured path prefix:
 - `GET {path}` and `GET {path}/*` — Swagger UI (static HTML/JS/CSS)
 
 ```ts
+
 @Component()
 @Priority(Interceptor.ROUTE - 2)
 @ConditionalOnConfiguration(SwaggerOptions, 'enabled')
@@ -39,7 +42,9 @@ class SwaggerInterceptor extends Interceptor {
     private openApiDoc!: object;
     private uiHtml!: string;
 
-    constructor(private readonly config = injectConfig(SwaggerOptions)) { super(); }
+    constructor(private readonly config = injectConfig(SwaggerOptions)) {
+        super();
+    }
 
     @OnConstruct()
     init(controllers = injectAll(Controller)) {
@@ -70,7 +75,7 @@ class SwaggerInterceptor extends Interceptor {
         const pathname = url.pathname;
 
         if (pathname === `${this.config.path}/json`) {
-            return new RawResponse(200, { 'Content-Type': 'application/json' },
+            return new RawResponse(200, {'Content-Type': 'application/json'},
                 JSON.stringify(this.openApiDoc));
         }
 
@@ -78,7 +83,7 @@ class SwaggerInterceptor extends Interceptor {
             // Serve Swagger UI assets
             const asset = pathname.slice(this.config.path.length + 1);
             if (!asset || asset === 'index.html') {
-                return new RawResponse(200, { 'Content-Type': 'text/html' }, this.uiHtml);
+                return new RawResponse(200, {'Content-Type': 'text/html'}, this.uiHtml);
             }
             // Serve bundled swagger-ui-dist assets (CSS, JS)
             return serveSwaggerAsset(asset);
@@ -100,7 +105,8 @@ declare function mergeOpenAPI(
 ): object;
 ```
 
-`mergeOpenAPI` combines all routes into a single OpenAPI 3.x document. Paths are deduped. Tags come from `EndpointOptions.tags`. Schemas are collected into `components.schemas` with `$ref` pointers.
+`mergeOpenAPI` combines all routes into a single OpenAPI 3.x document. Paths are deduped. Tags come
+from `EndpointOptions.tags`. Schemas are collected into `components.schemas` with `$ref` pointers.
 
 ## 5. Swagger UI rendering
 
@@ -112,19 +118,20 @@ declare function mergeOpenAPI(
 declare function renderSwaggerUI(jsonUrl: string): string;
 ```
 
-The rendered HTML loads swagger-ui from bundled assets and points at the JSON endpoint. No CDN dependency.
+The rendered HTML loads swagger-ui from bundled assets and points at the JSON endpoint. No CDN
+dependency.
 
 `swagger-ui-dist` is a **peer dependency** of `@kavri/swagger` — users install it themselves.
 
 ## 6. Usage
 
 ```ts
-import { Component, Touch } from '@kavri/container';
+import { Component, Import } from '@kavri/container';
 import { SwaggerInterceptor } from '@kavri/swagger';
 
 @Component()
-@Touch(UserController, OrderController)
-@Touch(SwaggerInterceptor)
+@Import(UserController, OrderController)
+@Import(SwaggerInterceptor)
 class MyApp {}
 
 const app = await WebApplication.create(MyApp);
@@ -159,4 +166,5 @@ kavri:
 
 Or via environment variable: `KAVRI_SWAGGER_ENABLED=false`.
 
-The `@ConditionalOnConfiguration(SwaggerOptions, 'enabled')` ensures the interceptor is never instantiated when disabled — zero overhead.
+The `@ConditionalOnConfiguration(SwaggerOptions, 'enabled')` ensures the interceptor is never
+instantiated when disabled — zero overhead.

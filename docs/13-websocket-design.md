@@ -4,25 +4,33 @@ Package: `@kavri/web` — definitions in `@kavri/schema`, client in `@kavri/clie
 
 ## 1. Design principles
 
-- **Definition-first.** `defineWebSocket()` in `@kavri/schema` defines a typed bidirectional contract — shared between client and server, like `defineRoute`.
-- **Mirrors HTTP pattern.** `@WebSocketHandler(protocol)` + `implements HandlerType<typeof protocol>` mirrors `@Controller(route)` + `implements ControllerType<typeof route>`.
-- **No stringly-typed dispatch.** Inbound message types map to handler methods by name. Greppable. Type-safe.
-- **Pluggable wire format.** `WebSocketCodec` abstract class handles encode/decode. Built-in `KavriWebSocketCodec` (JSON with `type`/`data` envelope). Custom codecs for binary protocols, STOMP, etc.
-- **Per-connection AsyncContext.** `onOpen` runs in `RequestContext.run()`. Message handlers `fork()` from it. Per-connection state works like per-request state.
-- **ConnectionHub.** Separate injectable class for broadcasting. Handlers and controllers should never be injected by application code.
-- **Auth via HTTP interceptors.** The upgrade request flows through the HTTP interceptor chain (ROUTE → CORS → GUARD). No separate auth mechanism.
+- **Definition-first.** `defineWebSocket()` in `@kavri/schema` defines a typed bidirectional
+  contract — shared between client and server, like `defineRoute`.
+- **Mirrors HTTP pattern.** `@WebSocketHandler(protocol)` +`implements HandlerType<typeof protocol>`
+  mirrors `@Controller(route)` +`implements ControllerType<typeof route>`.
+- **No stringly-typed dispatch.** Inbound message types map to handler methods by name. Greppable.
+  Type-safe.
+- **Pluggable wire format.** `WebSocketCodec` abstract class handles json/decode. Built-in
+  `KavriWebSocketCodec` (JSON with `type`/`data` envelope). Custom codecs for binary protocols,
+  STOMP, etc.
+- **Per-connection AsyncContext.** `onOpen` runs in `RequestContext.run()`. Message handlers`fork()`
+  from it. Per-connection state works like per-request state.
+- **ConnectionHub.** Separate injectable class for broadcasting. Handlers and controllers should
+  never be injected by application code.
+- **Auth via HTTP interceptors.** The upgrade request flows through the HTTP interceptor chain (
+  ROUTE → CORS → GUARD). No separate auth mechanism.
 
 ## 2. Definition (`@kavri/schema`)
 
 ```ts
 /** Message type: a @Schema class, or 'binary' for raw Uint8Array. */
-type MessageType = AnyConstructor<any> | 'binary';
+type MessageType = AnyConstructor | 'binary';
 
 interface WebSocketOptions {
     /** WebSocket endpoint path. */
     path: string;
     /** Request params schema (path + query params). Validated on upgrade. */
-    request?: AnyConstructor<any>;
+    request?: AnyConstructor;
     /** Title (for documentation). */
     title?: string;
     /** Description (for documentation). */
@@ -106,7 +114,8 @@ const GameProtocol = defineWebSocket('GameProtocol', { path: '/game', codec: 'ms
 
 ## 3. WebSocketCodec
 
-Abstract class for encoding/decoding wire format. Implementations are `@Component(name)`. Selected by `WebSocketOptions.codec` (default: `'kavri'`).
+Abstract class for encoding/decoding wire format. Implementations are `@Component(name)`. Selected
+by `WebSocketOptions.codec` (default: `'kavri'`).
 
 ```ts
 interface DecodedMessage {
@@ -130,7 +139,7 @@ abstract class WebSocketCodec {
      * Encode an outbound message. Return one or more frames.
      * string → text frame, Uint8Array → binary frame.
      */
-    abstract encode(type: string, data: unknown): string | Uint8Array | Array<string | Uint8Array>;
+    abstract json(type: string, data: unknown): string | Uint8Array | Array<string | Uint8Array>;
 }
 ```
 
@@ -152,7 +161,7 @@ class KavriWebSocketCodec extends WebSocketCodec {
         return { type: 'binary', data };
     }
 
-    encode(type: string, data: unknown): string | Uint8Array {
+    json(type: string, data: unknown): string | Uint8Array {
         if (data instanceof Uint8Array) return data;
         return JSON.stringify({ type, data });
     }
@@ -165,10 +174,19 @@ Wire format:
 { "type": "send", "data": { "text": "hello" } }
 ```
 
-Inbound messages are validated against the `@Schema` class after decoding. Invalid messages receive an error frame:
+Inbound messages are validated against the `@Schema` class after decoding. Invalid messages receive
+an error frame:
 
 ```json
-{ "type": "error", "data": { "message": "Validation failed", "issues": [...] } }
+{
+    "type": "error",
+    "data": {
+        "message": "Validation failed",
+        "issues": [
+            ...
+        ]
+    }
+}
 ```
 
 ### Custom codec example
@@ -181,12 +199,12 @@ class MsgpackCodec extends WebSocketCodec {
         const decoded = msgpack.decode(data) as { type: string; data: unknown };
         return decoded;
     }
-    encode(type: string, data: unknown): Uint8Array {
-        return msgpack.encode({ type, data });
+    json(type: string, data: unknown): Uint8Array {
+        return msgpack.json({ type, data });
     }
 }
 
-// Usage: @Touch(MsgpackCodec) in app module
+// Usage: @Import(MsgpackCodec) in app module
 ```
 
 ## 4. Built-in Keys
@@ -220,12 +238,16 @@ interface WebSocketConnection<T extends WebSocketProtocol = any> {
      * Validated request params (path + query merged, parsed via request schema).
      * Typed when options.request is provided, otherwise Record<string, string>.
      */
-    readonly params: T['options'] extends { request: AnyConstructor<infer R> } ? R : Record<string, string>;
+    readonly params: T['options'] extends {
+        request: AnyConstructor<infer R>
+    } ? R : Record<string, string>;
 
     /** Get a state value. */
     getState<V>(key: Key<V>): V | undefined;
+
     /** Set a state value. */
     setState<V>(key: Key<V>, value: V): void;
+
     /** Delete a state value. */
     deleteState(key: Key<any>): void;
 
@@ -234,8 +256,10 @@ interface WebSocketConnection<T extends WebSocketProtocol = any> {
      * Updates the ConnectionHub's reverse index for O(1) lookups.
      */
     setIndex<V>(key: Key<V>, value: V): void;
+
     /** Get an index value. */
     getIndex<V>(key: Key<V>): V | undefined;
+
     /**
      * Delete an index. Also deletes the state for the same key.
      * Removes from the ConnectionHub's reverse index.
@@ -253,11 +277,14 @@ interface WebSocketConnection<T extends WebSocketProtocol = any> {
 }
 ```
 
-`setIndex(key, value)` = `setState(key, value)` + update hub's reverse index. Indexes are a subset of state that the hub tracks for O(1) lookups. All indexes and state are auto-cleaned on connection close.
+`setIndex(key, value)` = `setState(key, value)` + update hub's reverse index. Indexes are a subset
+of state that the hub tracks for O(1) lookups. All indexes and state are auto-cleaned on connection
+close.
 
 ## 6. ConnectionHub
 
-Single `@Component()` that manages ALL WebSocket connections across all handlers. Indexes are private — managed automatically via `conn.setIndex()`/`conn.deleteIndex()`.
+Single `@Component()` that manages ALL WebSocket connections across all handlers. Indexes are
+private — managed automatically via `conn.setIndex()`/`conn.deleteIndex()`.
 
 **Handlers and controllers should never be injected by application code.**
 
@@ -309,7 +336,8 @@ const ROOM = Key.of<string>('room');  // used as index
 
 @Component()
 class NotificationService {
-    constructor(private readonly hub = inject(ConnectionHub)) {}
+    constructor(private readonly hub = inject(ConnectionHub)) {
+    }
 
     /** O(1) — uses index */
     async notifyRoom(roomId: string, message: ChatMessage) {
@@ -336,7 +364,7 @@ class NotificationService {
  */
 type HandlerType<T extends WebSocketProtocol> = {
     [K in keyof T['inbound'] as `on${Capitalize<string & K>}`]:
-        /* (data: ..., conn: WebSocketConnection<T>, ctx: Context) => Awaitable<void> */
+    /* (data: ..., conn: WebSocketConnection<T>, ctx: Context) => Awaitable<void> */
 };
 
 /**
@@ -345,7 +373,8 @@ type HandlerType<T extends WebSocketProtocol> = {
  * and access to the ConnectionHub.
  */
 abstract class WebSocketHandlerBase<T extends WebSocketProtocol> {
-    constructor(protected readonly hub = inject(ConnectionHub)) {}
+    constructor(protected readonly hub = inject(ConnectionHub)) {
+    }
 
     // The protocol is set by @WebSocketHandler(protocol)
     protected abstract readonly protocol: T;
@@ -406,12 +435,13 @@ const ROOM = Key.of<string>('room');  // used as index
 @WebSocketHandler(ChatProtocol)
 class ChatHandler
     extends WebSocketHandlerBase<typeof ChatProtocol>
-    implements HandlerType<typeof ChatProtocol>
-{
+    implements HandlerType<typeof ChatProtocol> {
     constructor(
         private readonly repo = inject(MessageRepository),
         private readonly logger = injectLogger(ChatHandler),
-    ) { super(); }
+    ) {
+        super();
+    }
 
     // --- Lifecycle ---
 
@@ -429,7 +459,7 @@ class ChatHandler
         // O(1) — broadcast to same room via index
         this.broadcastByIndex(ROOM, conn.params.roomId,
             'presence',
-            { userId: conn.getState(USERNAME)!, online: false },
+            {userId: conn.getState(USERNAME)!, online: false},
         );
         // state and indexes auto-cleaned on close
     }
@@ -438,7 +468,7 @@ class ChatHandler
 
     onSend(data: SendMessage, conn: WebSocketConnection<typeof ChatProtocol>, ctx: Context) {
         const username = conn.getState(USERNAME)!;
-        const msg = { from: username, text: data.text, timestamp: Date.now() };
+        const msg = {from: username, text: data.text, timestamp: Date.now()};
         this.repo.save(conn.params.roomId, msg);
 
         // O(1) — broadcast to same room via index
@@ -447,7 +477,7 @@ class ChatHandler
 
     onTyping(data: TypingEvent, conn: WebSocketConnection<typeof ChatProtocol>, ctx: Context) {
         this.broadcastByIndex(ROOM, conn.params.roomId, 'presence',
-            { userId: conn.getState(USERNAME)!, online: true });
+            {userId: conn.getState(USERNAME)!, online: true});
     }
 
     onUpload(data: Uint8Array, conn: WebSocketConnection<typeof ChatProtocol>, ctx: Context) {
@@ -456,7 +486,8 @@ class ChatHandler
 }
 ```
 
-Method naming: inbound key `send` → method `onSend`, key `typing` → method `onTyping`. Enforced by `HandlerType`.
+Method naming: inbound key `send` → method `onSend`, key `typing` → method `onTyping`. Enforced by
+`HandlerType`.
 
 ## 8. Per-connection AsyncContext
 
@@ -471,7 +502,9 @@ Connection established
        └─ onClose(conn)          ← still in connection scope
 ```
 
-State set in `onOpen` (e.g., `RequestContext.set(CURRENT_USER, user)`) is visible in all subsequent message handlers via prototype-chained scope. Each message handler runs in a `fork()` so it can set transient state without leaking to other messages.
+State set in `onOpen` (e.g., `RequestContext.set(CURRENT_USER, user)`) is visible in all subsequent
+message handlers via prototype-chained scope. Each message handler runs in a `fork()` so it can set
+transient state without leaking to other messages.
 
 ## 9. Upgrade flow
 
@@ -491,7 +524,7 @@ RequestContext.run():
   ▼
 RouteInterceptor.matchWebSocket(req.url)
   → sets ENDPOINT (WebSocket), PATH_PARAMS
-  → if request schema exists: merge path params + query, validate, parse
+  → if request schema exists: merge path params + query, decode, parse
   │
   ▼
 [CorsInterceptor] → checks Origin header
@@ -507,47 +540,55 @@ Handler.onOpen(conn)  ← in new per-connection RequestContext.run()
                          inherits state from upgrade scope (CURRENT_USER, etc.)
 ```
 
-HTTP interceptors run on the upgrade request up to `Interceptor.GUARD`. Auth, CORS, rate limiting all work naturally.
+HTTP interceptors run on the upgrade request up to `Interceptor.GUARD`. Auth, CORS, rate limiting
+all work naturally.
 
 ## 10. Configuration
 
 ```ts
+
 @Configuration('kavri.web.ws')
 class WebSocketServerOptions {
     /** Max inbound message size in bytes. */
-    @IsInteger({ default: 65536 }) maxMessageSize!: number;
+    @IsInteger({default: 65536}) maxMessageSize!: number;
     /** Ping interval in ms. 0 to disable. */
-    @IsInteger({ default: 30000 }) pingInterval!: number;
+    @IsInteger({default: 30000}) pingInterval!: number;
     /** Close connection if pong not received within this time. */
-    @IsInteger({ default: 10000 }) pingTimeout!: number;
+    @IsInteger({default: 10000}) pingTimeout!: number;
 }
 ```
 
-Ping/pong is automatic. The framework sends pings at `pingInterval` and closes connections that don't respond within `pingTimeout`.
+Ping/pong is automatic. The framework sends pings at `pingInterval` and closes connections that
+don't respond within `pingTimeout`.
 
 ## 11. Client (`@kavri/client`)
 
 ```ts
-import { createWebSocketClient } from '@kavri/client';
+import {createWebSocketClient} from '@kavri/client';
 
-const ws = createWebSocketClient(ChatProtocol, { url: 'wss://example.com' });
+const ws = createWebSocketClient(ChatProtocol, {url: 'wss://example.com'});
 
-// Typed send — only inbound message types allowed
-ws.send('send', { text: 'hello' });
-ws.send('typing', { typing: true });
+// Typed send — only inbound message utils allowed
+ws.send('send', {text: 'hello'});
+ws.send('typing', {typing: true});
 ws.send('upload', new Uint8Array([...]));  // binary
 
-// Typed receive — only outbound message types
+// Typed receive — only outbound message utils
 ws.on('message', (data: ChatMessage) => {
     console.log(`${data.from}: ${data.text}`);
 });
-ws.on('presence', (data: UserPresence) => { ... });
-ws.on('file', (data: Uint8Array) => { ... });  // binary
+ws.on('presence', (data: UserPresence) => { ...
+});
+ws.on('file', (data: Uint8Array) => { ...
+});  // binary
 
 // Lifecycle
-ws.on('open', () => { ... });
-ws.on('close', (code, reason) => { ... });
-ws.on('error', (err) => { ... });
+ws.on('open', () => { ...
+});
+ws.on('close', (code, reason) => { ...
+});
+ws.on('error', (err) => { ...
+});
 
 ws.close();
 ```
@@ -555,24 +596,30 @@ ws.close();
 ## 12. Example: multi-room chat
 
 ```ts
-import { Schema, IsString, IsBoolean, IsInteger, defineWebSocket } from '@kavri/schema';
+import {Schema, IsString, IsBoolean, IsInteger, defineWebSocket} from '@kavri/schema';
 import {
     WebSocketHandler, HandlerType, WebSocketHandlerBase,
     WebSocketConnection, ConnectionHub,
 } from '@kavri/web';
-import { Component, Touch, inject } from '@kavri/container';
-import { injectLogger } from '@kavri/logging';
+import {Component, Import, inject} from '@kavri/container';
+import {injectLogger} from '@kavri/logging';
 
 // --- Definition (shared) ---
 
 @Schema()
-class JoinRoom { @IsString() room!: string; }
+class JoinRoom {
+    @IsString() room!: string;
+}
 
 @Schema()
-class LeaveRoom { @IsString() room!: string; }
+class LeaveRoom {
+    @IsString() room!: string;
+}
 
 @Schema()
-class SendMsg { @IsString() text!: string; }
+class SendMsg {
+    @IsString() text!: string;
+}
 
 @Schema()
 class ChatMsg {
@@ -590,8 +637,8 @@ class RoomEvent {
 }
 
 const LobbyProtocol = defineWebSocket('LobbyProtocol', '/lobby', {
-    inbound: { join: JoinRoom, leave: LeaveRoom, send: SendMsg },
-    outbound: { message: ChatMsg, event: RoomEvent },
+    inbound: {join: JoinRoom, leave: LeaveRoom, send: SendMsg},
+    outbound: {message: ChatMsg, event: RoomEvent},
 });
 
 // --- Typed keys ---
@@ -605,12 +652,15 @@ const LOBBY_ROOM = Key.of<string>('lobbyRoom');  // index — one per room via c
 @WebSocketHandler(LobbyProtocol)
 class LobbyHandler
     extends WebSocketHandlerBase<typeof LobbyProtocol>
-    implements HandlerType<typeof LobbyProtocol>
-{
-    constructor(private readonly logger = injectLogger(LobbyHandler)) { super(); }
+    implements HandlerType<typeof LobbyProtocol> {
+    constructor(private readonly logger = injectLogger(LobbyHandler)) {
+        super();
+    }
 
     // Per-room index key. Each room gets its own Key so one connection can be in many rooms.
-    private roomKey(room: string) { return Key.of<boolean>(`room:${room}`); }
+    private roomKey(room: string) {
+        return Key.of<boolean>(`room:${room}`);
+    }
 
     onOpen(conn: WebSocketConnection<typeof LobbyProtocol>, ctx: Context) {
         conn.setState(LOBBY_USER, RequestContext.getOrThrow(CURRENT_USER).name);
@@ -622,7 +672,7 @@ class LobbyHandler
 
         this.hub.broadcastByIndex(LobbyProtocol, key, true,
             'event',
-            { room: data.room, user: conn.getState(LOBBY_USER)!, action: 'joined' },
+            {room: data.room, user: conn.getState(LOBBY_USER)!, action: 'joined'},
         );
     }
 
@@ -635,7 +685,7 @@ class LobbyHandler
         this.broadcastTo(
             c => true, // simplified; real impl would track rooms in state
             'message',
-            { from: conn.getState(LOBBY_USER)!, text: data.text, room: '', ts: Date.now() },
+            {from: conn.getState(LOBBY_USER)!, text: data.text, room: '', ts: Date.now()},
         );
     }
 
@@ -648,14 +698,15 @@ class LobbyHandler
 
 @Component()
 class AnnouncementService {
-    constructor(private readonly hub = inject(ConnectionHub)) {}
+    constructor(private readonly hub = inject(ConnectionHub)) {
+    }
 
     /** O(1) broadcast to a room via index */
     announce(room: string, text: string) {
         const key = Key.of<boolean>(`room:${room}`);
         this.hub.broadcastByIndex(LobbyProtocol, key, true,
             'message',
-            { from: 'system', text, room, ts: Date.now() },
+            {from: 'system', text, room, ts: Date.now()},
         );
     }
 
@@ -669,8 +720,9 @@ class AnnouncementService {
 // --- Bootstrap ---
 
 @Component()
-@Touch(LobbyHandler)
-class MyApp {}
+@Import(LobbyHandler)
+class MyApp {
+}
 
 const app = await WebApplication.create(MyApp);
 await app.start();

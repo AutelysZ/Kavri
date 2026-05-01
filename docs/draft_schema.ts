@@ -3,14 +3,7 @@
  * @author acrazing <joking.young@gmail.com>
  */
 
-import {
-    FieldDecoratorFactory,
-    FieldDecorator,
-    createFieldDecorator,
-    AnyConstructor,
-    createClassDecorator,
-    ClassDecorator,
-} from './draft'
+import { AnyConstructor, ClassDecorator, createFieldDecorator, FieldDecorator, FieldDecoratorFactory, } from './draft';
 
 interface JsonSchema {
     title?: string;
@@ -43,7 +36,7 @@ interface BaseSchema<S = any, V = S> extends ValidateOptions {
     nullable?: boolean;
     const?: ValidateField<V>;
     enum?: ValidateField<V[]>;
-    decorators?: SchemaFieldDecorator[];
+    decorators?: FieldSchemaDecorator[];
 }
 
 interface StringSchema<V = string> extends BaseSchema<string, V> {
@@ -59,7 +52,7 @@ interface NumericSchema<V = number> extends BaseSchema<number, V> {
     // ...
 }
 
-interface SchemaFieldDecoratorFactoryStatic<P> {
+interface FieldSchemaDecoratorFactoryStatic<P> {
     message?: string;
     parse?: (params: P, plain: any) => any;
     serialize?: (params: P, value: any) => any;
@@ -67,51 +60,51 @@ interface SchemaFieldDecoratorFactoryStatic<P> {
     toJsonSchema?: (params: P) => JsonSchema;
 }
 
-type SchemaFieldDecorator<P = any> = FieldDecorator<SchemaFieldDecoratorMetadata<P>>;
+type FieldSchemaDecorator<P = any> = FieldDecorator<FieldSchemaDecoratorMetadata<P>>;
 
-interface SchemaFieldDecoratorMetadata<P> {
-    factory: SchemaFieldDecoratorFactory<P>;
+interface FieldSchemaDecoratorMetadata<P> {
+    factory: FieldSchemaDecoratorFactory<P>;
     params: P;
-    decorators: SchemaFieldDecorator[];
+    decorators: FieldSchemaDecorator[];
 }
 
-type SchemaFieldDecoratorFactory<P> =
-    FieldDecoratorFactory<SchemaFieldDecoratorMetadata<P>>
-    & SchemaFieldDecoratorFactoryStatic<P>;
+type FieldSchemaDecoratorFactory<P> =
+    FieldDecoratorFactory<FieldSchemaDecoratorMetadata<P>>
+    & FieldSchemaDecoratorFactoryStatic<P>;
 
-function createSchemaFieldDecoratorFactory<P extends ValidateOptions, F extends FieldDecoratorFactory<SchemaFieldDecoratorMetadata<P>>>(factory: F, statics: SchemaFieldDecoratorFactoryStatic<P>): F & SchemaFieldDecoratorFactoryStatic<P> {
+function createFieldSchemaDecoratorFactory<P extends ValidateOptions, F extends FieldDecoratorFactory<FieldSchemaDecoratorMetadata<P>>>(factory: F, statics: FieldSchemaDecoratorFactoryStatic<P>): F & FieldSchemaDecoratorFactoryStatic<P> {
     return Object.assign(factory, statics);
 }
 
-function SchemaField<P extends ValidateOptions>(factory: SchemaFieldDecoratorFactory<P>, params: P, decorators: SchemaFieldDecorator[] = []): SchemaFieldDecorator<P> {
-    return createFieldDecorator<SchemaFieldDecoratorMetadata<P>>(SchemaField, {params, factory, decorators})
+function FieldSchema<P extends ValidateOptions>(factory: FieldSchemaDecoratorFactory<P>, params: P, decorators: FieldSchemaDecorator[] = []): FieldSchemaDecorator<P> {
+    return createFieldDecorator<FieldSchemaDecoratorMetadata<P>>(FieldSchema, {params, factory, decorators})
 }
 
 declare function toValidateSchema<T>(options: ValidateField<T>): ValidateSchema<T>
 
-export const MinLength = createSchemaFieldDecoratorFactory(function (options: ValidateField<number>): SchemaFieldDecorator<ValidateSchema<number>> {
-    return SchemaField(MinLength, toValidateSchema(options));
+export const MinLength = createFieldSchemaDecoratorFactory(function (options: ValidateField<number>): FieldSchemaDecorator<ValidateSchema<number>> {
+    return FieldSchema(MinLength, toValidateSchema(options));
 }, {
-    // validate should resolve .xxx styled variables in the template
+    // decode should resolve .xxx styled variables in the template
     // .label = .title || .key
     // .key is field name
     message: '.label must be at least .value characters',
-    validate: (params, value) => typeof value !== 'string' || value.length >= params.value, // only validate string
+    validate: (params, value) => typeof value !== 'string' || value.length >= params.value, // only decode string
     toJsonSchema: params => ({minLength: params.value})
 })
 
-export const IsString = createSchemaFieldDecoratorFactory(function <V = string>({
+export const IsString = createFieldSchemaDecoratorFactory(function <V = string>({
                                                                                     minLength,
-                                                                                    maxLength, /* and other validate fields */
+                                                                                    maxLength, /* and other decode fields */
                                                                                     decorators = [],
                                                                                     ...schema
-                                                                                }: StringSchema<V> = {}): SchemaFieldDecorator<StringSchema<V>> {
+                                                                                }: StringSchema<V> = {}): FieldSchemaDecorator<StringSchema<V>> {
     if (minLength) {
         decorators.push(MinLength(minLength));
     }
     // other inline decorators
 
-    return SchemaField<StringSchema<V>>(IsString, schema, decorators);
+    return FieldSchema<StringSchema<V>>(IsString, schema, decorators);
 }, {
     message: '.label must be a string',
     validate: (params, value) => typeof value === 'string',
@@ -124,11 +117,11 @@ export const IsString = createSchemaFieldDecoratorFactory(function <V = string>(
 
 type InferredSchema<V> = V extends number ? NumericSchema<V> : V extends string ? StringSchema<V> : ObjectSchema<V> /* and others */
 
-declare function IsEnum<K extends string, V extends string | number, E extends Record<K, V>>(host: ValidateField<E>, schema?: InferredSchema<V>): SchemaFieldDecorator<ValidateSchema<E>>
+declare function IsEnum<K extends string, V extends string | number, E extends Record<K, V>>(host: ValidateField<E>, schema?: InferredSchema<V>): FieldSchemaDecorator<ValidateSchema<E>>
 
-declare function IsIn<V extends readonly (string | number)[]>(host: ValidateField<V>, schema?: InferredSchema<V>): SchemaFieldDecorator<ValidateSchema<V>>
+declare function IsIn<V extends readonly (string | number)[]>(host: ValidateField<V>, schema?: InferredSchema<V>): FieldSchemaDecorator<ValidateSchema<V>>
 
-declare function IsConst<V>(value: ValidateField<V>, schema?: InferredSchema<V>): SchemaFieldDecorator<ValidateSchema<V>>
+declare function IsConst<V>(value: ValidateField<V>, schema?: InferredSchema<V>): FieldSchemaDecorator<ValidateSchema<V>>
 
 // isEmail options from validator
 declare interface IsEmailOptions {
@@ -139,8 +132,8 @@ declare function isEmail(email: any, options: IsEmailOptions): boolean;
 interface EmailOptions extends IsEmailOptions, ValidateOptions {
 }
 
-export const IsEmail = createSchemaFieldDecoratorFactory(function (options: EmailOptions = {}, schema: StringSchema = {}): SchemaFieldDecorator<EmailOptions> {
-    return SchemaField(IsEmail, options, [IsString(schema)])
+export const IsEmail = createFieldSchemaDecoratorFactory(function (options: EmailOptions = {}, schema: StringSchema = {}): FieldSchemaDecorator<EmailOptions> {
+    return FieldSchema(IsEmail, options, [IsString(schema)])
 }, {
     validate: (params, value) => isEmail(value, params),
     toJsonSchema: params => ({format: 'email'})
@@ -152,8 +145,8 @@ interface DateOptions extends ValidateOptions {
     after?: Date;
 }
 
-export const IsDate = createSchemaFieldDecoratorFactory(function (options: DateOptions = {}, schema?: StringSchema<Date>): SchemaFieldDecorator<DateOptions> {
-    return SchemaField<DateOptions>(IsDate, options, [IsString(schema)]);
+export const IsDate = createFieldSchemaDecoratorFactory(function (options: DateOptions = {}, schema?: StringSchema<Date>): FieldSchemaDecorator<DateOptions> {
+    return FieldSchema<DateOptions>(IsDate, options, [IsString(schema)]);
 }, {
     parse: (params, plain) => new Date(plain),
     serialize: (params, value: Date) => value.toISOString(),
@@ -161,42 +154,42 @@ export const IsDate = createSchemaFieldDecoratorFactory(function (options: DateO
     toJsonSchema: params => ({format: params.format === 'iso' ? 'date-time' : 'date'})
 });
 
-declare function IsInteger(schema?: NumericSchema): SchemaFieldDecorator<NumericSchema>;
-declare function IsNumber(schema?: NumericSchema): SchemaFieldDecorator<NumericSchema>;
-declare function IsBigInt(schema?: NumericSchema<bigint>): SchemaFieldDecorator<NumericSchema<bigint>>; // toJsonSchema -> type=string, pattern=^-?\d+$
+declare function IsInteger(schema?: NumericSchema): FieldSchemaDecorator<NumericSchema>;
+declare function IsNumber(schema?: NumericSchema): FieldSchemaDecorator<NumericSchema>;
+declare function IsBigInt(schema?: NumericSchema<bigint>): FieldSchemaDecorator<NumericSchema<bigint>>; // toJsonSchema -> type=string, pattern=^-?\d+$
 
-declare function Ref<T extends object>(ref: ValidateField<() => AnyConstructor<T>>, schema?: ObjectSchema<T>): SchemaFieldDecorator<ValidateSchema<() => AnyConstructor<T>>>;
+declare function Ref<T extends object>(ref: ValidateField<() => AnyConstructor<T>>, schema?: ObjectSchema<T>): FieldSchemaDecorator<ValidateSchema<() => AnyConstructor<T>>>;
 
 interface AnyOfSchema<T = any> extends BaseSchema<T> {
-    anyOf: SchemaFieldDecorator[];
+    anyOf: FieldSchemaDecorator[];
 }
 
-declare function AnyOf<T>(anyOf: SchemaFieldDecorator[], schema?: BaseSchema<T>): SchemaFieldDecorator<AnyOfSchema<T>>;
+declare function AnyOf<T>(anyOf: FieldSchemaDecorator[], schema?: BaseSchema<T>): FieldSchemaDecorator<AnyOfSchema<T>>;
 
 interface ObjectSchema<T = object> extends BaseSchema<T> {
-    properties?: { [K in keyof T]?: SchemaFieldDecorator };
-    patternProperties?: Record<string, SchemaFieldDecorator>;
-    additionalProperties?: SchemaFieldDecorator;
-    propertyNames?: SchemaFieldDecorator;
-    dependentSchemas?: { [K in keyof T]?: SchemaFieldDecorator };
+    properties?: { [K in keyof T]?: FieldSchemaDecorator };
+    patternProperties?: Record<string, FieldSchemaDecorator>;
+    additionalProperties?: FieldSchemaDecorator;
+    propertyNames?: FieldSchemaDecorator;
+    dependentSchemas?: { [K in keyof T]?: FieldSchemaDecorator };
     maxProperties?: ValidateField<number>;
     minProperties?: ValidateField<number>;
     required?: ValidateField<Array<keyof T>>;
     dependentRequired?: { [K in keyof T]?: ValidateField<Array<keyof T>> }
 }
 
-declare function IsObject<T extends object>(properties: { [K in keyof T]?: SchemaFieldDecorator }, schema?: ObjectSchema<T>): SchemaFieldDecorator<ObjectSchema<T>>
-declare function IsRecord<V>(value: SchemaFieldDecorator, schema?: ObjectSchema<Record<string, V>>): SchemaFieldDecorator<ObjectSchema<Record<string, V>>>
+declare function IsObject<T extends object>(properties: { [K in keyof T]?: FieldSchemaDecorator }, schema?: ObjectSchema<T>): FieldSchemaDecorator<ObjectSchema<T>>
+declare function IsRecord<V>(value: FieldSchemaDecorator, schema?: ObjectSchema<Record<string, V>>): FieldSchemaDecorator<ObjectSchema<Record<string, V>>>
 
 // remove checkAllFields
 declare function Schema<T>(schema?: ObjectSchema<T>): ClassDecorator<ObjectSchema<T>>;
 
 interface ArraySchema<T = any> extends BaseSchema<T[]> {
-    items?: SchemaFieldDecorator;
+    items?: FieldSchemaDecorator;
     // ...
 }
 
-declare function IsArray<T>(items: SchemaFieldDecorator, schema?: ArraySchema<T>): SchemaFieldDecorator<ArraySchema<T>>;
+declare function IsArray<T>(items: FieldSchemaDecorator, schema?: ArraySchema<T>): FieldSchemaDecorator<ArraySchema<T>>;
 
 // example
 

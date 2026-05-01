@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MetadataManager } from './metadata.js';
+import { MetadataManager } from './Metadata.js';
 import type {
   AnyConstructor,
   ClassDecorator,
@@ -48,9 +48,7 @@ describe('class decorators (TC39)', () => {
 
     const entries = Metadata.ofClass(Tag, Foo);
     expect(entries).toHaveLength(1);
-    expect(entries[0].metadata).toEqual({ tag: 'hello' });
-    expect(entries[0].target).toBe(Foo);
-    expect(entries[0].kind).toBe('class');
+    expect(entries[0]).toEqual({ tag: 'hello' });
   });
 
   it('supports multiple decorators', () => {
@@ -92,8 +90,7 @@ describe('method decorators (TC39)', () => {
 
     const entries = Metadata.ofMethod(Marker, Foo, 'hello' as keyof Foo);
     expect(entries).toHaveLength(1);
-    expect(entries[0].metadata).toEqual({ label: 'greet' });
-    expect(entries[0].method).toBe('hello');
+    expect(entries[0]).toEqual({ label: 'greet' });
   });
 
   it('returns empty for undecorated method', () => {
@@ -116,8 +113,7 @@ describe('field decorators (TC39)', () => {
 
     const entries = Metadata.ofField(FieldType, Foo, 'name' as keyof Foo);
     expect(entries).toHaveLength(1);
-    expect(entries[0].metadata).toEqual({ type: 'string' });
-    expect(entries[0].field).toBe('name');
+    expect(entries[0]).toEqual({ type: 'string' });
   });
 });
 
@@ -128,7 +124,7 @@ describe('composite decorators', () => {
 
     expect(Metadata.ofClass(Special, Foo)).toHaveLength(1);
     expect(Metadata.ofClass(Tag, Foo)).toHaveLength(1);
-    expect(Metadata.ofClass(Tag, Foo)[0].metadata.tag).toBe('special:vip');
+    expect(Metadata.ofClass(Tag, Foo)[0].tag).toBe('special:vip');
   });
 });
 
@@ -172,7 +168,7 @@ describe('subclassesOf', () => {
 
 describe('ComposeOptions', () => {
   it('classes option applies class decorator from method decorator', () => {
-    function Use(
+    function Inject(
       ...injectables: AnyConstructor[]
     ): ClassDecorator<{ injectables: AnyConstructor[] }> {
       return createClassDecorator(Use, { injectables });
@@ -183,7 +179,7 @@ describe('ComposeOptions', () => {
         NeedsService,
         {},
         {
-          classes: [Use(Date)],
+          classes: [Inject(Date)],
         },
       );
     }
@@ -196,7 +192,7 @@ describe('ComposeOptions', () => {
 
     const useEntries = Metadata.ofClass(Use, Foo);
     expect(useEntries).toHaveLength(1);
-    expect(useEntries[0].metadata.injectables).toContain(Date);
+    expect(useEntries[0].injectables).toContain(Date);
   });
 
   it('proxyMethod wraps the method (legacy)', () => {
@@ -284,7 +280,7 @@ describe('proxyMethod decorator pattern', () => {
   it('createAspectDecorator composes Use + method metadata', () => {
     const AM = new MetadataManager();
 
-    function Use(
+    function Inject(
       ...injectables: AnyConstructor[]
     ): ClassDecorator<{ injectables: AnyConstructor[] }> {
       return AM.createClassDecorator(Use, { injectables });
@@ -306,7 +302,7 @@ describe('proxyMethod decorator pattern', () => {
       AspectClass: AnyConstructor<Aspect<T>>,
     ) {
       return AM.createMethodDecorator(factory, metadata, {
-        classes: [Use(AspectClass)],
+        classes: [Inject(AspectClass)],
       });
     }
 
@@ -321,10 +317,8 @@ describe('proxyMethod decorator pattern', () => {
     }
 
     expect(AM.ofClass(Use, UserService)).toHaveLength(1);
-    expect(AM.ofClass(Use, UserService)[0].metadata.injectables).toContain(TransactionalAspect);
-    expect(AM.ofMethod(Transactional, UserService, 'createUser' as keyof UserService)).toHaveLength(
-      1,
-    );
+    expect(AM.ofClass(Use, UserService)[0].injectables).toContain(TransactionalAspect);
+    expect(AM.ofMethod(Transactional, UserService, 'createUser')).toHaveLength(1);
   });
 });
 

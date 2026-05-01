@@ -3,7 +3,7 @@
  * @author acrazing <joking.young@gmail.com>
  */
 
-import {Qualifier, Awaitable, AnyConstructor, Configuration, Priority, Component, OnConstruct, inject} from './draft'
+import { AnyConstructor, Awaitable, Component, Configuration, inject, OnConstruct, Priority, Qualifier } from './draft';
 
 enum Isolation {
     // ...
@@ -15,7 +15,7 @@ enum Propagation {
 interface DataSourceResolveOptions {
     driver?: Qualifier;
     dataSource?: Qualifier;
-    target?: AnyConstructor<any> | object;
+    target?: AnyConstructor | object;
 }
 
 interface TransactionOptions extends DataSourceResolveOptions {
@@ -24,13 +24,13 @@ interface TransactionOptions extends DataSourceResolveOptions {
     timeout?: number;
 }
 
-// the base driver should implement a few multiple/dynamic source management feature by itself.
+// the base env should implement a few multiple/dynamic source management feature by itself.
 // DataSourceDriver helps manage the multiple/dnyamic data sources, but don't help with
-// manage the connection pool. the driver need to acquire/release the connection when
+// manage the connection pool. the env need to acquire/release the connection when
 // doBegin/commit/rollback.
 abstract class DataSourceDriver<TOptions, TConnection, TPool extends TConnection = TConnection> {
     constructor(private readonly options = inject(DataSourceOptions, true)) {}
-    // automatically filter current driver's data sources
+    // automatically filter current env's data sources
     protected getSources(): NamedClusterOptions[];
     connect(name: Qualifier, options: TOptions): Promise<void>;
     protected abstract doConnect(name: Qualifier, options: TOptions): Awaitable<TPool>;
@@ -66,7 +66,7 @@ declare class DefaultDataSourceResolver extends DataSourceResolver{
     /**
      * builtin default resolver, ignore target
      * if not specify dataSource, use "default"
-     * if not specify driver, check if only one driver has specified dataSource
+     * if not specify env, check if only one env has specified dataSource
      *      if yes, use it, else if multiple throw error, else return void 0.
      * This method needs to be sync. As the repository needs to access it without
      * promise. So, we need an interceptor to set up the context for multi-tenant
@@ -98,7 +98,7 @@ declare class TransactionManager {
     getConnection<T>(options: DataSourceResolveOptions): T;
 }
 
-// example driver
+// example env
 
 @Component('my')
 class MyDriver extends DataSourceDriver<DataSourceOptions, {query(sql: string): any}> {

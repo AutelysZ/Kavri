@@ -1,21 +1,84 @@
-/**
- * Route-specific field decorators: IsFile, IsBody, IsFilename.
- * These are exclusive to route request schemas.
- */
-import { lookup } from 'mime-types';
-import type { BaseSchema, SchemaFieldDecorator, StringSchema, ValidateOptions } from '../types.js';
-import { createSchemaFieldDecoratorFactory, SchemaField } from '../field.js';
-import { IsInteger, IsString } from './primitives.js';
-import { IsArray, Ref } from './composite.js';
-import { Schema } from '../schema';
-import { IsMimeType } from './validators';
+import { type BinaryHandler, Env, type FileHandler } from '@kavri/env';
+import db from 'mime-db';
+import {
+  createFieldSchemaDecoratorFactory,
+  decoupleOptions,
+  FieldSchema,
+  type FieldSchemaDecorator,
+  ofArrayField,
+  ofValueField,
+  Phase,
+  type ValidateField,
+  type ValidateOptions,
+} from '../field.js';
+import { Schema } from '../schema.js';
+import { createUnionClass } from '../union.js';
+import { entryOf, isString, once } from '../utils.js';
+import { type ArrayOptions, IsArray } from './array.js';
+import { IsInteger } from './number.js';
+import { IsString, type StringOptions } from './string.js';
+import { IsMimeType } from './string.semantics.js';
 
-// ---------------------------------------------------------------------------
-// IsFilename
-// ---------------------------------------------------------------------------
+const mimeDB = /* #__PURE__ */ once(() => {
+  const out: Record<string, readonly string[]> = {};
+  for (const [k, v] of entryOf(db)) {
+    if (!v.extensions) {
+      continue;
+    }
+    out[k] = v.extensions;
+    const allType = k.substring(0, k.indexOf('/') + 1) + '*';
+    ((out[allType] ??= []) as string[]).push(...v.extensions);
+  }
+  return out;
+});
 
-/** Options for filename fields. */
-export interface IsFilenameOptions extends ValidateOptions {
+export interface AcceptSchema {
+  accept: string[];
+  extensions: Set<string>;
+}
+
+export const Accept = createFieldSchemaDecoratorFactory(
+  'Accept',
+  (accept: string[], options?: ValidateOptions): FieldSchemaDecorator<AcceptSchema> => {
+    const extensions = new Set(
+      accept.flatMap((item) => {
+        if (item.startsWith('.')) {
+          return [item.toLowerCase()];
+        }
+        const mime = mimeDB()[item];
+        if (!mime) {
+          throw new Error(`Invalid mime/extension "${item}" found.`);
+        }
+        return mime;
+      }),
+    );
+    return FieldSchema<AcceptSchema>(Accept, { accept, extensions }, options);
+  },
+  {
+    phase: Phase.Semantics,
+    message: ({ params }) => `.label should be a: ${params.accept.join(', ')}.`,
+    decode: ({ value, params: { extensions } }) => {
+      let name: string;
+      if (isString(value)) {
+        name = value.toLowerCase();
+      } else if (value instanceof FileUnion) {
+        name = value.toHandle().name.toLowerCase();
+      } else {
+        return true;
+      }
+      for (const e of extensions) {
+        if (name.endsWith(e)) {
+          return true;
+        }
+      }
+      return false;
+    },
+  },
+);
+
+export type FilenameType = 'name_only' | 'nested' | 'absolute' | 'relative';
+
+export interface IsFilenameOptions {
   /**
    * - name_only: only allow filename, no special chars like /
    * - nested: allow dir, like a/b.png, but no /, and no ../ or ./
@@ -23,9 +86,11 @@ export interface IsFilenameOptions extends ValidateOptions {
    * - relative: all name, nested, absolute style, and also allow ./ and ../
    * default is name_only
    */
-  type?: 'name_only' | 'nested' | 'absolute' | 'relative';
-  /** Accepted file extensions or MIME patterns. E.g., ['.png', '.jpg', 'image/*']. */
-  accept?: string[];
+  type?: FilenameType;
+  /**
+   * Accepted file extensions or MIME patterns. E.g., ['.png', '.jpg', 'image/*'].
+   */
+  accept?: ValidateField<string[]>;
 }
 
 /**
@@ -33,30 +98,67 @@ export interface IsFilenameOptions extends ValidateOptions {
  * Validates against accept patterns if provided.
  * Use in binary request schemas alongside @IsBody.
  */
-export const IsFilename = createSchemaFieldDecoratorFactory(
+export const IsFilename = createFieldSchemaDecoratorFactory(
   'IsFilename',
   (
-    options: IsFilenameOptions = {},
-    schema?: StringSchema,
-  ): SchemaFieldDecorator<IsFilenameOptions> => {
-    return SchemaField(IsFilename, options, undefined, [IsString(schema)]);
+    { type = 'name_only', accept }: IsFilenameOptions = {},
+    schema: StringOptions = {},
+  ): FieldSchemaDecorator<FilenameType> => {
+    const [opts, info] = decoupleOptions(schema);
+    const deps: FieldSchemaDecorator[] = [IsString(info)];
+    if (accept) deps.push(Accept(...ofArrayField(accept)));
+    return FieldSchema<FilenameType>(IsFilename, type, opts, deps);
   },
   {
+    phase: Phase.Semantics,
     message: '.label should be a filename',
-    validate: (p, v) => {
-      if (typeof v !== 'string' || !p.accept?.length) return true;
-      const mimeType = lookup(v) || '';
-      return p.accept.some((pattern: string) => {
-        if (pattern.startsWith('.')) return v.endsWith(pattern);
-        return matchAccept([pattern], mimeType);
-      });
+    decode: ({ value, params }) => {
+      if (!isString(value)) return true;
+      if (value === '' || value.includes('\0')) return false;
+
+      const segs = value.split('/');
+      const startsAbs = value.startsWith('/');
+      const trailing = value.length > 1 && value.endsWith('/');
+
+      switch (params) {
+        case 'name_only':
+          return (
+            !value.includes('/') &&
+            !value.includes('\\') &&
+            value !== '.' &&
+            value !== '..'
+          );
+        case 'nested':
+          return (
+            !startsAbs &&
+            !trailing &&
+            segs.every((s) => s !== '' && s !== '.' && s !== '..')
+          );
+        case 'absolute': {
+          if (!startsAbs || trailing) return false;
+          const parts = segs.slice(1);
+          return (
+            parts.length > 0 && parts.every((s) => s !== '' && s !== '.' && s !== '..')
+          );
+        }
+        case 'relative': {
+          if (trailing) return false;
+          const parts = startsAbs ? segs.slice(1) : segs;
+          return parts.length > 0 && parts.every((s) => s !== '');
+        }
+      }
     },
   },
 );
 
-// ---------------------------------------------------------------------------
-// MultipartFile
-// ---------------------------------------------------------------------------
+declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
+  namespace Kavri {
+    interface FileUnions {
+      multipart: MultipartFile;
+    }
+  }
+}
 
 /** Represents an uploaded file in a multipart request. */
 @Schema()
@@ -75,18 +177,20 @@ export class MultipartFile {
   readonly path!: string;
 }
 
-// ---------------------------------------------------------------------------
-// IsFile
-// ---------------------------------------------------------------------------
+export class FileUnion
+  extends /* @__PURE__ */ createUnionClass<Kavri.FileUnions, FileHandler>('FileUnion', (ctor) => {
+    ctor.register('multipart', (v) => ({ name: v.name, size: v.size }));
+    Env.registerFileHandlers(ctor.register.bind(ctor));
+  }) {}
 
 /** Options for file upload fields. */
-export interface IsFileOptions extends ValidateOptions {
+export interface IsFileOptions {
   /** If true, field type is MultipartFile[]. Default: false. */
-  array?: boolean;
-  /** Accepted MIME types. E.g., ['image/*', 'application/pdf']. */
-  accept?: string[];
+  array?: ArrayOptions<FileUnion>;
+  /** Accepted MIME utils. E.g., ['image/*', 'application/pdf']. */
+  accept?: ValidateField<string[]>;
   /** Max file size in bytes. */
-  maxSize?: number;
+  maxSize?: ValidateField<number>;
 }
 
 /**
@@ -98,54 +202,91 @@ export interface IsFileOptions extends ValidateOptions {
  * - `accept`: checks file MIME type against allowed patterns (glob-style).
  * - `maxSize`: checks file size in bytes.
  */
-export const IsFile = createSchemaFieldDecoratorFactory(
+export const IsFile = createFieldSchemaDecoratorFactory(
   'IsFile',
-  (options?: IsFileOptions): SchemaFieldDecorator<IsFileOptions> => {
-    const fileRef = Ref(() => MultipartFile);
-    const dep = options?.array ? IsArray(fileRef) : fileRef;
-    return SchemaField(IsFile, (options ?? {}) as IsFileOptions, undefined, [dep]);
+  (
+    { array, accept, maxSize }: IsFileOptions = {},
+    options: ValidateOptions = {},
+  ): FieldSchemaDecorator<boolean> => {
+    const deps: FieldSchemaDecorator[] = [];
+    if (array) deps.push(IsArray(IsFile({ accept, maxSize }), array));
+    else {
+      if (accept) deps.push(Accept(...ofArrayField(accept)));
+      if (maxSize) deps.push(MaxSize(...ofValueField(maxSize)));
+    }
+    return FieldSchema<boolean>(IsFile, !array, options, deps);
   },
   {
-    message: '.label should be a file',
-    validate: (p, v) => {
-      if (v == null) return true; // handled by required/optional
-      const files: MultipartFile[] = Array.isArray(v) ? v : [v];
-      for (const file of files) {
-        if (!(file instanceof MultipartFile)) return false;
-        if (p.maxSize !== undefined && file.size > p.maxSize) return false;
-        if (p.accept?.length && !matchAccept(p.accept, file.type)) return false;
-      }
-      return true;
-    },
+    phase: Phase.Type,
+    message: '.label should be a file.',
+    decode: ({ value, params }) => !params || FileUnion.is(value),
   },
 );
 
-/** Check if a MIME type matches any of the accept patterns. */
-function matchAccept(accept: string[], mimeType: string): boolean {
-  return accept.some((pattern) => {
-    if (pattern === mimeType) return true;
-    if (pattern.endsWith('/*')) {
-      const prefix = pattern.slice(0, -1); // 'image/*' → 'image/'
-      return mimeType.startsWith(prefix);
-    }
-    return false;
-  });
-}
+export const MaxSize = createFieldSchemaDecoratorFactory(
+  'MaxSize',
+  (size: number, options: ValidateOptions = {}): FieldSchemaDecorator<number> => {
+    return FieldSchema<number>(MaxSize, size, options);
+  },
+  {
+    phase: Phase.Semantics,
+    message: 'The size of .label cannot exceed .params',
+    decode: ({ params, value }) => !FileUnion.is(value) || value.toHandle().size <= params,
+  },
+);
 
 // ---------------------------------------------------------------------------
 // IsBody
 // ---------------------------------------------------------------------------
 
+export class BinaryUnion
+  extends /* @__PURE__ */ createUnionClass<Kavri.BinaryUnions, BinaryHandler>(
+    'BinaryUnion',
+    (ctor) => {
+      Env.registerBinaryHandlers(ctor.register.bind(ctor));
+    },
+  ) {}
+
 /**
  * Marks a field as the raw binary request body stream.
- * Use in binary request schemas only. At most one @IsBody per schema.
+ * Use in binary request schemas only. At most one @IsBinary per schema.
  */
-export const IsBody = createSchemaFieldDecoratorFactory(
-  'IsBody',
-  (schema?: BaseSchema<ReadableStream>): SchemaFieldDecorator<BaseSchema<ReadableStream>> => {
-    return SchemaField(IsBody, (schema ?? {}) as BaseSchema<ReadableStream>);
+export const IsBinary = createFieldSchemaDecoratorFactory(
+  'IsBinary',
+  (options: ValidateOptions = {}): FieldSchemaDecorator<undefined> => {
+    return FieldSchema<undefined>(IsBinary, void 0, options);
   },
   {
-    message: '.label should be a stream/blob/buffer',
+    phase: Phase.Type,
+    message: '.label should be a binary stream',
+    decode: ({ value }) => BinaryUnion.is(value),
+  },
+);
+
+/**
+ * Mark a field MUST be the entire body and as a binary data.
+ */
+export const IsBody = createFieldSchemaDecoratorFactory(
+  'IsBody',
+  (options: ValidateOptions = {}): FieldSchemaDecorator<undefined> => {
+    return FieldSchema<undefined>(IsBody, void 0, options, [IsBinary(options)]);
+  },
+  {
+    phase: Phase.Info,
+    message: '',
+  },
+);
+
+/**
+ * Just mark a field MUST in query
+ */
+export const IsQuery = createFieldSchemaDecoratorFactory(
+  'IsQuery',
+  (): FieldSchemaDecorator<undefined> => {
+    return FieldSchema<undefined>(IsQuery, void 0, void 0);
+  },
+  {
+    phase: Phase.Info,
+    message: '',
   },
 );

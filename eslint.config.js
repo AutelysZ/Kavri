@@ -30,6 +30,7 @@ export default tseslint.config(
       '*.js',
       '*.mjs',
       'scripts/',
+      'temp/',
     ],
   },
 );

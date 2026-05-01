@@ -1,221 +1,172 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
- * Composite type decorators: IsArray, IsObject, IsRecord, Ref, AnyOf, OneOf, AllOf, IsEnum, IsIn, IsConst.
+ * Composition decorators per JSON Schema 2020-12: `AnyOf`, `OneOf`, `AllOf`,
+ * `Not`. Each runs in `Phase.Composition`, after the regular type/semantic
+ * checks, and applies one or more nested schemas to the same value.
+ *
+ * Annotation propagation for `unevaluatedProperties` / `unevaluatedItems`
+ * across composition is not yet wired through — sub-schemas run in their own
+ * decode context via `decode(schema, value)`, so the parent's `evaluated` set
+ * does not see what they consumed. That belongs in a follow-up once the
+ * framework exposes a same-path child constructor.
  */
-import type { AnyConstructor } from '@kavri/basic';
-import type {
-  AllOfSchema,
-  AnyOfSchema,
-  ArraySchema,
-  BaseSchema,
-  NestedFieldSchema,
-  ObjectSchema,
-  OneOfSchema,
-  SchemaFieldDecorator,
-  ValidateField,
-  ValidateSchema,
-} from '../types.js';
-import { createSchemaFieldDecoratorFactory, SchemaField, toValidateSchema } from '../field.js';
-import { MaxItems, MaxProperties, MinItems, MinProperties, UniqueItems } from './constraints.js';
+import { decode } from '../decode.js';
+import {
+  createFieldSchemaDecoratorFactory,
+  FieldSchema,
+  type FieldSchemaDecorator,
+  type NestedFieldSchema,
+  Phase,
+  type ValidateOptions,
+} from '../field.js';
+import { fromJsonSchema, toJsonSchema } from '../jsonschema.js';
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function arrayConstraints<T>(schema?: ArraySchema<T>): SchemaFieldDecorator[] {
-  const children: SchemaFieldDecorator[] = [];
-  if (schema?.minItems !== undefined) children.push(MinItems(schema.minItems));
-  if (schema?.maxItems !== undefined) children.push(MaxItems(schema.maxItems));
-  if (schema?.uniqueItems) children.push(UniqueItems());
-  return children;
-}
-
-function objectConstraints(schema?: ObjectSchema<any>): SchemaFieldDecorator[] {
-  const children: SchemaFieldDecorator[] = [];
-  if (schema?.minProperties !== undefined) children.push(MinProperties(schema.minProperties));
-  if (schema?.maxProperties !== undefined) children.push(MaxProperties(schema.maxProperties));
-  return children;
-}
-
-// ---------------------------------------------------------------------------
-// IsArray
-// ---------------------------------------------------------------------------
-
-/** Array field. `items` specifies the element type decorator. */
-export const IsArray = createSchemaFieldDecoratorFactory(
-  'IsArray',
-  <T>(items: NestedFieldSchema, schema?: ArraySchema<T>): SchemaFieldDecorator<ArraySchema<T>> => {
-    return SchemaField<ArraySchema<T>>(IsArray, { items, ...schema }, arrayConstraints(schema));
+/**
+ * Union — value must match at least one of `params`. Maps to JSON Schema
+ * `anyOf`.
+ */
+export const AnyOf = createFieldSchemaDecoratorFactory(
+  'AnyOf',
+  (
+    value: readonly NestedFieldSchema[],
+    options?: ValidateOptions,
+  ): FieldSchemaDecorator<readonly NestedFieldSchema[]> => {
+    return FieldSchema<readonly NestedFieldSchema[]>(AnyOf, value, options);
   },
   {
-    message: '.label is not an array.',
-    validate: (_, v) => Array.isArray(v),
-    toJsonSchema: () => ({ type: 'array' }),
-    fromJsonSchema: () => {
-      // todo
+    phase: Phase.Composition,
+    message: '.label must match at least one of the allowed schemas',
+    decode: ({ value, params }) => {
+      for (const schema of params) {
+        if (decode(schema, value).ok) return true;
+      }
+      return false;
+    },
+    toJsonSchema: (params) => ({ anyOf: params.map((s) => toJsonSchema(s)) }),
+    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
+      return schema.anyOf ? AnyOf(schema.anyOf.map((s) => fromJsonSchema(s))) : void 0;
     },
   },
 );
 
-// ---------------------------------------------------------------------------
-// IsObject
-// ---------------------------------------------------------------------------
-
-/** Object field with typed properties. */
-export const IsObject = createSchemaFieldDecoratorFactory(
-  'IsObject',
-  <T extends object>(
-    properties: { [K in keyof T]?: SchemaFieldDecorator },
-    schema?: ObjectSchema<T>,
-  ): SchemaFieldDecorator<ObjectSchema<T>> => {
-    return SchemaField(
-      IsObject,
-      { ...(schema ?? ({} as any)), properties } as any,
-      objectConstraints(schema as any),
-    ) as any;
-  },
-  {
-    message: '.label must be an object',
-    validate: (_, v) => typeof v === 'object' && v !== null && !Array.isArray(v),
-    toJsonSchema: () => ({ type: 'object' }),
-  },
-);
-
-// ---------------------------------------------------------------------------
-// IsRecord
-// ---------------------------------------------------------------------------
-
-/** Record<string, V> field. `value` specifies the value type decorator. */
-export const IsRecord = createSchemaFieldDecoratorFactory(
-  'IsRecord',
-  <V>(
-    value: SchemaFieldDecorator,
-    schema?: ObjectSchema<Record<string, V>>,
-  ): SchemaFieldDecorator<ObjectSchema<Record<string, V>>> => {
-    return SchemaField(
-      IsRecord,
-      {
-        ...(schema ?? {}),
-        additionalProperties: value,
-      } as ObjectSchema<Record<string, V>>,
-      objectConstraints(schema as any),
-    ) as any;
-  },
-  {
-    message: '.label must be an object',
-    validate: (_, v) => typeof v === 'object' && v !== null && !Array.isArray(v),
-    toJsonSchema: () => ({ type: 'object' }),
-  },
-);
-
-// ---------------------------------------------------------------------------
-// Ref
-// ---------------------------------------------------------------------------
-
-/** Reference to a @Schema class. Always lazy (factory function) to handle circular refs. */
-export const Ref = createSchemaFieldDecoratorFactory(
-  'Ref',
-  <T extends object>(
-    ref: () => AnyConstructor<T>,
-    schema?: ObjectSchema<T>,
-  ): SchemaFieldDecorator<ValidateSchema<() => AnyConstructor<T>>> => {
-    return SchemaField(Ref, { value: ref, ...(schema ?? {}) } as ValidateSchema<
-      () => AnyConstructor<T>
-    >) as any;
-  },
-  {
-    message: '.label must be an object',
-    validate: (_, v) => typeof v === 'object' && v !== null,
-    // toJsonSchema generates $ref at schema generation time (handled by toJsonSchema utility)
-  },
-);
-
-// ---------------------------------------------------------------------------
-// AnyOf / OneOf / AllOf
-// ---------------------------------------------------------------------------
-
-/** Union type: value must match at least one of the given schemas. */
-export const AnyOf = createSchemaFieldDecoratorFactory(
-  'AnyOf',
-  <T>(
-    anyOf: SchemaFieldDecorator[],
-    schema?: BaseSchema<T>,
-  ): SchemaFieldDecorator<AnyOfSchema<T>> => {
-    return SchemaField(AnyOf, { ...(schema ?? {}), anyOf } as AnyOfSchema<T>) as any;
-  },
-  {
-    message: '.label does not match any of the allowed types',
-  },
-);
-
-/** Exactly-one match: value must match exactly one of the given schemas. */
-export const OneOf = createSchemaFieldDecoratorFactory(
+/**
+ * Exactly-one — value must match exactly one of `params`. Zero matches or
+ * two-plus matches both fail. Maps to JSON Schema `oneOf`.
+ */
+export const OneOf = createFieldSchemaDecoratorFactory(
   'OneOf',
-  <T>(
-    oneOf: SchemaFieldDecorator[],
-    schema?: BaseSchema<T>,
-  ): SchemaFieldDecorator<OneOfSchema<T>> => {
-    return SchemaField(OneOf, { ...(schema ?? {}), oneOf } as OneOfSchema<T>) as any;
+  (
+    value: readonly NestedFieldSchema[],
+    options?: ValidateOptions,
+  ): FieldSchemaDecorator<readonly NestedFieldSchema[]> => {
+    return FieldSchema<readonly NestedFieldSchema[]>(OneOf, value, options);
   },
-  { message: '.label must match exactly one of the allowed types' },
+  {
+    phase: Phase.Composition,
+    message: '.label must match exactly one of the allowed schemas',
+    decode: ({ value, params }) => {
+      let matched = 0;
+      for (const schema of params) {
+        if (decode(schema, value).ok && ++matched > 1) return false;
+      }
+      return matched === 1;
+    },
+    toJsonSchema: (params) => ({ oneOf: params.map((s) => toJsonSchema(s)) }),
+    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
+      return schema.oneOf ? OneOf(schema.oneOf.map((s) => fromJsonSchema(s))) : void 0;
+    },
+  },
 );
 
-/** Intersection: value must match all of the given schemas. */
-export const AllOf = createSchemaFieldDecoratorFactory(
+/**
+ * Intersection — value must match every schema in `params`. The per-schema
+ * `DecodeResult`s are returned so each branch's errors flow into the
+ * aggregate report. Maps to JSON Schema `allOf`.
+ */
+export const AllOf = createFieldSchemaDecoratorFactory(
   'AllOf',
-  <T>(
-    allOf: SchemaFieldDecorator[],
-    schema?: BaseSchema<T>,
-  ): SchemaFieldDecorator<AllOfSchema<T>> => {
-    return SchemaField(AllOf, { ...(schema ?? {}), allOf } as AllOfSchema<T>) as any;
-  },
-  { message: '.label does not match all required types' },
-);
-
-// ---------------------------------------------------------------------------
-// IsEnum / IsIn / IsConst
-// ---------------------------------------------------------------------------
-
-/** Enum field. Accepts a TypeScript enum object. */
-export const IsEnum = createSchemaFieldDecoratorFactory(
-  'IsEnum',
-  <K extends string, V extends string | number, E extends Record<K, V>>(
-    host: ValidateField<E>,
-  ): SchemaFieldDecorator<ValidateSchema<E>> => {
-    const s = toValidateSchema(host);
-    return SchemaField(IsEnum, s as ValidateSchema<E>) as any;
+  (
+    value: readonly NestedFieldSchema[],
+    options?: ValidateOptions,
+  ): FieldSchemaDecorator<readonly NestedFieldSchema[]> => {
+    return FieldSchema<readonly NestedFieldSchema[]>(AllOf, value, options);
   },
   {
-    message: '.label must be one of the allowed enum values',
-    validate: (p, v) => Object.values(p.value).includes(v as string | number),
-    toJsonSchema: (p) => ({ enum: Object.values(p.value) }),
+    phase: Phase.Composition,
+    message: '',
+    decode: ({ value, params }) => params.map((schema) => decode(schema, value)),
+    toJsonSchema: (params) => ({ allOf: params.map((s) => toJsonSchema(s)) }),
+    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
+      return schema.allOf ? AllOf(schema.allOf.map((s) => fromJsonSchema(s))) : void 0;
+    },
   },
 );
 
-/** Value must be one of the given values. */
-export const IsIn = createSchemaFieldDecoratorFactory(
-  'IsIn',
-  <V extends readonly (string | number)[]>(
-    values: ValidateField<V>,
-  ): SchemaFieldDecorator<ValidateSchema<V>> => {
-    return SchemaField(IsIn, toValidateSchema(values) as ValidateSchema<V>) as any;
+/** Branches for `IfThenElse`. Maps to JSON Schema `if`/`then`/`else`. */
+export interface IfThenElseSchema {
+  /** Predicate schema. Whether it passes routes to `then` (true) or `else` (false). */
+  if: NestedFieldSchema;
+  /** Applied when `if` passes. Omitting it means "no further constraint on the matching branch". */
+  then?: NestedFieldSchema;
+  /** Applied when `if` fails. Omitting it means "no further constraint on the non-matching branch". */
+  else?: NestedFieldSchema;
+}
+
+/**
+ * Conditional — runs `params.if` against the value, then routes to `then` (if
+ * the predicate passed) or `else` (if it failed). The `if` branch's own
+ * errors are *not* surfaced; only the chosen branch contributes to the
+ * result. Omitted branches pass.
+ *
+ * Maps to the JSON Schema `if` / `then` / `else` keyword triple.
+ */
+export const IfThenElse = createFieldSchemaDecoratorFactory(
+  'IfThenElse',
+  (
+    value: IfThenElseSchema,
+    options?: ValidateOptions,
+  ): FieldSchemaDecorator<IfThenElseSchema> => {
+    return FieldSchema<IfThenElseSchema>(IfThenElse, value, options);
   },
   {
-    message: '.label must be one of the allowed values',
-    validate: (p, v) => (p.value as readonly (string | number)[]).includes(v as string | number),
-    toJsonSchema: (p) => ({ enum: [...p.value] }),
+    phase: Phase.Composition,
+    message: '',
+    decode: ({ value, params }) => {
+      const branch = decode(params.if, value).ok ? params.then : params.else;
+      return branch === undefined ? true : decode(branch, value);
+    },
+    toJsonSchema: (params) => ({
+      if: toJsonSchema(params.if),
+      ...(params.then !== undefined && { then: toJsonSchema(params.then) }),
+      ...(params.else !== undefined && { else: toJsonSchema(params.else) }),
+    }),
+    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
+      if (!schema.if) return void 0;
+      const branches: IfThenElseSchema = { if: fromJsonSchema(schema.if) };
+      if (schema.then) branches.then = fromJsonSchema(schema.then);
+      if (schema.else) branches.else = fromJsonSchema(schema.else);
+      return IfThenElse(branches);
+    },
   },
 );
 
-/** Value must be exactly the given constant. */
-export const IsConst = createSchemaFieldDecoratorFactory(
-  'IsConst',
-  <V>(value: ValidateField<V>): SchemaFieldDecorator<ValidateSchema<V>> => {
-    return SchemaField(IsConst, toValidateSchema(value)) as any;
+/**
+ * Negation — value must NOT match `params`. Maps to JSON Schema `not`.
+ */
+export const Not = createFieldSchemaDecoratorFactory(
+  'Not',
+  (
+    value: NestedFieldSchema,
+    options?: ValidateOptions,
+  ): FieldSchemaDecorator<NestedFieldSchema> => {
+    return FieldSchema<NestedFieldSchema>(Not, value, options);
   },
   {
-    message: '.label must be .value',
-    validate: (p, v) => v === p.value,
-    toJsonSchema: (p) => ({ const: p.value }),
+    phase: Phase.Composition,
+    message: '.label must not match the negated schema',
+    decode: ({ value, params }) => !decode(params, value).ok,
+    toJsonSchema: (params) => ({ not: toJsonSchema(params) }),
+    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
+      return schema.not ? Not(fromJsonSchema(schema.not)) : void 0;
+    },
   },
 );

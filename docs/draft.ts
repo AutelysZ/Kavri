@@ -187,11 +187,11 @@ export declare function inject<T>(injectable: Injectable<T>, name: Qualifier, op
 declare function injectRef<T>(injectable: Injectable<T>): Ref<T>
 declare function injectRef<T>(injectable: Injectable<T>, optional: true): Ref<T> | undefined
 
-declare function injectAll<T>(injectable: Injectable<T> | ClassDecoratorFactory<any>, order?: CollectionOrder): readonly T[]
+declare function injectAll<T>(injectable: Injectable<T> | ClassDecoratorFactory, order?: CollectionOrder): readonly T[]
 
-declare function injectSet<T>(injectable: Injectable<T> | ClassDecoratorFactory<any>): ReadonlySet<T>;
+declare function injectSet<T>(injectable: Injectable<T> | ClassDecoratorFactory): ReadonlySet<T>;
 
-declare function injectMap<T>(injectable: Injectable<T> | ClassDecoratorFactory<any>): ReadonlyMap<Qualifier, T>;
+declare function injectMap<T>(injectable: Injectable<T> | ClassDecoratorFactory): ReadonlyMap<Qualifier, T>;
 
 // ============================================================
 // Section 7: Metadata
@@ -223,20 +223,20 @@ declare const Metadata: {
 }
 
 // ============================================================
-// Section 8: Module System — @Touch & @Use
+// Section 8: Module System — @Import & @Use
 // ============================================================
 
 /**
  * Class decorator: registers listed classes without instantiating.
  * Only accepts class constructors (not tokens).
  */
-declare function Touch(...classes: AnyConstructor<any>[]): ClassDecorator<readonly AnyConstructor<any>[]>;
+declare function Import(...classes: AnyConstructor[]): ClassDecorator<readonly AnyConstructor[]>;
 
 /**
  * Class decorator: ensures listed injectables are instantiated
  * (and their @Provide processed) before this class is resolved.
  */
-declare function Use(...injectables: Injectable<any>[]): ClassDecorator<readonly Injectable<any>[]>;
+declare function Inject(...injectables: Injectable<any>[]): ClassDecorator<readonly Injectable<any>[]>;
 
 // ============================================================
 // Section 9: Container
@@ -249,7 +249,7 @@ declare function Use(...injectables: Injectable<any>[]): ClassDecorator<readonly
  *   All @Use deps and target are entrypoints, instantiated serially.
  *   For each target:
  *     1. Check @Conditional. Disabled → skip. (Configuration resolves before conditions.)
- *     2. Register decorator metadata: @Touch, @Provide (pure registration).
+ *     2. Register decorator metadata: @Import, @Provide (pure registration).
  *        Duplicate @Provide → DuplicateProviderError (unless primary).
  *     3. Process @Use: recursively instantiate deps (depth-first).
  *     4. Call factory (inject context active).
@@ -437,7 +437,7 @@ declare function OverrideConfiguration<T>(
  *  11. invokeResolvers()      — for each Resolver (injectAll(Resolver)):
  *          bind resolver's getOptionsClass() → if has values, call resolve(options)
  *          → merge returned variables
- *  12. validate()             — check allowUnused constraint
+ *  12. decode()             — check allowUnused constraint
  *
  * bind<T>(configClass):
  *   Parse config class from current layered state.
@@ -1030,7 +1030,7 @@ class CacheModule {
 }
 
 @Component()
-@Touch(MysqlDriver, PsqlDriver)
+@Import(MysqlDriver, PsqlDriver)
 @Provide(Sequelize, async (url = inject(DatabaseUrl)) => {
     const seq = new Sequelize(url);
     await seq.authenticate();
@@ -1058,9 +1058,9 @@ class RedisEventSubscriber {
 }
 
 @Component()
-@Touch(JsonSerializer, XmlSerializer, YamlSerializer)
-@Use(AppConfigModule, CacheModule, DatabaseModule)
-@Use(RedisEventSubscriber, JobMetricsListener)
+@Import(JsonSerializer, XmlSerializer, YamlSerializer)
+@Inject(AppConfigModule, CacheModule, DatabaseModule)
+@Inject(RedisEventSubscriber, JobMetricsListener)
 class Application {
     constructor(
         private readonly appConfig = injectConfig(AppConfig),
@@ -1096,7 +1096,7 @@ async function testUserService() {
         save: async () => {
         },
     }))
-    @Use(UserService)
+    @Inject(UserService)
     class TestHarness {
         constructor(readonly service = inject(UserService)) {
         }
@@ -1218,11 +1218,11 @@ async function testUserService() {
     }
 
     @Component()
-    @Touch(Dog, Cat, Bird)
-    @Touch(PsqlDriver)
-    @Touch(AwsSecretManagerResolver, EnvFileLoader)
-    @Use(RedisModule)
-    @Use(RedisEventSubscriber, JobMetricsListener)
+    @Import(Dog, Cat, Bird)
+    @Import(PsqlDriver)
+    @Import(AwsSecretManagerResolver, EnvFileLoader)
+    @Inject(RedisModule)
+    @Inject(RedisEventSubscriber, JobMetricsListener)
     @OverrideConfiguration(ConfigFileOptions, () => ({configFile: './config/petstore'}))
     @OverrideConfiguration(ProfileOptions, () => ({profiles: ['prod']}))
     @OverrideConfiguration(VariantOptions, () => ({envPrefix: 'PETSTORE_'}))

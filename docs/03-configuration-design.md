@@ -2,9 +2,13 @@
 
 ## 1. Position
 
-Configuration is a first-class subsystem with pluggable loaders, import resolvers, and class-based schemas. Config classes are decorated with `@Configuration(prefix)` (which composes `@Schema`) and injected via `injectConfig()`. Follows Spring Boot conventions: profile-based config files, external secret imports, and `${...}` variable substitution.
+Configuration is a first-class subsystem with pluggable loaders, import resolvers, and class-based
+schemas. Config classes are decorated with `@Configuration(prefix)` (which composes `@Schema`) and
+injected via `injectConfig()`. Follows Spring Boot conventions: profile-based config files, external
+secret imports, and `${...}` variable substitution.
 
-There is no bootstrap/regular split. All configuration classes use a single `@Configuration(prefix, options?)` decorator and are managed by a single `ConfigurationRegistry`.
+There is no bootstrap/regular split. All configuration classes use a single
+`@Configuration(prefix, options?)` decorator and are managed by a single `ConfigurationRegistry`.
 
 ## 2. Architecture
 
@@ -23,33 +27,35 @@ ConfigurationRegistry @OnConstruct (Spring-style layered resolution):
  11. invokeResolvers()      — for each Resolver (injectAll(Resolver)):
          bind resolver's getOptionsClass() -> if has values, call resolve(options)
          -> merge returned variables
- 12. validate()             — check allowUnused constraint
+ 12. decode()             — check allowUnused constraint
 
 Config phase:
   injectConfig(clazz) -> ConfigurationRegistry.bind(clazz)
-  -> extract prefix, validate with @Schema field decorators
+  -> extract prefix, decode with @Schema field decorators
 ```
 
 ## 3. @Configuration Decorator
 
 ```ts
 interface ConfigurationOptions {
-  /** Hide from help output and/or schema generation. */
-  hidden?: boolean | 'schema';
+    /** Hide from help output and/or schema generation. */
+    hidden?: boolean | 'schema';
 }
 
 interface ConfigurationMetadata {
-  prefix: string;
-  options: ConfigurationOptions;
+    prefix: string;
+    options: ConfigurationOptions;
 }
 
 declare function Configuration(
-  prefix: string,
-  options?: ConfigurationOptions,
+    prefix: string,
+    options?: ConfigurationOptions,
 ): ClassDecorator<ConfigurationMetadata>;
 ```
 
-`@Configuration(prefix)` composes `@Schema()` -- all fields must have field decorators from `@kavri/schema` (`@IsString`, `@IsInteger`, `@IsBoolean`, etc.). No separate parser or `ConfigParser<T>` needed.
+`@Configuration(prefix)` composes `@Schema()` -- all fields must have field decorators from
+`@kavri/schema` (`@IsString`, `@IsInteger`, `@IsBoolean`, etc.). No separate parser or
+`ConfigParser<T>` needed.
 
 ```ts
 @Configuration('database')
@@ -65,20 +71,22 @@ class DatabaseOptions {
 
 ## 4. Built-in configuration classes
 
-These are the framework-provided `@Configuration` classes that control the registry lifecycle. They replace the old `BootstrapOptions` with focused, single-responsibility classes.
+These are the framework-provided `@Configuration` classes that control the registry lifecycle. They
+replace the old `BootstrapOptions` with focused, single-responsibility classes.
 
 ### EnvOptions
 
 ```ts
 /** Not modifiable via env/cli/file. Hidden from help and schema. */
-@Configuration('kavri.config', { hidden: true })
+@Configuration('kavri.config', {hidden: true})
 class EnvOptions {
-  env: Record<string, string> = process.env;
-  argv: string[] = process.argv.slice(2);
+    env: Record<string, string> = process.env;
+    argv: string[] = process.argv.slice(2);
 }
 ```
 
-Provides the raw env and argv sources. Bound first during registry init. Hidden from help and schema because it is not user-configurable.
+Provides the raw env and argv sources. Bound first during registry init. Hidden from help and schema
+because it is not user-configurable.
 
 ### ConfigFileOptions
 
@@ -91,7 +99,8 @@ class ConfigFileOptions {
 }
 ```
 
-Determines the config file path. Can be overridden via env or cli. Hidden from schema generation but visible in help.
+Determines the config file path. Can be overridden via env or cli. Hidden from schema generation but
+visible in help.
 
 ### ProfileOptions
 
@@ -104,7 +113,8 @@ class ProfileOptions {
 }
 ```
 
-Determines active profiles. The root config file can specify profiles, or they can be set via env/cli.
+Determines active profiles. The root config file can specify profiles, or they can be set via
+env/cli.
 
 ### VariantOptions
 
@@ -119,7 +129,8 @@ class VariantOptions {
 }
 ```
 
-Controls env/cli prefix mapping, extra variables for `${...}` substitution, and strictness for unused config keys.
+Controls env/cli prefix mapping, extra variables for `${...}` substitution, and strictness for
+unused config keys.
 
 ## 5. injectConfig
 
@@ -128,23 +139,29 @@ declare function injectConfig<T>(clazz: AnyConstructor<T>): T;
 declare function injectConfig<T>(clazz: AnyConstructor<T>, optional: true): T | undefined;
 ```
 
-`injectConfig()` is an **inject point** -- usable in constructors, factories, `@Conditional` predicates, and lifecycle hooks. The class must be decorated with `@Configuration(prefix)`. Internally calls `ConfigurationRegistry.bind(clazz)`.
+`injectConfig()` is an **inject point** -- usable in constructors, factories, `@Conditional`
+predicates, and lifecycle hooks. The class must be decorated with `@Configuration(prefix)`.
+Internally calls `ConfigurationRegistry.bind(clazz)`.
 
 Precedence: `cli > env > config file > @OverrideConfiguration > schema defaults`.
 
-Variable substitution (`${key}` / `${key:-default}`) occurs during `bind()` using accumulated variables (env + resolver-provided).
+Variable substitution (`${key}` / `${key:-default}`) occurs during `bind()` using accumulated
+variables (env + resolver-provided).
 
 ```ts
+
 @Component()
 class UserService {
-  constructor(private readonly config = injectConfig(DatabaseOptions)) {}
+    constructor(private readonly config = injectConfig(DatabaseOptions)) {
+    }
 }
 
 // Conditional injection:
 @Component()
 @Conditional((config = injectConfig(TelemetryOptions, true)) => config?.enabled ?? false)
 class TelemetryService {
-  constructor(private readonly config = injectConfig(TelemetryOptions)) {}
+    constructor(private readonly config = injectConfig(TelemetryOptions)) {
+    }
 }
 ```
 
@@ -152,14 +169,16 @@ class TelemetryService {
 
 ```ts
 abstract class Loader {
-  abstract supports(): string[];              // file extensions
-  abstract load(content: string): Awaitable<object>;  // parse file content
+    abstract supports(): string[];              // file extensions
+    abstract load(content: string): Awaitable<object>;  // parse file content
 }
 ```
 
-Abstract class -- subclasses must be `@Component()`. Config module touches `JsonLoader`, `YamlLoader`, `TomlLoader` by default. Third-party loaders added via `@Touch`.
+Abstract class -- subclasses must be `@Component()`. Config module touches `JsonLoader`,
+`YamlLoader`, `TomlLoader` by default. Third-party loaders added via `@Import`.
 
-`ConfigurationRegistry` discovers extensions from `injectAll(Loader)` and tries `{configFile}.{ext}` for each, using the first found.
+`ConfigurationRegistry` discovers extensions from `injectAll(Loader)` and tries `{configFile}.{ext}`
+for each, using the first found.
 
 ## 7. Resolver
 
@@ -174,39 +193,47 @@ Abstract class -- subclasses must be `@Component()`. Config module touches `Json
  * Discovered via injectAll(Resolver).
  */
 abstract class Resolver<T = any> {
-  abstract getOptionsClass(): AnyConstructor<T>;
-  abstract resolve(options: T): Awaitable<Record<string, string>>;
+    abstract getOptionsClass(): AnyConstructor<T>;
+
+    abstract resolve(options: T): Awaitable<Record<string, string>>;
 }
 ```
 
-Resolvers load external key-value pairs into the variable context. Each resolver defines its own options class via `getOptionsClass()`. The registry binds that options class and, if it has values, calls `resolve(options)`. The returned key-value pairs are merged into the variable context for `${...}` substitution.
+Resolvers load external key-value pairs into the variable context. Each resolver defines its own
+options class via `getOptionsClass()`. The registry binds that options class and, if it has values,
+calls `resolve(options)`. The returned key-value pairs are merged into the variable context for
+`${...}` substitution.
 
-Resolvers are discovered via `injectAll(Resolver)` (not `injectMap`). Each resolver manages its own import strategy -- there is no `kavri.config.import` protocol dispatch.
+Resolvers are discovered via `injectAll(Resolver)` (not `injectMap`). Each resolver manages its own
+import strategy -- there is no `kavri.config.import` protocol dispatch.
 
 ```ts
+
 @Configuration('kavri.resolver.aws.secretmanager')
 class AwsSecretManagerResolverOptions {
-  @IsString() region!: string;
-  @IsArray(IsObject({ name: IsString(), prefix: IsString() }))
-  items!: Array<{ name: string; prefix: string }>;
+    @IsString() region!: string;
+    @IsArray(IsObject({name: IsString(), prefix: IsString()}))
+    items!: Array<{ name: string; prefix: string }>;
 }
 
 @Component()
 class AwsSecretManagerResolver extends Resolver<AwsSecretManagerResolverOptions> {
-  getOptionsClass() { return AwsSecretManagerResolverOptions; }
-
-  async resolve(opts: AwsSecretManagerResolverOptions) {
-    const client = new SecretsManagerClient(opts);
-    const entries: Record<string, string> = {};
-    for (const item of opts.items) {
-      const result = await client.getSecretValue({ SecretId: item.name });
-      const secrets = JSON.parse(result.SecretString ?? '{}');
-      for (const [k, v] of Object.entries(secrets)) {
-        entries[item.prefix ? `${item.prefix}.${k}` : k] = String(v);
-      }
+    getOptionsClass() {
+        return AwsSecretManagerResolverOptions;
     }
-    return entries;
-  }
+
+    async resolve(opts: AwsSecretManagerResolverOptions) {
+        const client = new SecretsManagerClient(opts);
+        const entries: Record<string, string> = {};
+        for (const item of opts.items) {
+            const result = await client.getSecretValue({SecretId: item.name});
+            const secrets = JSON.parse(result.SecretString ?? '{}');
+            for (const [k, v] of Object.entries(secrets)) {
+                entries[item.prefix ? `${item.prefix}.${k}` : k] = String(v);
+            }
+        }
+        return entries;
+    }
 }
 ```
 
@@ -224,9 +251,12 @@ declare function OverrideConfiguration<T>(
 ): ClassDecorator<OverrideConfigurationMetadata<T>>;
 ```
 
-Code-level defaults for a `@Configuration` class. Lowest priority layer -- overridden by config files, env, and cli. The callback receives the previous override value (or `undefined` if first) and returns the merged partial. Multiple for the same class: chained in `@Use` order.
+Code-level defaults for a `@Configuration` class. Lowest priority layer -- overridden by config
+files, env, and cli. The callback receives the previous override value (or `undefined` if first) and
+returns the merged partial. Multiple for the same class: chained in `@Inject` order.
 
-**CONSTRAINT:** Classes with `@OverrideConfiguration` must NOT have `@Conditional`. Enforced at runtime and by `@kavri/eslint-plugin`.
+**CONSTRAINT:** Classes with `@OverrideConfiguration` must NOT have `@Conditional`. Enforced at
+runtime and by `@kavri/eslint-plugin`.
 
 `@OverrideConfiguration` targets config **classes** (not tokens):
 
@@ -244,16 +274,18 @@ class AppOptionsModule {}
 
 ## 9. Variable substitution
 
-After all sources are merged and resolvers are invoked, string values containing `${...}` are resolved from the **variable context**.
+After all sources are merged and resolvers are invoked, string values containing `${...}` are
+resolved from the **variable context**.
 
 The variable context is built from:
+
 1. `EnvOptions.env` (process.env by default)
 2. Values loaded by Resolvers (merged on top)
 3. `VariantOptions.variables` (explicit variables)
 
-| Syntax | Behavior |
-|---|---|
-| `${key}` | Look up in variable context |
+| Syntax            | Behavior                               |
+|-------------------|----------------------------------------|
+| `${key}`          | Look up in variable context            |
 | `${key:-default}` | Use default if not in variable context |
 
 ## 10. ConfigurationRegistry (internal)
@@ -271,81 +303,89 @@ Internal singleton. Manages layered config data.
 7. **`parseRootFile()`** -- load & parse config file, insert after cli/env layers
 8. **`bind(ProfileOptions)`** -- determine active profiles (root file can specify)
 9. **`parseProfileFiles()`** -- load profile files, insert before root file
-10. **`bind(VariantOptions)`** -- parse variant settings (envPrefix, argvPrefix, variables, allowUnused)
-11. **`invokeResolvers()`** -- for each Resolver (`injectAll(Resolver)`): bind resolver's `getOptionsClass()` -> if has values, call `resolve(options)` -> merge returned variables
-12. **`validate()`** -- check `allowUnused` constraint
+10. **`bind(VariantOptions)`** -- parse variant settings (envPrefix, argvPrefix, variables,
+    allowUnused)
+11. **`invokeResolvers()`** -- for each Resolver (`injectAll(Resolver)`): bind resolver's
+    `getOptionsClass()` -> if has values, call `resolve(options)` -> merge returned variables
+12. **`decode()`** -- check `allowUnused` constraint
 
-**`bind<T>(configClass)`**: Parse config class from current layered state. Cached: each class is bound exactly once. Variable substitution (`${key}` / `${key:-default}`) performed during bind using accumulated variables (env + resolver-provided).
+**`bind<T>(configClass)`**: Parse config class from current layered state. Cached: each class is
+bound exactly once. Variable substitution (`${key}` / `${key:-default}`) performed during bind using
+accumulated variables (env + resolver-provided).
 
 ## 11. Full example
 
 ```ts
 import {
-  Container, Component, Conditional, Touch, Use,
-  inject, injectAll, token,
+    Container, Component, Conditional, Import, Use,
+    inject, injectAll, token,
 } from '@kavri/container';
 import {
-  Configuration, injectConfig, OverrideConfiguration,
-  ConfigFileOptions, ProfileOptions, VariantOptions,
-  Resolver, Loader,
+    Configuration, injectConfig, OverrideConfiguration,
+    ConfigFileOptions, ProfileOptions, VariantOptions,
+    Resolver, Loader,
 } from '@kavri/config';
-import { IsString, IsInteger, IsArray, IsBoolean, IsObject } from '@kavri/schema';
+import {IsString, IsInteger, IsArray, IsBoolean, IsObject} from '@kavri/schema';
 
 // --- resolver options ---
 
 @Configuration('kavri.resolver.aws.secretmanager')
 class AwsSecretManagerResolverOptions {
-  @IsString({ default: 'us-east-1' }) region!: string;
-  @IsArray(IsObject({ name: IsString(), prefix: IsString() }))
-  items!: Array<{ name: string; prefix: string }>;
+    @IsString({default: 'us-east-1'}) region!: string;
+    @IsArray(IsObject({name: IsString(), prefix: IsString()}))
+    items!: Array<{ name: string; prefix: string }>;
 }
 
 // --- import resolver ---
 
 @Component()
 class AwsSecretManagerResolver extends Resolver<AwsSecretManagerResolverOptions> {
-  getOptionsClass() { return AwsSecretManagerResolverOptions; }
+    getOptionsClass() {
+        return AwsSecretManagerResolverOptions;
+    }
 
-  async resolve(opts: AwsSecretManagerResolverOptions) {
-    // fetch secrets and return key-value pairs
-    return { 'database.password': 'secret123' };
-  }
+    async resolve(opts: AwsSecretManagerResolverOptions) {
+        // fetch secrets and return key-value pairs
+        return {'database.password': 'secret123'};
+    }
 }
 
 // --- config schemas ---
 
 @Configuration('database')
 class DatabaseOptions {
-  @IsString() driver!: string;
-  @IsString() host!: string;
-  @IsInteger({ default: 5432 }) port!: number;
-  @IsString() password!: string;
+    @IsString() driver!: string;
+    @IsString() host!: string;
+    @IsInteger({default: 5432}) port!: number;
+    @IsString() password!: string;
 }
 
 @Configuration('app')
 class AppOptions {
-  @IsString({ default: 'my-app' }) name!: string;
-  @IsString({ in: ['dev', 'staging', 'prod'], default: 'dev' }) env!: string;
+    @IsString({default: 'my-app'}) name!: string;
+    @IsString({in: ['dev', 'staging', 'prod'], default: 'dev'}) env!: string;
 }
 
 @Configuration('telemetry')
 class TelemetryOptions {
-  @IsBoolean({ default: false }) enabled!: boolean;
+    @IsBoolean({default: false}) enabled!: boolean;
 }
 
-// --- driver ---
+// --- env ---
 
 abstract class Driver {
-  abstract query(sql: string): Promise<any>;
+    abstract query(sql: string): Promise<any>;
 }
 
 @Component('psql')
 class PsqlDriver extends Driver {
-  async query(sql: string) { return `psql:${sql}`; }
+    async query(sql: string) {
+        return `psql:${sql}`;
+    }
 }
 
 const SelectedDriver = token<Driver>(
-  (cfg = injectConfig(DatabaseOptions), d = inject(Driver, cfg.driver)) => d,
+    (cfg = injectConfig(DatabaseOptions), d = inject(Driver, cfg.driver)) => d,
 );
 
 // --- conditional component ---
@@ -353,8 +393,11 @@ const SelectedDriver = token<Driver>(
 @Component()
 @Conditional((config = injectConfig(TelemetryOptions, true)) => config?.enabled ?? false)
 class TelemetryService {
-  constructor(private readonly config = injectConfig(TelemetryOptions)) {}
-  send(metric: string, value: number): void {}
+    constructor(private readonly config = injectConfig(TelemetryOptions)) {
+    }
+
+    send(metric: string, value: number): void {
+    }
 }
 
 // --- application ---
@@ -364,7 +407,7 @@ class TelemetryService {
 // app:
 //   name: pet-store
 // database:
-//   driver: psql
+//   env: psql
 //   host: "${DATABASE_HOST:-localhost}"
 //   password: "${database.password}"
 //
@@ -383,27 +426,28 @@ class TelemetryService {
 //   env: prod
 
 @Component()
-@Touch(PsqlDriver)
-@Touch(AwsSecretManagerResolver)
+@Import(PsqlDriver)
+@Import(AwsSecretManagerResolver)
 @OverrideConfiguration(ConfigFileOptions, () => ({
-  configFile: './config/config',
+    configFile: './config/config',
 }))
 @OverrideConfiguration(ProfileOptions, () => ({
-  profiles: ['prod'],
+    profiles: ['prod'],
 }))
 @OverrideConfiguration(VariantOptions, () => ({
-  envPrefix: 'MYAPP_',
+    envPrefix: 'MYAPP_',
 }))
 class Application {
-  constructor(
-    private readonly app = injectConfig(AppOptions),
-    private readonly driver = inject(SelectedDriver),
-    private readonly telemetry = inject(TelemetryService, true),
-  ) {}
+    constructor(
+        private readonly app = injectConfig(AppOptions),
+        private readonly driver = inject(SelectedDriver),
+        private readonly telemetry = inject(TelemetryService, true),
+    ) {
+    }
 
-  async run() {
-    console.log(`${this.app.name} (${this.app.env}): ${await this.driver.query('select 1')}`);
-  }
+    async run() {
+        console.log(`${this.app.name} (${this.app.env}): ${await this.driver.query('select 1')}`);
+    }
 }
 
 const container = new Container();
