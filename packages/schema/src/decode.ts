@@ -1,13 +1,14 @@
 import { type AnyConstructor, KeyMap, Metadata } from '@kavri/basic';
-import { DecoratorPhaseStrategy, FieldSchemaDecoratorName, Strategy } from './field.internal.js';
 import {
+  DecoratorPhaseStrategy,
   FieldSchema,
   type FieldSchemaDecorator,
   type FieldSchemaDecoratorMetadata,
+  FieldSchemaDecoratorName,
   isFieldSchemaDecorator,
   type NestedFieldSchema,
   type Phase,
-
+  Strategy,
 } from './field.js';
 import { isArray } from './utils.js';
 
@@ -441,11 +442,9 @@ function formatScalar(v: unknown): string {
 
 function normalizeSchema(schema: NestedFieldSchema): FieldSchemaDecoratorMetadata[] {
   if (isArray(schema)) {
-    return (schema as readonly (FieldSchemaDecorator | FieldSchemaDecoratorMetadata)[]).map(
-      toMetadata,
-    );
+    return schema.map(toMetadata);
   }
-  return [toMetadata(schema as FieldSchemaDecorator | FieldSchemaDecoratorMetadata)];
+  return [toMetadata(schema)];
 }
 
 function toMetadata(

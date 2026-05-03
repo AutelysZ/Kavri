@@ -7,9 +7,7 @@ import type {
 } from '@kavri/basic';
 import { createFieldDecorator, Metadata } from '@kavri/basic';
 import type { DecodeContext, DecodeResult } from './decode.js';
-import { FieldSchemaDecoratorName } from './field.internal.js';
-import { FromJsonSchemaRegistry } from './jsonschema.internal.js';
-import { type FromJsonSchemaContext, type JsonSchema } from './jsonschema.js';
+import type { FromJsonSchemaContext, JsonSchema } from './jsonschema.js';
 import { isArray, isFunction, isObject } from './utils.js';
 
 export interface ValidateOptions {
@@ -100,6 +98,22 @@ export function isFieldSchemaDecoratorMetadata(v: unknown): v is FieldSchemaDeco
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type FieldSchemaDecorator<P = any> = FieldDecorator<FieldSchemaDecoratorMetadata<P>>;
 
+/**
+ * Identity key on every schema decorator factory's static surface. Carries the
+ * registered rule name (`'IsString'`, `'MinLength'`, …) and is the marker
+ * `isFieldSchemaDecoratorFactory` looks for.
+ */
+export const FieldSchemaDecoratorName = Symbol('schema:name');
+
+/**
+ * Registry of decorator factories that opt into JSON Schema → decorator
+ * round-tripping. `createFieldSchemaDecoratorFactory` populates this when a
+ * factory declares `fromJsonSchema`. Lives here (not `jsonschema.ts`) so
+ * `field.ts` doesn't have to eagerly load the decorator graph.
+ */
+// eslint-disable-next-line @typescript-eslint/no-use-before-define
+export const FromJsonSchemaRegistry = new Set<FieldSchemaDecoratorFactory>();
+
 export enum Phase {
   /**
    * only provide json schema metadata plus label for print error message
@@ -156,6 +170,46 @@ export enum Phase {
    */
   AdditionalConstraints,
 }
+
+export enum Strategy {
+  /**
+   * If this decorator passes, stop the entire pipeline (all phases).
+   */
+  ShortCircuit,
+
+  /**
+   * Pass if any decorator in this phase passes.
+   * Stop evaluating remaining decorators in this phase after first pass.
+   */
+  AnyPass,
+
+  /**
+   * Stop the entire pipeline immediately when this decorator fails.
+   */
+  FailFast,
+
+  /**
+   * Continue evaluating even if this decorator fails.
+   * Final result depends on aggregated errors.
+   */
+  ContinueOnError,
+}
+
+export const DecoratorPhaseStrategy: Readonly<Record<Phase, Strategy>> = {
+  [Phase.Info]: Strategy.ContinueOnError,
+  [Phase.Defaults]: Strategy.ShortCircuit,
+  [Phase.Presence]: Strategy.ShortCircuit,
+  [Phase.Coercion]: Strategy.AnyPass,
+  [Phase.Type]: Strategy.AnyPass,
+  [Phase.Normalization]: Strategy.FailFast,
+  [Phase.Semantics]: Strategy.ContinueOnError,
+  [Phase.TextEncoding]: Strategy.FailFast,
+  [Phase.BinaryEncoding]: Strategy.FailFast,
+  [Phase.ContentType]: Strategy.FailFast,
+  [Phase.Property]: Strategy.ContinueOnError,
+  [Phase.Composition]: Strategy.ContinueOnError,
+  [Phase.AdditionalConstraints]: Strategy.ContinueOnError,
+};
 
 /**
  * Static methods attached to a schema field decorator factory.

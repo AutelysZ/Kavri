@@ -2,9 +2,11 @@ import type { AnyConstructor } from '@kavri/basic';
 
 // eslint-disable-next-line
 export type Union<T extends Record<string, any>, H> = {
-  as<K extends keyof T>(key: K): T[K];
-  is<K extends keyof T>(key: K): boolean;
+  as<K extends keyof T>(type: K): T[K];
+  is<K extends keyof T>(type: K): boolean;
   toHandle(): H;
+  get type(): keyof T;
+  get value(): T[keyof T];
 } & {
   [P in keyof T as `as${Capitalize<P & string>}`]: () => T[P];
 };
@@ -12,8 +14,8 @@ export type Union<T extends Record<string, any>, H> = {
 // eslint-disable-next-line
 export type UnionConstructor<T extends Record<string, any>, H> = {
   is<T>(this: AnyConstructor<T>, v: unknown): v is T;
-  of<K extends keyof T>(key: K, value: T[K]): Union<T, H>;
-  register<K extends keyof T>(key: K, handler: (value: T[K]) => H): void;
+  of<K extends keyof T>(type: K, value: T[K]): Union<T, H>;
+  register<K extends keyof T>(type: K, handler: (value: T[K]) => H): void;
   new (): Union<T, H>;
 } & {
   [P in keyof T as `of${Capitalize<P & string>}`]: (value: T[P]) => Union<T, H>;
@@ -27,53 +29,61 @@ export function createUnionClass<T extends Record<string, any>, H>(
 ): UnionConstructor<T, H> {
   class Union {
     static #handlers = new Map<string, (value: unknown) => unknown>();
-    static of(key: string, value: unknown) {
-      return new Union(key, value);
+    static of(type: string, value: unknown) {
+      return new Union(type, value);
     }
 
     static is(v: unknown) {
       return v instanceof this;
     }
 
-    static register(key: string, handler: (value: unknown) => unknown) {
-      if (this.#handlers.has(key)) {
-        throw new Error(`${name}'s handler ${key} is already registered`);
+    static register(type: string, handler: (value: unknown) => unknown) {
+      if (this.#handlers.has(type)) {
+        throw new Error(`${name}'s handler ${type} is already registered`);
       }
-      this.#handlers.set(key, handler);
-      Object.defineProperty(Union, `of${key}`, {
+      this.#handlers.set(type, handler);
+      Object.defineProperty(Union, `of${type}`, {
         value: function (this: UnionConstructor<Record<string, unknown>, unknown>, value: unknown) {
-          return this.of(key, value);
+          return this.of(type, value);
         },
       });
-      Object.defineProperty(Union.prototype, `as${key}`, {
+      Object.defineProperty(Union.prototype, `as${type}`, {
         value: function (this: Union) {
-          return this.as(key);
+          return this.as(type);
         },
       });
     }
 
-    readonly #key: string;
+    readonly #type: string;
     readonly #value: unknown;
 
-    constructor(key: string, value: unknown) {
-      this.#key = key;
+    constructor(type: string, value: unknown) {
+      this.#type = type;
       this.#value = value;
     }
 
-    as(key: string) {
-      if (this.#key === key) {
+    as(type: string) {
+      if (this.#type === type) {
         return this.#value;
       }
-      throw new TypeError(`${name} is ${this.#key}, not ${key}`);
+      throw new TypeError(`${name} is ${this.#type}, not ${type}`);
     }
 
-    is(key: string) {
-      return this.#key === key;
+    is(type: string) {
+      return this.#type === type;
     }
 
     toHandle() {
       // eslint-disable-next-line
-      return Union.#handlers.get(this.#key)!(this);
+      return Union.#handlers.get(this.#type)!(this);
+    }
+
+    get type() {
+      return this.#type;
+    }
+
+    get value() {
+      return this.#value;
     }
   }
 
