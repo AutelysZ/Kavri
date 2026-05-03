@@ -1,3 +1,3 @@
-import type { FieldSchemaDecoratorFactory } from './field.js';
+import { type FieldSchemaDecoratorFactory } from './field.js';
 
 export const FromJsonSchemaRegistry = new Set<FieldSchemaDecoratorFactory>();

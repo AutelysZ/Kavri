@@ -7,7 +7,8 @@ import type {
 } from '@kavri/basic';
 import { createFieldDecorator, Metadata } from '@kavri/basic';
 import type { DecodeContext, DecodeResult } from './decode.js';
-import { FromJsonSchemaRegistry } from './internal.js';
+import { FieldSchemaDecoratorName } from './field.internal.js';
+import { FromJsonSchemaRegistry } from './jsonschema.internal.js';
 import { type FromJsonSchemaContext, type JsonSchema } from './jsonschema.js';
 import { isArray, isFunction, isObject } from './utils.js';
 
@@ -98,7 +99,6 @@ export function isFieldSchemaDecoratorMetadata(v: unknown): v is FieldSchemaDeco
 /** A field decorator carrying schema metadata. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type FieldSchemaDecorator<P = any> = FieldDecorator<FieldSchemaDecoratorMetadata<P>>;
-export const FieldSchemaDecoratorName = Symbol('schema:name');
 
 export enum Phase {
   /**
@@ -157,46 +157,6 @@ export enum Phase {
   AdditionalConstraints,
 }
 
-export enum Strategy {
-  /**
-   * If this decorator passes, stop the entire pipeline (all phases).
-   */
-  ShortCircuit,
-
-  /**
-   * Pass if any decorator in this phase passes.
-   * Stop evaluating remaining decorators in this phase after first pass.
-   */
-  AnyPass,
-
-  /**
-   * Stop the entire pipeline immediately when this decorator fails.
-   */
-  FailFast,
-
-  /**
-   * Continue evaluating even if this decorator fails.
-   * Final result depends on aggregated errors.
-   */
-  ContinueOnError,
-}
-
-export const DefaultPhaseStrategy: Readonly<Record<Phase, Strategy>> = {
-  [Phase.Info]: Strategy.ContinueOnError,
-  [Phase.Defaults]: Strategy.ShortCircuit,
-  [Phase.Presence]: Strategy.ShortCircuit,
-  [Phase.Coercion]: Strategy.AnyPass,
-  [Phase.Type]: Strategy.AnyPass,
-  [Phase.Normalization]: Strategy.FailFast,
-  [Phase.Semantics]: Strategy.ContinueOnError,
-  [Phase.TextEncoding]: Strategy.FailFast,
-  [Phase.BinaryEncoding]: Strategy.FailFast,
-  [Phase.ContentType]: Strategy.FailFast,
-  [Phase.Property]: Strategy.ContinueOnError,
-  [Phase.Composition]: Strategy.ContinueOnError,
-  [Phase.AdditionalConstraints]: Strategy.ContinueOnError,
-};
-
 /**
  * Static methods attached to a schema field decorator factory.
  * Used by the schema pipeline for validation, parsing, serialization, and JSON Schema generation.
@@ -213,7 +173,6 @@ export interface FieldSchemaDecoratorFactoryStatic<P> {
   [FieldSchemaDecoratorName]: string;
 
   phase: Phase;
-  strategy?: Strategy;
 
   /**
    * The default error message, .xxx will be replaced with corresponding value, like .label, .value.
@@ -221,11 +180,13 @@ export interface FieldSchemaDecoratorFactoryStatic<P> {
    * .xxx include: the params of the decorator, include base {@link ValidateOptions}. And a few
    * special values:
    *
-   * - .label is options.label ?? options.title
-   * - .key is the current field name
-   * - .data is the current field's value, note it's not .value. .value is used by
-   *    {@link ValidateSchema}, which is used by primitive param decorators.
-   * - .this is the current input object, can use like .this.foo to get a field.
+   * - .label   is options.label ?? options.title
+   * - .key     is the current field name
+   * - .value   is the current field's value
+   * - .params  is the current params
+   * - .input   is the current object
+   *
+   * Can be nested, like: .params.format, .input.otherField
    */
   message: string | ((ctx: DecodeContext<P>) => string);
 

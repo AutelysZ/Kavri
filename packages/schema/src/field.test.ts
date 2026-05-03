@@ -1,12 +1,13 @@
 import type { ClassDecorator } from '@kavri/basic';
 import { createClassDecorator, Metadata } from '@kavri/basic';
 import { describe, expect, it } from 'vitest';
+import { FieldSchemaDecoratorName } from './field.internal.js';
 import {
   createFieldSchemaDecoratorFactory,
   FieldSchema,
   type FieldSchemaDecorator,
   type FieldSchemaDecoratorMetadata,
-  FieldSchemaDecoratorName,
+
 } from './field.js';
 
 // Dummy class decorator to flush TC39 metadata
