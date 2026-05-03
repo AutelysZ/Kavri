@@ -73,10 +73,10 @@ describe('class decorators (TC39)', () => {
     }).toThrow();
   });
 
-  it('returns empty for undecorated class', () => {
+  it('returns undefined for undecorated class', () => {
     class Bare {}
 
-    expect(Metadata.ofClass(Tag, Bare)).toEqual([]);
+    expect(Metadata.ofClass(Tag, Bare)).toBeUndefined();
   });
 });
 
@@ -93,13 +93,13 @@ describe('method decorators (TC39)', () => {
     expect(entries[0]).toEqual({ label: 'greet' });
   });
 
-  it('returns empty for undecorated method', () => {
+  it('returns undefined for undecorated method', () => {
     @Tag('cls')
     class Foo {
       bar() {}
     }
 
-    expect(Metadata.ofMethod(Marker, Foo, 'bar' as keyof Foo)).toEqual([]);
+    expect(Metadata.ofMethod(Marker, Foo, 'bar' as keyof Foo)).toBeUndefined();
   });
 });
 
@@ -171,7 +171,7 @@ describe('ComposeOptions', () => {
     function Inject(
       ...injectables: AnyConstructor[]
     ): ClassDecorator<{ injectables: AnyConstructor[] }> {
-      return createClassDecorator(Use, { injectables });
+      return createClassDecorator(Inject, { injectables });
     }
 
     function NeedsService(): MethodDecorator<object> {
@@ -190,7 +190,7 @@ describe('ComposeOptions', () => {
       doWork() {}
     }
 
-    const useEntries = Metadata.ofClass(Use, Foo);
+    const useEntries = Metadata.ofClass(Inject, Foo);
     expect(useEntries).toHaveLength(1);
     expect(useEntries[0].injectables).toContain(Date);
   });
@@ -283,7 +283,7 @@ describe('proxyMethod decorator pattern', () => {
     function Inject(
       ...injectables: AnyConstructor[]
     ): ClassDecorator<{ injectables: AnyConstructor[] }> {
-      return AM.createClassDecorator(Use, { injectables });
+      return AM.createClassDecorator(Inject, { injectables });
     }
 
     abstract class Aspect<T> {
@@ -316,8 +316,8 @@ describe('proxyMethod decorator pattern', () => {
       createUser() {}
     }
 
-    expect(AM.ofClass(Use, UserService)).toHaveLength(1);
-    expect(AM.ofClass(Use, UserService)[0].injectables).toContain(TransactionalAspect);
+    expect(AM.ofClass(Inject, UserService)).toHaveLength(1);
+    expect(AM.ofClass(Inject, UserService)[0].injectables).toContain(TransactionalAspect);
     expect(AM.ofMethod(Transactional, UserService, 'createUser')).toHaveLength(1);
   });
 });
@@ -335,6 +335,6 @@ describe('MetadataManager isolation', () => {
     class Foo {}
 
     expect(m1.ofClass(T1, Foo)).toHaveLength(1);
-    expect(m2.ofClass(T1, Foo)).toEqual([]);
+    expect(m2.ofClass(T1, Foo)).toBeUndefined();
   });
 });

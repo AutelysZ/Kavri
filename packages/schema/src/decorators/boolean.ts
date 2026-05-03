@@ -1,4 +1,3 @@
-import { IsNumber, IsString } from '@kavri/schema';
 import {
   createFieldSchemaDecoratorFactory,
   decoupleOptions,
@@ -9,6 +8,8 @@ import {
 } from '../field.js';
 import { addType, hasType, isBoolean, isNumber, isString } from '../utils.js';
 import { decoupleTypeOptions, Info, type TypeOptions } from './base.js';
+import { IsNumber } from './number.js';
+import { IsString } from './string.js';
 
 /**
  * Boolean field. Composes `Info` from `TypeOptions<boolean>`. When

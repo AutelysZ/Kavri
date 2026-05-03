@@ -12,11 +12,11 @@ import { Schema } from '../schema.js';
 export class UploadRequest {
   @IsFile({
     array: {
-      maxItems: { value: 10, message: 'Upload up to 10 files at a time.' },
-      minItems: { value: 1, message: 'Upload files cannot be empty.' },
+      maxItems: [10, { message: 'Upload up to 10 files at a time.' }],
+      minItems: [1, { message: 'Upload files cannot be empty.' }],
     },
     accept: ['image/*', '.pdf'],
-    maxSize: { value: 1 << 22, message: 'Max file size is 4MB.' },
+    maxSize: [1 << 22, { message: 'Max file size is 4MB.' }],
   })
   files!: FileUnion[];
 }

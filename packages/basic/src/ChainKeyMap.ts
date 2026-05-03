@@ -38,7 +38,7 @@ export class ChainKeyMap {
 
   getOrThrow<T>(key: Key<T>): T {
     if (!this.has(key)) {
-      throw new Error(`Key ${key} not found`);
+      throw new Error(`"${key}" is not set`);
     }
     return this.get(key) as T;
   }

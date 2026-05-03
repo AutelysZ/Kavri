@@ -1,14 +1,12 @@
-import { describe, expect, it } from 'vitest';
 import type { ClassDecorator } from '@kavri/basic';
 import { createClassDecorator, Metadata } from '@kavri/basic';
+import { describe, expect, it } from 'vitest';
 import {
   createFieldSchemaDecoratorFactory,
   FieldSchema,
   type FieldSchemaDecorator,
   type FieldSchemaDecoratorMetadata,
   FieldSchemaDecoratorName,
-  toValidateSchema,
-  type ValidateSchema,
 } from './field.js';
 
 // Dummy class decorator to flush TC39 metadata
@@ -136,7 +134,7 @@ describe('FieldSchema', () => {
       (options: ValidateSchema<number>): FieldSchemaDecorator<ValidateSchema<number>> => {
         return FieldSchema(MinLength, options);
       },
-       
+
       {
         message: '.label must be at least .value characters',
         validate: (p: any, v: any) => typeof v !== 'string' || v.length >= p.value,
@@ -148,7 +146,7 @@ describe('FieldSchema', () => {
       (options: ValidateSchema<number>): FieldSchemaDecorator<ValidateSchema<number>> => {
         return FieldSchema(MaxLength, options);
       },
-       
+
       {
         message: '.label must be at most .value characters',
         validate: (p: any, v: any) => typeof v !== 'string' || v.length <= p.value,

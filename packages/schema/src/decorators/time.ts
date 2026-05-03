@@ -1,4 +1,3 @@
-import { type BaseOptions, IsInstanceOf, IsNumber, IsString } from '@kavri/schema';
 import {
   createFieldSchemaDecoratorFactory,
   FieldSchema,
@@ -9,7 +8,10 @@ import {
   type ValidateOptions,
 } from '../field.js';
 import { isNumber, isString } from '../utils.js';
-import { decoupleTypeOptions, Info } from './base.js';
+import { type BaseOptions, decoupleTypeOptions, Info } from './base.js';
+import { IsNumber } from './number.js';
+import { IsInstanceOf } from './object.js';
+import { IsString } from './string.js';
 
 /**
  * Inputs accepted by `resolveDate` — used as the *reference* date in
