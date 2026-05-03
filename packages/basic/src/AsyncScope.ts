@@ -1,7 +1,7 @@
+import { type AsyncLocalStorage, createAsyncLocalStorage } from '@kavri/env';
+import type { Context } from './Context.js';
 import type { Key } from './Key.js';
 import type { Awaitable } from './types.js';
-import type { Context } from './Context.js';
-import { Env, type AsyncLocalStorage } from '@kavri/env';
 
 /**
  * Async-scoped context manager backed by `AsyncLocalStorage`.
@@ -36,7 +36,7 @@ export class AsyncScope<S extends Context = Context> {
 
   #ensureAls(): AsyncLocalStorage<S> {
     if (!this.#als) {
-      this.#als = new Env.AsyncLocalStorage<S>();
+      this.#als = createAsyncLocalStorage<S>();
     }
     return this.#als;
   }

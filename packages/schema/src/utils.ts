@@ -89,14 +89,17 @@ export function isBoolean(v: unknown): v is boolean {
   return typeof v === 'boolean';
 }
 
+/* #__NO_SIDE_EFFECTS__ */
 export function entryOf<T extends object>(v: T): [keyof T & string, T[keyof T]][] {
   return Object.entries(v) as any;
 }
 
+/* #__NO_SIDE_EFFECTS__ */
 export function keyOf<T extends object>(v: T): (keyof T & string)[] {
   return Object.keys(v) as any;
 }
 
+/* #__NO_SIDE_EFFECTS__ */
 export function valueOf<T extends object>(v: T): T[keyof T][] {
   return Object.values(v) as any;
 }
@@ -212,6 +215,7 @@ export function todo(): never {
   throw new Error('Not implemented');
 }
 
+/* #__NO_SIDE_EFFECTS__ */
 export function once<T>(fn: () => T) {
   let cache: [T] | undefined = undefined;
   return () => {

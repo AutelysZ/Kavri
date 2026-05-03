@@ -28,7 +28,7 @@ export default defineConfig({
       // The default `@kavri/env` source export is a `null as never` placeholder
       // intended for runtime injection. In Node tests we want the real
       // `AsyncLocalStorage`-backed implementation.
-      '@kavri/env': path.resolve(__dirname, 'packages/env/src/index.node.ts'),
+      '@kavri/env': path.resolve(__dirname, 'packages/env/src/env.node.ts'),
     },
   },
   test: {

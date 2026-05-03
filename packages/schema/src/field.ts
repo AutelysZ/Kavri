@@ -1,5 +1,6 @@
 import type {
-  AnyConstructor, Awaitable,
+  AnyConstructor,
+  Awaitable,
   FieldDecorator,
   FieldDecoratorFactory,
   Qualifier,
@@ -230,7 +231,9 @@ export interface FieldSchemaDecoratorFactoryStatic<P> {
   /**
    * Validate and parse the plain input to target data. eg: parse a string to bigint.
    */
-  decode?: (ctx: DecodeContext<P>) => Awaitable<boolean | string | DecodeResult | readonly DecodeResult[]>;
+  decode?: (
+    ctx: DecodeContext<P>,
+  ) => Awaitable<boolean | string | DecodeResult | readonly DecodeResult[]>;
 
   /**
    * convert the target data to plain input. eg: stringify as json, base64 json.
@@ -316,6 +319,7 @@ export function FieldSchema<P>(
  * );
  * ```
  */
+/* #__NO_SIDE_EFFECTS__ */
 export function createFieldSchemaDecoratorFactory<
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   F extends (...args: any[]) => FieldSchemaDecorator,

@@ -1,4 +1,9 @@
-import { type BinaryHandler, Env, type FileHandler } from '@kavri/env';
+import {
+  type BinaryHandler,
+  type FileHandler,
+  registerBinaryHandlers,
+  registerFileHandlers,
+} from '@kavri/env';
 import db from 'mime-db';
 import {
   createFieldSchemaDecoratorFactory,
@@ -19,7 +24,7 @@ import { IsInteger } from './number.js';
 import { IsString, type StringOptions } from './string.js';
 import { IsMimeType } from './string.semantics.js';
 
-const mimeDB = /* #__PURE__ */ once(() => {
+const mimeDB = once(() => {
   const out: Record<string, readonly string[]> = {};
   for (const [k, v] of entryOf(db)) {
     if (!v.extensions) {
@@ -122,24 +127,13 @@ export const IsFilename = createFieldSchemaDecoratorFactory(
 
       switch (params) {
         case 'name_only':
-          return (
-            !value.includes('/') &&
-            !value.includes('\\') &&
-            value !== '.' &&
-            value !== '..'
-          );
+          return !value.includes('/') && !value.includes('\\') && value !== '.' && value !== '..';
         case 'nested':
-          return (
-            !startsAbs &&
-            !trailing &&
-            segs.every((s) => s !== '' && s !== '.' && s !== '..')
-          );
+          return !startsAbs && !trailing && segs.every((s) => s !== '' && s !== '.' && s !== '..');
         case 'absolute': {
           if (!startsAbs || trailing) return false;
           const parts = segs.slice(1);
-          return (
-            parts.length > 0 && parts.every((s) => s !== '' && s !== '.' && s !== '..')
-          );
+          return parts.length > 0 && parts.every((s) => s !== '' && s !== '.' && s !== '..');
         }
         case 'relative': {
           if (trailing) return false;
@@ -177,11 +171,13 @@ export class MultipartFile {
   readonly path!: string;
 }
 
-export class FileUnion
-  extends /* @__PURE__ */ createUnionClass<Kavri.FileUnions, FileHandler>('FileUnion', (ctor) => {
+export class FileUnion extends createUnionClass<Kavri.FileUnions, FileHandler>(
+  'FileUnion',
+  (ctor) => {
     ctor.register('multipart', (v) => ({ name: v.name, size: v.size }));
-    Env.registerFileHandlers(ctor.register.bind(ctor));
-  }) {}
+    registerFileHandlers(ctor.register.bind(ctor));
+  },
+) {}
 
 /** Options for file upload fields. */
 export interface IsFileOptions {
@@ -239,13 +235,12 @@ export const MaxSize = createFieldSchemaDecoratorFactory(
 // IsBody
 // ---------------------------------------------------------------------------
 
-export class BinaryUnion
-  extends /* @__PURE__ */ createUnionClass<Kavri.BinaryUnions, BinaryHandler>(
-    'BinaryUnion',
-    (ctor) => {
-      Env.registerBinaryHandlers(ctor.register.bind(ctor));
-    },
-  ) {}
+export class BinaryUnion extends createUnionClass<Kavri.BinaryUnions, BinaryHandler>(
+  'BinaryUnion',
+  (ctor) => {
+    registerBinaryHandlers(ctor.register.bind(ctor));
+  },
+) {}
 
 /**
  * Marks a field as the raw binary request body stream.

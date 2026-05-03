@@ -1,6 +1,7 @@
 import type { AnyConstructor } from '@kavri/basic';
 import * as registry from './decorators/registry.jsonschema.js';
 import type { FieldSchemaDecorator, FieldSchemaDecoratorFactory, NestedFieldSchema } from './field.js';
+import { valueOf } from './utils.js';
 
 // ---------------------------------------------------------------------------
 // JSON Schema utils
@@ -74,7 +75,7 @@ export function toJsonSchema(clazz: AnyConstructor | NestedFieldSchema): JsonSch
   throw new Error('Not implemented');
 }
 
-const DECORATORS: FieldSchemaDecoratorFactory[] = /* @__PURE__ */ Object.values(registry);
+const DECORATORS: FieldSchemaDecoratorFactory[] = valueOf(registry);
 
 export function fromJsonSchema(schema: JsonSchema): FieldSchemaDecorator[] {
   const out: FieldSchemaDecorator[] = [];

@@ -19,6 +19,7 @@ export type UnionConstructor<T extends Record<string, any>, H> = {
   [P in keyof T as `of${Capitalize<P & string>}`]: (value: T[P]) => Union<T, H>;
 };
 
+// #__NO_SIDE_EFFECTS__
 // eslint-disable-next-line
 export function createUnionClass<T extends Record<string, any>, H>(
   name: string,

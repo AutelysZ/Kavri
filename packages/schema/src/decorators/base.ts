@@ -11,6 +11,9 @@ import type { JsonSchema } from '../jsonschema.js';
 import { addType, hasType, isBoolean, isEqual } from '../utils.js';
 
 export interface BaseSchema {
+  $anchor?: string;
+  $dynamicAnchor?: string;
+  $comment?: string;
   title?: string;
   description?: string;
   readOnly?: boolean;

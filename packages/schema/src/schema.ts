@@ -9,7 +9,6 @@ import { FieldSchema } from './field.js';
 // ---------------------------------------------------------------------------
 
 interface SchemaMetadata<T extends object = object> extends ObjectOptions<T> {
-  slug?: string;
 }
 
 /**

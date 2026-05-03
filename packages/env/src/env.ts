@@ -1,37 +1,23 @@
-import type { AsyncLocalStorage } from 'node:async_hooks';
+import type { AsyncLocalStorage, BinaryHandler, FileHandler } from './types.js';
 
-export type { AsyncLocalStorage };
-
-export interface FileHandler {
-  name: string;
-  size: number;
+export function createAsyncLocalStorage<T>(): AsyncLocalStorage<T> {
+  throw new Error('Method not implemented');
 }
 
-export interface BinaryHandler {
-  size: number;
+export function registerFileHandlers(
+  register: <K extends keyof Kavri.FileUnions>(
+    key: K,
+    handler: (value: Kavri.FileUnions[K]) => FileHandler,
+  ) => void,
+) {
+  throw new Error('Method not implemented');
 }
 
-declare global {
-  // eslint-disable-next-line @typescript-eslint/no-namespace
-  namespace Kavri {
-    interface FileUnions {}
-
-    interface BinaryUnions {}
-  }
-}
-
-export interface KavriEnv {
-  readonly AsyncLocalStorage: typeof AsyncLocalStorage;
-  registerFileHandlers: (
-    register: <K extends keyof Kavri.FileUnions>(
-      key: K,
-      handler: (value: Kavri.FileUnions[K]) => FileHandler,
-    ) => void,
-  ) => void;
-  registerBinaryHandlers: (
-    register: <K extends keyof Kavri.BinaryUnions>(
-      key: K,
-      handler: (value: Kavri.BinaryUnions[K]) => BinaryHandler,
-    ) => void,
-  ) => void;
+export function registerBinaryHandlers(
+  register: <K extends keyof Kavri.BinaryUnions>(
+    key: K,
+    handler: (value: Kavri.BinaryUnions[K]) => BinaryHandler,
+  ) => void,
+) {
+  throw new Error('Method not implemented');
 }

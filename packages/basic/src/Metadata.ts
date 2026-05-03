@@ -124,6 +124,7 @@ function isTC39MemberContext(
  * {@link createFieldDecorator}, {@link createDecorator}) instead
  * of instantiating this class directly.
  */
+/* #__NO_SIDE_EFFECTS__ */
 export class MetadataManager {
   /**
    * Class-level storage: factory → Map<constructor, entries[]>
@@ -609,7 +610,7 @@ export class MetadataManager {
  * const entries = Metadata.ofClass(Tag, Foo);
  * ```
  */
-export const Metadata = /* @__PURE__ */ new MetadataManager();
+export const Metadata = new MetadataManager();
 
 /**
  * Create a class decorator that stores typed metadata in the global

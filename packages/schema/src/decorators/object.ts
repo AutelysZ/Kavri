@@ -644,7 +644,7 @@ export const Ref = createFieldSchemaDecoratorFactory(
     decode: ({ value, params }) => decode(params(), value),
     toJsonSchema: (params) => {
       const clazz = params();
-      const key = getSchema(clazz).slug ?? clazz.name;
+      const key = getSchema(clazz).$id ?? clazz.name;
       return {
         $ref: `#/$defs/${key}`,
         $defs: { [key]: toJsonSchema(clazz) },
