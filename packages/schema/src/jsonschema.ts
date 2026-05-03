@@ -1,7 +1,7 @@
 import type { AnyConstructor } from '@kavri/basic';
-import * as registry from './decorators/registry.jsonschema.js';
-import type { FieldSchemaDecorator, FieldSchemaDecoratorFactory, NestedFieldSchema } from './field.js';
-import { valueOf } from './utils.js';
+import * as decorators from './decorators/index.js';
+import type { FieldSchemaDecorator, NestedFieldSchema } from './field.js';
+import { isArray, isString } from './utils.js';
 
 // ---------------------------------------------------------------------------
 // JSON Schema utils
@@ -60,6 +60,8 @@ export interface JsonSchema {
   $id?: string;
   $schema?: string;
   $anchor?: string;
+  $dynamicAnchor?: string;
+  $comment?: string;
   $ref?: string;
   $defs?: Record<string, JsonSchema>;
   [P: `x-${string}`]: unknown;
@@ -75,8 +77,22 @@ export function toJsonSchema(clazz: AnyConstructor | NestedFieldSchema): JsonSch
   throw new Error('Not implemented');
 }
 
-const DECORATORS: FieldSchemaDecoratorFactory[] = valueOf(registry);
+// todo
+export class FromJsonSchemaContext {
+  schema!: JsonSchema;
+  current!: readonly FieldSchemaDecorator[];
+  fromJsonSchema!: (schema: JsonSchema) => readonly FieldSchemaDecorator[];
 
-export function fromJsonSchema(schema: JsonSchema): FieldSchemaDecorator[] {
-  const out: FieldSchemaDecorator[] = [];
+  hasType = (t: string): boolean => {
+    return (
+      (isString(this.schema.type) && this.schema.type === t) ||
+      (isArray(this.schema.type) && this.schema.type.includes(t))
+    );
+  };
+}
+
+export function fromJsonSchema(schema: JsonSchema): NestedFieldSchema {
+  // Ensure all builtin decorators are not been removed by tree-shaking.
+  if (!decorators) throw new Error('Decorators cannot be null');
+  throw new Error('Decorators cannot be null');
 }

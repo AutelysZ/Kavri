@@ -1,6 +1,9 @@
-
-
-import { type AnyConstructor, type ClassDecorator, createClassDecorator, Metadata } from '@kavri/basic';
+import {
+  type AnyConstructor,
+  type ClassDecorator,
+  createClassDecorator,
+  Metadata,
+} from '@kavri/basic';
 import type { ObjectOptions } from './decorators/object.js';
 import { FieldSchema } from './field.js';
 
@@ -9,6 +12,7 @@ import { FieldSchema } from './field.js';
 // ---------------------------------------------------------------------------
 
 interface SchemaMetadata<T extends object = object> extends ObjectOptions<T> {
+  slug?: string;
 }
 
 /**
@@ -24,7 +28,7 @@ interface SchemaMetadata<T extends object = object> extends ObjectOptions<T> {
  * ```
  */
 export function Schema<T extends object = object>(
-  options: ObjectOptions<T> = {},
+  options: SchemaMetadata<T> = {},
 ): ClassDecorator<SchemaMetadata<T>> {
   return createClassDecorator<SchemaMetadata<T>>(Schema, options);
 }
@@ -32,7 +36,9 @@ export function Schema<T extends object = object>(
 const schemaCache = new WeakMap<AnyConstructor, SchemaMetadata>();
 
 // Get class schema. Aggregates all field decorator metadata.
-export function getSchema<T extends object>(target: AnyConstructor<T> | T): SchemaMetadata<T> {
+export function getSchema<T extends object>(
+  target: AnyConstructor<T> | T,
+): SchemaMetadata<T> | undefined {
   const ctor = typeof target === 'function' ? target : target.constructor;
   return schemaCache.getOrInsertComputed(ctor as AnyConstructor, () => {
     const schemas = Metadata.ofClass(Schema, target);

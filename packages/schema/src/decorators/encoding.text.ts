@@ -197,7 +197,7 @@ export const IsBase32 = createFieldSchemaDecoratorFactory(
       return base32Encode(toUint8Array(value), getBase32Alphabet(variant));
     },
     toJsonSchema: () => ({ contentEncoding: 'base32' }),
-    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
+    fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined => {
       return schema.contentEncoding === 'base32' ? IsBase32() : void 0;
     },
   },
@@ -237,7 +237,7 @@ export const IsBase58 = createFieldSchemaDecoratorFactory(
       return base58Encode(toUint8Array(value));
     },
     toJsonSchema: () => ({ contentEncoding: 'base58' }),
-    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
+    fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined => {
       return schema.contentEncoding === 'base58' ? IsBase58() : void 0;
     },
   },
@@ -285,7 +285,7 @@ export const IsBase64 = createFieldSchemaDecoratorFactory(
     toJsonSchema: ({ urlSafe = true }) => ({
       contentEncoding: urlSafe ? 'base64url' : 'base64',
     }),
-    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
+    fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined => {
       if (schema.contentEncoding === 'base64url') return IsBase64({ urlSafe: true });
       if (schema.contentEncoding === 'base64') return IsBase64({ urlSafe: false });
       return void 0;

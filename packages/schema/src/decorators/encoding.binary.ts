@@ -74,7 +74,7 @@ export const IsCompressed = createFieldSchemaDecoratorFactory(
     toJsonSchema: ({ format = 'gzip' }, current) => ({
       contentEncoding: current.contentEncoding ? `${current.contentEncoding}+${format}` : format,
     }),
-    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
+    fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined => {
       const encs = schema.contentEncoding?.split('+') ?? [];
       const candidates: CompressionFormat[] = ['gzip', 'deflate', 'deflate-raw'];
       const format = candidates.find((f) => encs.includes(f));

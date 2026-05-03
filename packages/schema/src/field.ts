@@ -7,7 +7,8 @@ import type {
 } from '@kavri/basic';
 import { createFieldDecorator, Metadata } from '@kavri/basic';
 import type { DecodeContext, DecodeResult } from './decode.js';
-import type { JsonSchema } from './jsonschema.js';
+import { FromJsonSchemaRegistry } from './internal.js';
+import { type FromJsonSchemaContext, type JsonSchema } from './jsonschema.js';
 import { isArray, isFunction, isObject } from './utils.js';
 
 export interface ValidateOptions {
@@ -254,13 +255,9 @@ export interface FieldSchemaDecoratorFactoryStatic<P> {
   toJsonSchema?: (params: P, current: JsonSchema) => JsonSchema | undefined;
 
   /**
-   * build from JSON schema.
-   * You may use {@link fromJsonSchema} to convert your nested rules.
+   * Build decorators from external JSON schema.
    */
-  fromJsonSchema?: (
-    schema: JsonSchema,
-    current: readonly FieldSchemaDecorator[],
-  ) => FieldSchemaDecorator | undefined;
+  fromJsonSchema?: (ctx: FromJsonSchemaContext) => FieldSchemaDecorator | undefined;
 }
 
 /**
@@ -333,6 +330,9 @@ export function createFieldSchemaDecoratorFactory<
   >,
   methods?: U,
 ): F & FieldSchemaDecoratorFactoryStatic<ReturnType<F>['metadata']['params']> & U {
+  if (statics.fromJsonSchema) {
+    FromJsonSchemaRegistry.add(factory as never);
+  }
   return Object.assign(factory, statics, { [FieldSchemaDecoratorName]: name }, methods);
 }
 

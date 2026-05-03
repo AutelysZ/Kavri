@@ -10,7 +10,7 @@ import {
   type ValidateField,
   type ValidateOptions,
 } from '../field.js';
-import { addType, hasType, isNumber, isString } from '../utils.js';
+import { addType, isNumber, isString } from '../utils.js';
 import { decoupleTypeOptions, Info, type TypeOptions } from './base.js';
 import { IsNumber } from './number.js';
 
@@ -24,7 +24,7 @@ export const MinLength = createFieldSchemaDecoratorFactory(
     message: '.label must be at least .params characters',
     decode: ({ value, params }) => !isString(value) || value.length >= params,
     toJsonSchema: (p) => ({ minLength: p }),
-    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
+    fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined => {
       return isNumber(schema.minLength) ? MinLength(schema.minLength) : void 0;
     },
   },
@@ -40,7 +40,7 @@ export const MaxLength = createFieldSchemaDecoratorFactory(
     message: '.label must be at most .params characters',
     decode: ({ value, params }) => !isString(value) || value.length <= params,
     toJsonSchema: (p) => ({ maxLength: p }),
-    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
+    fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined => {
       return isNumber(schema.maxLength) ? MaxLength(schema.maxLength) : void 0;
     },
   },
@@ -56,7 +56,7 @@ export const Pattern = createFieldSchemaDecoratorFactory(
     message: '.label must match pattern .params',
     decode: ({ value, params }) => !isString(value) || new RegExp(params).test(value),
     toJsonSchema: (p) => ({ pattern: p }),
-    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
+    fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined => {
       return isString(schema.pattern) ? Pattern(schema.pattern) : void 0;
     },
   },
@@ -104,8 +104,8 @@ export const IsString = createFieldSchemaDecoratorFactory(
     message: ({ value }) => `.label should be a string, got ${typeof value}`,
     decode: ({ value }) => isString(value),
     toJsonSchema: addType('string'),
-    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
-      return hasType(schema, 'string') ? IsString() : void 0;
+    fromJsonSchema: ({ hasType }): FieldSchemaDecorator | undefined => {
+      return hasType('string') ? IsString() : void 0;
     },
   },
 );

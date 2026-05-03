@@ -120,7 +120,7 @@ function sv(
       message: '.label is invalid',
       toJsonSchema: format ? () => ({ format }) : void 0,
       fromJsonSchema: format
-        ? (schema): FieldSchemaDecorator | undefined => {
+        ? ({ schema }): FieldSchemaDecorator | undefined => {
             const args = noArg ? [{ type: false }] : [void 0, { type: false }];
             return schema.format === format ? factory(...args) : void 0;
           }

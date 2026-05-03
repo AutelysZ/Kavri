@@ -9,7 +9,7 @@ import {
   type ValidateField,
   type ValidateOptions,
 } from '../field.js';
-import { addType, hasType, isBigInt, isInteger, isNumber, isString } from '../utils.js';
+import { addType, isBigInt, isInteger, isNumber, isString } from '../utils.js';
 import { decoupleTypeOptions, Info, type TypeOptions } from './base.js';
 import { IsInstanceOf } from './object.js';
 import { IsString } from './string.js';
@@ -39,7 +39,7 @@ export const Minimum = createFieldSchemaDecoratorFactory(
       return true;
     },
     toJsonSchema: (p) => (isNumber(p) ? { minimum: p } : void 0),
-    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
+    fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined => {
       return isNumber(schema.minimum) ? Minimum(schema.minimum) : void 0;
     },
   },
@@ -60,7 +60,7 @@ export const Maximum = createFieldSchemaDecoratorFactory(
       return true;
     },
     toJsonSchema: (p) => (isNumber(p) ? { maximum: p } : void 0),
-    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
+    fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined => {
       return isNumber(schema.maximum) ? Maximum(schema.maximum) : void 0;
     },
   },
@@ -81,7 +81,7 @@ export const ExclusiveMinimum = createFieldSchemaDecoratorFactory(
       return true;
     },
     toJsonSchema: (p) => (isNumber(p) ? { exclusiveMinimum: p } : void 0),
-    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
+    fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined => {
       return isNumber(schema.exclusiveMinimum) ? ExclusiveMinimum(schema.exclusiveMinimum) : void 0;
     },
   },
@@ -102,7 +102,7 @@ export const ExclusiveMaximum = createFieldSchemaDecoratorFactory(
       return true;
     },
     toJsonSchema: (p) => (isNumber(p) ? { exclusiveMaximum: p } : void 0),
-    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
+    fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined => {
       return isNumber(schema.exclusiveMaximum) ? ExclusiveMaximum(schema.exclusiveMaximum) : void 0;
     },
   },
@@ -123,7 +123,7 @@ export const MultipleOf = createFieldSchemaDecoratorFactory(
       return true;
     },
     toJsonSchema: (p) => (isNumber(p) ? { multipleOf: p } : void 0),
-    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
+    fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined => {
       return isNumber(schema.multipleOf) ? MultipleOf(schema.multipleOf) : void 0;
     },
   },
@@ -167,8 +167,8 @@ export const IsInteger = createFieldSchemaDecoratorFactory(
     message: '.label must be an integer',
     decode: ({ value }) => isInteger(value),
     toJsonSchema: addType('integer'),
-    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
-      return hasType(schema, 'integer') ? IsInteger() : void 0;
+    fromJsonSchema: ({ hasType }): FieldSchemaDecorator | undefined => {
+      return hasType('integer') ? IsInteger() : void 0;
     },
   },
 );
@@ -189,8 +189,8 @@ export const IsNumber = createFieldSchemaDecoratorFactory(
     message: '.label must be a number',
     decode: ({ value }) => isNumber(value),
     toJsonSchema: addType('number'),
-    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
-      return hasType(schema, 'number') ? IsNumber() : void 0;
+    fromJsonSchema: ({ hasType }): FieldSchemaDecorator | undefined => {
+      return hasType('number') ? IsNumber() : void 0;
     },
   },
 );
@@ -219,9 +219,8 @@ export const ToBigInt = createFieldSchemaDecoratorFactory(
       if (isNumber(value)) return provide(BigInt(value));
       return false;
     },
-    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
-      return (schema.format === 'bigint' || schema.format === 'integer') &&
-        hasType(schema, 'string')
+    fromJsonSchema: ({ schema, hasType }): FieldSchemaDecorator | undefined => {
+      return (schema.format === 'bigint' || schema.format === 'integer') && hasType('string')
         ? ToBigInt()
         : void 0;
     },

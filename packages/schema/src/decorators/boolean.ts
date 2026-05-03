@@ -6,7 +6,7 @@ import {
   type FieldSchemaDecorator,
   Phase,
 } from '../field.js';
-import { addType, hasType, isBoolean, isNumber, isString } from '../utils.js';
+import { addType, isBoolean, isNumber, isString } from '../utils.js';
 import { decoupleTypeOptions, Info, type TypeOptions } from './base.js';
 import { IsNumber } from './number.js';
 import { IsString } from './string.js';
@@ -28,8 +28,8 @@ export const IsBoolean = createFieldSchemaDecoratorFactory(
     message: '.label must be a boolean',
     decode: ({ value }) => isBoolean(value),
     toJsonSchema: addType('boolean'),
-    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
-      return hasType(schema, 'boolean') ? IsBoolean() : void 0;
+    fromJsonSchema: ({ hasType }): FieldSchemaDecorator | undefined => {
+      return hasType('boolean') ? IsBoolean() : void 0;
     },
   },
 );

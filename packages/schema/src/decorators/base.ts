@@ -8,7 +8,7 @@ import {
   type ValidateOptions,
 } from '../field.js';
 import type { JsonSchema } from '../jsonschema.js';
-import { addType, hasType, isBoolean, isEqual } from '../utils.js';
+import { addType, isBoolean, isEqual } from '../utils.js';
 
 export interface BaseSchema {
   $anchor?: string;
@@ -92,13 +92,27 @@ export const Info = createFieldSchemaDecoratorFactory(
       ...schema,
     }),
     fromJsonSchema: ({
-      title,
-      description,
-      readOnly,
-      writeOnly,
-      ...rawSchema
+      schema: {
+        title,
+        description,
+        readOnly,
+        writeOnly,
+        $anchor,
+        $dynamicAnchor,
+        $comment,
+        ...rawSchema
+      },
     }): FieldSchemaDecorator | undefined => {
-      return Info({ title, description, readOnly, writeOnly, rawSchema });
+      return Info({
+        title,
+        description,
+        readOnly,
+        writeOnly,
+        $anchor,
+        $dynamicAnchor,
+        $comment,
+        rawSchema,
+      });
     },
   },
 );
@@ -112,7 +126,7 @@ export const Examples = createFieldSchemaDecoratorFactory(
     phase: Phase.Info,
     message: '',
     toJsonSchema: (params) => ({ examples: params as unknown[] }),
-    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
+    fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined => {
       return schema.examples ? Examples(schema.examples) : void 0;
     },
   },
@@ -130,7 +144,7 @@ export const Deprecated = createFieldSchemaDecoratorFactory(
       description: `[Deprecated] ${params}\n\n${current.description}`.trim(),
       deprecated: true,
     }),
-    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
+    fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined => {
       return schema.deprecated ? Deprecated('') : void 0;
     },
   },
@@ -146,7 +160,7 @@ export const Default = createFieldSchemaDecoratorFactory(
     message: '',
     decode: ({ value, params, provide }) => value !== void 0 || provide(params),
     toJsonSchema: (params) => ({ default: params }),
-    fromJsonSchema: (schema, current): FieldSchemaDecorator | undefined => {
+    fromJsonSchema: ({ schema, current }): FieldSchemaDecorator | undefined => {
       return schema.default === void 0 ||
         current.some((v) => v.metadata.factory.phase === Phase.Defaults)
         ? void 0
@@ -177,8 +191,8 @@ export const IsNullable = createFieldSchemaDecoratorFactory(
     message: '.label should be null',
     decode: ({ value }) => value === null,
     toJsonSchema: addType('null'),
-    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
-      return hasType(schema, 'null') ? IsNullable() : void 0;
+    fromJsonSchema: ({ hasType }): FieldSchemaDecorator | undefined => {
+      return hasType('null') ? IsNullable() : void 0;
     },
   },
 );
@@ -193,7 +207,7 @@ export const IsConst = createFieldSchemaDecoratorFactory(
     message: '.label should be .params',
     decode: ({ value, params }) => isEqual(value, params),
     toJsonSchema: (params) => ({ const: params }),
-    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
+    fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined => {
       return schema.const === void 0 ? void 0 : IsConst(schema.const);
     },
   },

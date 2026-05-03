@@ -384,7 +384,7 @@ export const IsDate = createFieldSchemaDecoratorFactory(
       if (format === 'date') return { type: 'date' };
       return void 0;
     },
-    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
+    fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined => {
       if (schema.format === 'date') return IsDate({ format: 'date' });
       if (schema.format === 'date-time') return IsDate({ format: 'iso' });
       return void 0;
@@ -433,7 +433,7 @@ export const DefaultDate = createFieldSchemaDecoratorFactory(
       }
       return void 0;
     },
-    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
+    fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined => {
       if (
         schema.default !== void 0 &&
         (schema.format === 'date' ||
@@ -469,7 +469,7 @@ export const IsDuration = createFieldSchemaDecoratorFactory(
       return !isString(value) || provide(Duration.parse(value));
     },
     toJsonSchema: () => ({ format: 'duration' }),
-    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
+    fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined => {
       return schema.format === 'duration' ? IsDuration() : void 0;
     },
   },

@@ -1,14 +1,3 @@
-/**
- * Composition decorators per JSON Schema 2020-12: `AnyOf`, `OneOf`, `AllOf`,
- * `Not`. Each runs in `Phase.Composition`, after the regular type/semantic
- * checks, and applies one or more nested schemas to the same value.
- *
- * Annotation propagation for `unevaluatedProperties` / `unevaluatedItems`
- * across composition is not yet wired through — sub-schemas run in their own
- * decode context via `decode(schema, value)`, so the parent's `evaluated` set
- * does not see what they consumed. That belongs in a follow-up once the
- * framework exposes a same-path child constructor.
- */
 import { decode } from '../decode.js';
 import {
   createFieldSchemaDecoratorFactory,
@@ -18,7 +7,7 @@ import {
   Phase,
   type ValidateOptions,
 } from '../field.js';
-import { fromJsonSchema, toJsonSchema } from '../jsonschema.js';
+import { toJsonSchema } from '../jsonschema.js';
 
 /**
  * Union — value must match at least one of `params`. Maps to JSON Schema
@@ -42,7 +31,7 @@ export const AnyOf = createFieldSchemaDecoratorFactory(
       return false;
     },
     toJsonSchema: (params) => ({ anyOf: params.map((s) => toJsonSchema(s)) }),
-    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
+    fromJsonSchema: ({ schema, fromJsonSchema }): FieldSchemaDecorator | undefined => {
       return schema.anyOf ? AnyOf(schema.anyOf.map((s) => fromJsonSchema(s))) : void 0;
     },
   },
@@ -71,7 +60,7 @@ export const OneOf = createFieldSchemaDecoratorFactory(
       return matched === 1;
     },
     toJsonSchema: (params) => ({ oneOf: params.map((s) => toJsonSchema(s)) }),
-    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
+    fromJsonSchema: ({ schema, fromJsonSchema }): FieldSchemaDecorator | undefined => {
       return schema.oneOf ? OneOf(schema.oneOf.map((s) => fromJsonSchema(s))) : void 0;
     },
   },
@@ -95,7 +84,7 @@ export const AllOf = createFieldSchemaDecoratorFactory(
     message: '',
     decode: ({ value, params }) => params.map((schema) => decode(schema, value)),
     toJsonSchema: (params) => ({ allOf: params.map((s) => toJsonSchema(s)) }),
-    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
+    fromJsonSchema: ({ schema, fromJsonSchema }): FieldSchemaDecorator | undefined => {
       return schema.allOf ? AllOf(schema.allOf.map((s) => fromJsonSchema(s))) : void 0;
     },
   },
@@ -121,10 +110,7 @@ export interface IfThenElseSchema {
  */
 export const IfThenElse = createFieldSchemaDecoratorFactory(
   'IfThenElse',
-  (
-    value: IfThenElseSchema,
-    options?: ValidateOptions,
-  ): FieldSchemaDecorator<IfThenElseSchema> => {
+  (value: IfThenElseSchema, options?: ValidateOptions): FieldSchemaDecorator<IfThenElseSchema> => {
     return FieldSchema<IfThenElseSchema>(IfThenElse, value, options);
   },
   {
@@ -139,7 +125,7 @@ export const IfThenElse = createFieldSchemaDecoratorFactory(
       ...(params.then !== undefined && { then: toJsonSchema(params.then) }),
       ...(params.else !== undefined && { else: toJsonSchema(params.else) }),
     }),
-    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
+    fromJsonSchema: ({ schema, fromJsonSchema }): FieldSchemaDecorator | undefined => {
       if (!schema.if) return void 0;
       const branches: IfThenElseSchema = { if: fromJsonSchema(schema.if) };
       if (schema.then) branches.then = fromJsonSchema(schema.then);
@@ -165,7 +151,7 @@ export const Not = createFieldSchemaDecoratorFactory(
     message: '.label must not match the negated schema',
     decode: ({ value, params }) => !decode(params, value).ok,
     toJsonSchema: (params) => ({ not: toJsonSchema(params) }),
-    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
+    fromJsonSchema: ({ schema, fromJsonSchema }): FieldSchemaDecorator | undefined => {
       return schema.not ? Not(fromJsonSchema(schema.not)) : void 0;
     },
   },

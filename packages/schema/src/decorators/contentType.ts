@@ -10,7 +10,7 @@ import {
   type ValidateField,
   type ValidateOptions,
 } from '../field.js';
-import { fromJsonSchema, toJsonSchema } from '../jsonschema.js';
+import { toJsonSchema } from '../jsonschema.js';
 import { isString } from '../utils.js';
 import { IsString, type StringOptions } from './string.js';
 
@@ -34,7 +34,7 @@ export const ContentSchema = createFieldSchemaDecoratorFactory(
     message: '',
     decode: ({ value, params }) => decode(params, value),
     toJsonSchema: (params) => ({ contentSchema: toJsonSchema(params) }),
-    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
+    fromJsonSchema: ({ schema, fromJsonSchema }): FieldSchemaDecorator | undefined => {
       return schema.contentSchema ? ContentSchema(fromJsonSchema(schema.contentSchema)) : void 0;
     },
   },
@@ -71,7 +71,7 @@ export const IsJSON = createFieldSchemaDecoratorFactory(
     },
     encode: (_, value) => JSON.stringify(value),
     toJsonSchema: () => ({ contentMediaType: 'application/json' }),
-    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
+    fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined => {
       return schema.contentMediaType === 'application/json' ? IsJSON(void 0) : void 0;
     },
   },

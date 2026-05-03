@@ -117,9 +117,6 @@ export function uniqueFilter<T>() {
   };
 }
 
-export function hasType(s: JsonSchema, t: string): boolean {
-  return (isString(s.type) && s.type === t) || (isArray(s.type) && s.type.includes(t));
-}
 
 export function addType(types: string | string[], extra?: JsonSchema) {
   return (_: unknown, current: JsonSchema) => {
@@ -134,55 +131,6 @@ export function addEncoding(encoding: string) {
       contentEncoding: `${current.contentEncoding ? current.contentEncoding + '+' : ''}${encoding}`,
     };
   };
-}
-
-const CONTAINS_PREFIX = 'contains:';
-
-/**
- * Build the marker key used by `Contains` to mark an array index that matched
- * its schema in `DecodeContext.evaluated`. Read by `MinContains`/`MaxContains`
- * (via {@link containsCount}) and by `UnevaluatedItems` (via
- * {@link isEvaluatedIndex}).
- *
- * @param index - The 0-based array index.
- * @returns The namespaced marker key (e.g. `'contains:0'`).
- */
-export function containsKey(index: number): string {
-  return CONTAINS_PREFIX + index;
-}
-
-/**
- * Count the array indexes marked as matched by a sibling `Contains` decorator
- * in the current `DecodeContext.evaluated` set.
- *
- * Used by `MinContains` and `MaxContains` to enforce `contains` cardinality.
- *
- * @param evaluated - The evaluation tracking set from the current decode context.
- * @returns The number of indexes carrying a {@link containsKey} marker.
- */
-export function containsCount(evaluated: ReadonlySet<string>): number {
-  let count = 0;
-  for (const k of evaluated) {
-    if (k.startsWith(CONTAINS_PREFIX)) count++;
-  }
-  return count;
-}
-
-/**
- * Whether an array index has been evaluated by any sibling decorator — either
- * a positional/items decorator (plain index string) or `Contains` (prefixed
- * via {@link containsKey}).
- *
- * Used by `UnevaluatedItems` to skip indexes already covered by an
- * `items` / `prefixItems` / `contains` keyword.
- *
- * @param evaluated - The evaluation tracking set from the current decode context.
- * @param index - The 0-based array index.
- * @returns `true` if the index was evaluated, `false` otherwise.
- */
-export function isEvaluatedIndex(evaluated: ReadonlySet<string>, index: number): boolean {
-  const s = index + '';
-  return evaluated.has(s) || evaluated.has(CONTAINS_PREFIX + s);
 }
 
 export function hasOwn(obj: unknown, key: PropertyKey) {

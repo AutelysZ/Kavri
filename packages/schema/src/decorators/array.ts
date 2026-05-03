@@ -13,17 +13,8 @@ import {
   type ValidateField,
   type ValidateOptions,
 } from '../field.js';
-import { fromJsonSchema, toJsonSchema } from '../jsonschema.js';
-import {
-  addType,
-  containsCount,
-  containsKey,
-  hasType,
-  isArray,
-  isEqual,
-  isEvaluatedIndex,
-  isNumber,
-} from '../utils.js';
+import { toJsonSchema } from '../jsonschema.js';
+import { addType, isArray, isEqual, isNumber } from '../utils.js';
 import { decoupleTypeOptions, Info, type TypeOptions } from './base.js';
 
 export const Items = createFieldSchemaDecoratorFactory(
@@ -44,7 +35,7 @@ export const Items = createFieldSchemaDecoratorFactory(
     toJsonSchema: (p, current) => ({
       items: { ...current.items, ...toJsonSchema(p) },
     }),
-    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
+    fromJsonSchema: ({ schema, fromJsonSchema }): FieldSchemaDecorator | undefined => {
       return schema.items === void 0 ? void 0 : Items(fromJsonSchema(schema.items));
     },
   },
@@ -67,13 +58,32 @@ export const PrefixItems = createFieldSchemaDecoratorFactory(
       return value.slice(0, limit).map((item, i) => decode(child(i + '', item, params[i])));
     },
     toJsonSchema: (p) => ({ prefixItems: p.map((s) => toJsonSchema(s)) }),
-    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
+    fromJsonSchema: ({ schema, fromJsonSchema }): FieldSchemaDecorator | undefined => {
       return schema.prefixItems === void 0
         ? void 0
         : PrefixItems(schema.prefixItems.map((s) => fromJsonSchema(s)));
     },
   },
 );
+
+const CONTAINS_PREFIX = 'contains:';
+
+function containsKey(index: number): string {
+  return CONTAINS_PREFIX + index;
+}
+
+function containsCount(evaluated: ReadonlySet<string>): number {
+  let count = 0;
+  for (const k of evaluated) {
+    if (k.startsWith(CONTAINS_PREFIX)) count++;
+  }
+  return count;
+}
+
+function isEvaluatedIndex(evaluated: ReadonlySet<string>, index: number): boolean {
+  const s = index + '';
+  return evaluated.has(s) || evaluated.has(CONTAINS_PREFIX + s);
+}
 
 export const Contains = createFieldSchemaDecoratorFactory(
   'Contains',
@@ -98,7 +108,7 @@ export const Contains = createFieldSchemaDecoratorFactory(
       return matched > 0;
     },
     toJsonSchema: (p) => ({ contains: toJsonSchema(p) }),
-    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
+    fromJsonSchema: ({ schema, fromJsonSchema }): FieldSchemaDecorator | undefined => {
       return schema.contains === void 0 ? void 0 : Contains(fromJsonSchema(schema.contains));
     },
   },
@@ -117,7 +127,7 @@ export const MinContains = createFieldSchemaDecoratorFactory(
       return containsCount(evaluated) >= params;
     },
     toJsonSchema: (p) => ({ minContains: p }),
-    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
+    fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined => {
       return isNumber(schema.minContains) ? MinContains(schema.minContains) : void 0;
     },
   },
@@ -136,7 +146,7 @@ export const MaxContains = createFieldSchemaDecoratorFactory(
       return containsCount(evaluated) <= params;
     },
     toJsonSchema: (p) => ({ maxContains: p }),
-    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
+    fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined => {
       return isNumber(schema.maxContains) ? MaxContains(schema.maxContains) : void 0;
     },
   },
@@ -152,7 +162,7 @@ export const MinItems = createFieldSchemaDecoratorFactory(
     message: '.label has at least .params elements',
     decode: ({ value, params }) => !isArray(value) || value.length >= params,
     toJsonSchema: (p) => ({ minItems: p }),
-    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
+    fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined => {
       return isNumber(schema.minItems) ? MinItems(schema.minItems) : void 0;
     },
   },
@@ -168,7 +178,7 @@ export const MaxItems = createFieldSchemaDecoratorFactory(
     message: '.label can contain at most .params elements',
     decode: ({ value, params }) => !isArray(value) || value.length <= params,
     toJsonSchema: (p) => ({ maxItems: p }),
-    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
+    fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined => {
       return isNumber(schema.maxItems) ? MaxItems(schema.maxItems) : void 0;
     },
   },
@@ -196,7 +206,7 @@ export const UniqueItems = createFieldSchemaDecoratorFactory(
       });
     },
     toJsonSchema: () => ({ uniqueItems: true }),
-    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
+    fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined => {
       return schema.uniqueItems ? UniqueItems() : void 0;
     },
   },
@@ -226,7 +236,7 @@ export const UnevaluatedItems = createFieldSchemaDecoratorFactory(
     toJsonSchema: (p) => ({
       unevaluatedItems: p === false ? false : toJsonSchema(p),
     }),
-    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
+    fromJsonSchema: ({ schema, fromJsonSchema }): FieldSchemaDecorator | undefined => {
       const u = schema.unevaluatedItems;
       if (u === void 0 || u === true) return void 0;
       if (u === false) return UnevaluatedItems(false);
@@ -283,8 +293,8 @@ export const IsArray = createFieldSchemaDecoratorFactory(
     message: '.label should be an array',
     decode: ({ value }) => isArray(value),
     toJsonSchema: addType('array'),
-    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
-      return hasType(schema, 'array') ? IsArray() : void 0;
+    fromJsonSchema: ({ hasType }): FieldSchemaDecorator | undefined => {
+      return hasType('array') ? IsArray() : void 0;
     },
   },
 );

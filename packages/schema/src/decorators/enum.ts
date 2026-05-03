@@ -83,7 +83,7 @@ export const IsEnum = createFieldSchemaDecoratorFactory(
         'x-enum-descriptions': descriptions,
       };
     },
-    fromJsonSchema: (schema): FieldSchemaDecorator | undefined => {
+    fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined => {
       return schema.enum
         ? IsEnum(schema.enum as Array<string | number>, {
             varnames: schema['x-enum-varnames'] as string[] | undefined,

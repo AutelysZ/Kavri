@@ -1,3 +1,7 @@
+import { polyfill } from '@kavri/env';
+
+polyfill();
+
 export {
   Metadata,
   createClassDecorator,

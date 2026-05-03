@@ -14,26 +14,6 @@ import type {
   Qualifier,
 } from './types.js';
 
-// Polyfill `Map.prototype.getOrInsertComputed` (TC39 stage-3 "upsert" proposal,
-// declared in TS 6's `lib.esnext.collection.d.ts` but not yet shipped in V8 /
-// Node 24). Loaded once when this module is imported.
-if (typeof Map.prototype.getOrInsertComputed !== 'function') {
-  Object.defineProperty(Map.prototype, 'getOrInsertComputed', {
-    value(this: Map<unknown, unknown>, key: unknown, callback: (key: unknown) => unknown) {
-      if (this.has(key)) return this.get(key);
-      const v = callback(key);
-      this.set(key, v);
-      return v;
-    },
-    writable: true,
-    configurable: true,
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Compose options
-// ---------------------------------------------------------------------------
-
 /**
  * Options for composing additional decorators alongside the primary one.
  */
