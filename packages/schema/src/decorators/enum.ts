@@ -8,15 +8,23 @@ import {
 import { enumKeys, type EnumLike, enumValues } from '../utils.js';
 import { type BaseOptions, Info } from './base.js';
 
-/** Options for `IsEnum`. */
+/**
+ * Options for `IsEnum`.
+ */
 export interface EnumOptions extends BaseOptions {
-  /** OpenAPI/Swagger `x-enum-varnames` annotation for the values. */
+  /**
+   * OpenAPI/Swagger `x-enum-varnames` annotation for the values.
+   */
   varnames?: string[];
-  /** OpenAPI/Swagger `x-enum-descriptions` annotation for the values. */
+  /**
+   * OpenAPI/Swagger `x-enum-descriptions` annotation for the values.
+   */
   descriptions?: string[];
 }
 
-/** Runtime params stored on the `IsEnum` metadata. */
+/**
+ * Runtime params stored on the `IsEnum` metadata.
+ */
 interface EnumParams {
   values: Array<string | number>;
   set: Set<string | number>;

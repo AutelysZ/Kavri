@@ -154,19 +154,29 @@ declare global {
   }
 }
 
-/** Represents an uploaded file in a multipart request. */
+/**
+ * Represents an uploaded file in a multipart request.
+ */
 @Schema()
 export class MultipartFile {
-  /** Original uploaded filename. */
+  /**
+   * Original uploaded filename.
+   */
   @IsString()
   readonly name!: string;
-  /** File size in bytes. */
+  /**
+   * File size in bytes.
+   */
   @IsInteger()
   readonly size!: number;
-  /** MIME type. */
+  /**
+   * MIME type.
+   */
   @IsMimeType()
   readonly type!: string;
-  /** Temp file path on disk. */
+  /**
+   * Temp file path on disk.
+   */
   @IsFilename({ type: 'absolute' })
   readonly path!: string;
 }
@@ -179,13 +189,21 @@ export class FileUnion extends createUnionClass<Kavri.FileUnions, FileHandler>(
   },
 ) {}
 
-/** Options for file upload fields. */
+/**
+ * Options for file upload fields.
+ */
 export interface IsFileOptions {
-  /** If true, field type is MultipartFile[]. Default: false. */
+  /**
+   * If true, field type is MultipartFile[]. Default: false.
+   */
   array?: ArrayOptions<FileUnion>;
-  /** Accepted MIME utils. E.g., ['image/*', 'application/pdf']. */
+  /**
+   * Accepted MIME utils. E.g., ['image/*', 'application/pdf'].
+   */
   accept?: ValidateField<string[]>;
-  /** Max file size in bytes. */
+  /**
+   * Max file size in bytes.
+   */
   maxSize?: ValidateField<number>;
 }
 

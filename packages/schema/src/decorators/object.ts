@@ -517,7 +517,9 @@ export const DependentSchemas = createFieldSchemaDecoratorFactory(
   },
 );
 
-/** Schema options for object fields. */
+/**
+ * Schema options for object fields.
+ */
 export interface ObjectOptions<T extends object = object> extends BaseOptions<T> {
   properties?: PartialRecord<keyof T, NestedFieldSchema>;
   patternProperties?: Record<string, NestedFieldSchema>;

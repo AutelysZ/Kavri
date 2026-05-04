@@ -90,13 +90,21 @@ export const AllOf = createFieldSchemaDecoratorFactory(
   },
 );
 
-/** Branches for `IfThenElse`. Maps to JSON Schema `if`/`then`/`else`. */
+/**
+ * Branches for `IfThenElse`. Maps to JSON Schema `if`/`then`/`else`.
+ */
 export interface IfThenElseSchema {
-  /** Predicate schema. Whether it passes routes to `then` (true) or `else` (false). */
+  /**
+   * Predicate schema. Whether it passes routes to `then` (true) or `else` (false).
+   */
   if: NestedFieldSchema;
-  /** Applied when `if` passes. Omitting it means "no further constraint on the matching branch". */
+  /**
+   * Applied when `if` passes. Omitting it means "no further constraint on the matching branch".
+   */
   then?: NestedFieldSchema;
-  /** Applied when `if` fails. Omitting it means "no further constraint on the non-matching branch". */
+  /**
+   * Applied when `if` fails. Omitting it means "no further constraint on the non-matching branch".
+   */
   else?: NestedFieldSchema;
 }
 

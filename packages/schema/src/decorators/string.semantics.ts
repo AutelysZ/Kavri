@@ -27,8 +27,10 @@ import isEmpty from 'validator/es/lib/isEmpty.js';
 import isEthereumAddress from 'validator/es/lib/isEthereumAddress.js';
 import isFloat from 'validator/es/lib/isFloat.js';
 import isFQDN from 'validator/es/lib/isFQDN.js';
-// @ts-expect-error - no type declarations for ES module
-import isFreightContainerID from 'validator/es/lib/isFreightContainerID.js';
+// `isFreightContainerID` is omitted — the installed `validator` package
+// (13.15.35) does not ship that file, even though @types/validator declares
+// it. Re-add the import + `IsFreightContainerID` export once the runtime
+// catches up.
 import isFullWidth from 'validator/es/lib/isFullWidth.js';
 import isHalfWidth from 'validator/es/lib/isHalfWidth.js';
 import isHash from 'validator/es/lib/isHash.js';
@@ -212,7 +214,7 @@ export const IsISO31661Alpha2 = sv0('IsISO31661Alpha2', isISO31661Alpha2);
 export const IsISO31661Alpha3 = sv0('IsISO31661Alpha3', isISO31661Alpha3);
 export const IsISO31661Numeric = sv0('IsISO31661Numeric', isISO31661Numeric);
 export const IsISRC = sv0('IsISRC', isISRC);
-export const IsFreightContainerID = sv0('IsFreightContainerID', isFreightContainerID);
+// IsFreightContainerID intentionally omitted — see import-block note above.
 export const IsULID = sv0('IsULID', isULID);
 export const IsSemVer = sv0('IsSemVer', isSemVer);
 

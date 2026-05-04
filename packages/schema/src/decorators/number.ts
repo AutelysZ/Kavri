@@ -24,7 +24,9 @@ export interface NumericSchema<V extends NumericType = NumericType> extends Type
   multipleOf?: ValidateField<V>;
 }
 
-/** Inclusive lower bound. Works for `number` and `bigint`. */
+/**
+ * Inclusive lower bound. Works for `number` and `bigint`.
+ */
 export const Minimum = createFieldSchemaDecoratorFactory(
   'Minimum',
   (value: NumericType, options: ValidateOptions = {}): FieldSchemaDecorator<NumericType> => {
@@ -45,7 +47,9 @@ export const Minimum = createFieldSchemaDecoratorFactory(
   },
 );
 
-/** Inclusive upper bound. Works for `number` and `bigint`. */
+/**
+ * Inclusive upper bound. Works for `number` and `bigint`.
+ */
 export const Maximum = createFieldSchemaDecoratorFactory(
   'Maximum',
   (value: NumericType, options: ValidateOptions = {}): FieldSchemaDecorator<NumericType> => {
@@ -66,7 +70,9 @@ export const Maximum = createFieldSchemaDecoratorFactory(
   },
 );
 
-/** Exclusive lower bound. */
+/**
+ * Exclusive lower bound.
+ */
 export const ExclusiveMinimum = createFieldSchemaDecoratorFactory(
   'ExclusiveMin',
   (value: NumericType, options: ValidateOptions = {}): FieldSchemaDecorator<NumericType> => {
@@ -87,7 +93,9 @@ export const ExclusiveMinimum = createFieldSchemaDecoratorFactory(
   },
 );
 
-/** Exclusive upper bound. */
+/**
+ * Exclusive upper bound.
+ */
 export const ExclusiveMaximum = createFieldSchemaDecoratorFactory(
   'ExclusiveMax',
   (value: NumericType, options: ValidateOptions = {}): FieldSchemaDecorator<NumericType> => {
@@ -108,7 +116,9 @@ export const ExclusiveMaximum = createFieldSchemaDecoratorFactory(
   },
 );
 
-/** Value must be an integer multiple of `params`. */
+/**
+ * Value must be an integer multiple of `params`.
+ */
 export const MultipleOf = createFieldSchemaDecoratorFactory(
   'MultipleOf',
   (value: NumericType, options: ValidateOptions = {}): FieldSchemaDecorator<NumericType> => {
@@ -129,7 +139,9 @@ export const MultipleOf = createFieldSchemaDecoratorFactory(
   },
 );
 
-/** Build the constraint deps for a numeric type decorator from its options. */
+/**
+ * Build the constraint deps for a numeric type decorator from its options.
+ */
 function numericConstraints({
   minimum,
   maximum,

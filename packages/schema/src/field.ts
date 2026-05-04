@@ -83,9 +83,13 @@ export function ofNestedField(
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export interface FieldSchemaDecoratorMetadata<P = any> {
-  /** The factory function that created this decorator. */
+  /**
+   * The factory function that created this decorator.
+   */
   factory: FieldSchemaDecoratorFactory<P>;
-  /** Parameters passed to the factory. */
+  /**
+   * Parameters passed to the factory.
+   */
   params: P;
   options: ValidateOptions | undefined;
 }
@@ -94,7 +98,9 @@ export function isFieldSchemaDecoratorMetadata(v: unknown): v is FieldSchemaDeco
   return isObject(v) && 'factory' in v && isFieldSchemaDecoratorFactory(v.factory);
 }
 
-/** A field decorator carrying schema metadata. */
+/**
+ * A field decorator carrying schema metadata.
+ */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type FieldSchemaDecorator<P = any> = FieldDecorator<FieldSchemaDecoratorMetadata<P>>;
 

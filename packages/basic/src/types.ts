@@ -33,7 +33,7 @@ export interface DecoratorStatic<T> {
  * via the {@link DecoratorStatic.metadata} property.
  */
 export type ClassDecorator<T = any> = globalThis.ClassDecorator &
-  ((target: Function, context: ClassDecoratorContext) => void) &
+  ((target: (...args: unknown[]) => unknown, context: ClassDecoratorContext) => void) &
   DecoratorStatic<T>;
 
 /**
@@ -42,7 +42,7 @@ export type ClassDecorator<T = any> = globalThis.ClassDecorator &
  * via the {@link DecoratorStatic.metadata} property.
  */
 export type MethodDecorator<T = any> = globalThis.MethodDecorator &
-  ((target: Function, context: ClassMethodDecoratorContext) => void) &
+  ((target: (...args: unknown[]) => unknown, context: ClassMethodDecoratorContext) => void) &
   DecoratorStatic<T>;
 
 /**
@@ -51,7 +51,7 @@ export type MethodDecorator<T = any> = globalThis.MethodDecorator &
  * `(target, key, descriptor?)` signature as method decorators.
  * Carries typed metadata `T` via the {@link DecoratorStatic.metadata} property.
  */
-export type FieldDecorator<T = any> = globalThis.MethodDecorator &
+export type FieldDecorator<T = any> = globalThis.PropertyDecorator &
   ((value: undefined, context: ClassFieldDecoratorContext) => void) &
   DecoratorStatic<T>;
 

@@ -11,4 +11,3 @@ export * from './openapi.js';
 export * from './decode.js';
 export * from './json.js';
 export * from './websocket.js';
-export { DecoratorPhaseStrategy, FieldSchemaDecoratorName, Strategy } from './field.js';

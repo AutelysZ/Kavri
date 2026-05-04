@@ -47,15 +47,25 @@ export type DateInput = Date | Duration | number | string;
  */
 export type DateFormat = 'iso' | 'date' | 'unix' | 'unix-ms';
 
-/** Options for `IsDate`. */
+/**
+ * Options for `IsDate`.
+ */
 export interface DateOptions extends Omit<BaseOptions<Date>, 'default'> {
-  /** Output format. Default: `'iso'`. */
+  /**
+   * Output format. Default: `'iso'`.
+   */
   format?: DateFormat;
-  /** Reserved for restricting accepted input formats. Currently advisory. */
+  /**
+   * Reserved for restricting accepted input formats. Currently advisory.
+   */
   inputFormat?: DateFormat[];
-  /** Value must be strictly before this date. `undefined` means "now". */
+  /**
+   * Value must be strictly before this date. `undefined` means "now".
+   */
   before?: ValidateField<DateInput | undefined>;
-  /** Value must be strictly after this date. `undefined` means "now". */
+  /**
+   * Value must be strictly after this date. `undefined` means "now".
+   */
   after?: ValidateField<DateInput | undefined>;
   default?: ValidateField<DateInput>;
 }
@@ -64,7 +74,9 @@ export interface DateOptions extends Omit<BaseOptions<Date>, 'default'> {
 // Duration (ISO 8601)
 // ---------------------------------------------------------------------------
 
-/** Component fields of an ISO 8601 duration. */
+/**
+ * Component fields of an ISO 8601 duration.
+ */
 export interface DurationParts {
   years?: number;
   months?: number;
@@ -73,7 +85,9 @@ export interface DurationParts {
   hours?: number;
   minutes?: number;
   seconds?: number;
-  /** Negate the entire duration. */
+  /**
+   * Negate the entire duration.
+   */
   negative?: boolean;
 }
 
@@ -176,7 +190,9 @@ export class Duration implements DurationParts {
     });
   }
 
-  /** Return a new `Duration` with the sign flipped. */
+  /**
+   * Return a new `Duration` with the sign flipped.
+   */
   negate(): Duration {
     return new Duration({
       years: this.years,
@@ -206,7 +222,9 @@ export class Duration implements DurationParts {
     return out;
   }
 
-  /** Serialize back to canonical ISO 8601 form. */
+  /**
+   * Serialize back to canonical ISO 8601 form.
+   */
   toString(): string {
     const date: string[] = [];
     if (this.years) date.push(`${this.years}Y`);

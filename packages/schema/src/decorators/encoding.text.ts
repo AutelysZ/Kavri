@@ -161,9 +161,13 @@ function fromUint8Array(data: Uint8Array, text: boolean): Uint8Array | string {
 }
 
 export interface IsBase32Options {
-  /** Base32 variant. Default: `'rfc4648'`. */
+  /**
+   * Base32 variant. Default: `'rfc4648'`.
+   */
   variant?: Base32Variant;
-  /** Decode bytes to a UTF-8 string instead of `Uint8Array`. Default: `false`. */
+  /**
+   * Decode bytes to a UTF-8 string instead of `Uint8Array`. Default: `false`.
+   */
   text?: boolean;
 }
 
@@ -204,7 +208,9 @@ export const IsBase32 = createFieldSchemaDecoratorFactory(
 );
 
 export interface IsBase58Options {
-  /** Decode bytes to a UTF-8 string instead of `Uint8Array`. Default: `false`. */
+  /**
+   * Decode bytes to a UTF-8 string instead of `Uint8Array`. Default: `false`.
+   */
   text?: boolean;
 }
 
@@ -244,11 +250,17 @@ export const IsBase58 = createFieldSchemaDecoratorFactory(
 );
 
 export interface IsBase64Options {
-  /** Use URL-safe alphabet (`-_` instead of `+/`). Default: `true`. */
+  /**
+   * Use URL-safe alphabet (`-_` instead of `+/`). Default: `true`.
+   */
   urlSafe?: boolean;
-  /** Require / emit `=` padding. Default: `false`. */
+  /**
+   * Require / emit `=` padding. Default: `false`.
+   */
   padding?: boolean;
-  /** Decode bytes to a UTF-8 string instead of `Uint8Array`. Default: `false`. */
+  /**
+   * Decode bytes to a UTF-8 string instead of `Uint8Array`. Default: `false`.
+   */
   text?: boolean;
 }
 

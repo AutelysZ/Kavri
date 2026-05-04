@@ -12,23 +12,35 @@ import {
 } from './field.js';
 import { isArray } from './utils.js';
 
-/** A single validation issue produced by one decorator rule. */
+/**
+ * A single validation issue produced by one decorator rule.
+ */
 export interface RuleIssue {
-  /** The decorator's registered name (e.g. `'MinLength'`). */
+  /**
+   * The decorator's registered name (e.g. `'MinLength'`).
+   */
   rule: string;
-  /** The decorator's params at the time of failure. */
+  /**
+   * The decorator's params at the time of failure.
+   */
   params: unknown;
-  /** Formatted error message with placeholders resolved. */
+  /**
+   * Formatted error message with placeholders resolved.
+   */
   message: string;
 }
 
-/** Aggregate decode failure for a single value. */
+/**
+ * Aggregate decode failure for a single value.
+ */
 export interface DecodeIssue {
   issues?: RuleIssue[];
   children?: FieldIssue[];
 }
 
-/** A `DecodeIssue` tagged with the field it came from. */
+/**
+ * A `DecodeIssue` tagged with the field it came from.
+ */
 export interface FieldIssue extends DecodeIssue {
   field: string;
 }
@@ -52,15 +64,21 @@ export class DecodeResult<T = unknown> {
   }
 }
 
-/** Constructor input for `DecodeContext`. */
+/**
+ * Constructor input for `DecodeContext`.
+ */
 export interface DecodeContextInit {
   field?: string;
   value: unknown;
-  /** Defaults to `value` when omitted (root contexts). */
+  /**
+   * Defaults to `value` when omitted (root contexts).
+   */
   object?: unknown;
   parent?: DecodeContext;
   rules: readonly FieldSchemaDecoratorMetadata[];
-  /** Shared between parent and children when omitted (defaults to a fresh `KeyMap`). */
+  /**
+   * Shared between parent and children when omitted (defaults to a fresh `KeyMap`).
+   */
   state?: KeyMap;
 }
 
@@ -70,27 +88,43 @@ export interface DecodeContextInit {
  * `currentRule` as it walks the rule list.
  */
 export class DecodeContext<P = unknown> {
-  /** The field name within the parent object, if any (root contexts: `undefined`). */
+  /**
+   * The field name within the parent object, if any (root contexts: `undefined`).
+   */
   readonly field: string | undefined;
-  /** Live value. Mutated by `provide()` so subsequent rules see the coerced form. */
+  /**
+   * Live value. Mutated by `provide()` so subsequent rules see the coerced form.
+   */
   value: unknown;
-  /** Snapshot of `value` at construction time. */
+  /**
+   * Snapshot of `value` at construction time.
+   */
   readonly originalValue: unknown;
-  /** The owning instance/object when this context is a field of one. */
+  /**
+   * The owning instance/object when this context is a field of one.
+   */
   readonly object: unknown;
   readonly parent: DecodeContext | undefined;
-  /** Shared per-context key/value bag for rule-to-rule signalling. */
+  /**
+   * Shared per-context key/value bag for rule-to-rule signalling.
+   */
   readonly state: KeyMap;
-  /** All rule metadata at this level (siblings + the current rule). */
+  /**
+   * All rule metadata at this level (siblings + the current rule).
+   */
   readonly rules: readonly FieldSchemaDecoratorMetadata[];
   /**
    * Annotation set used by `unevaluatedProperties`/`unevaluatedItems` and
    * other rules that need to know what siblings consumed.
    */
   readonly evaluated: Set<string>;
-  /** The currently-executing rule's params (set per-rule by the runner). */
+  /**
+   * The currently-executing rule's params (set per-rule by the runner).
+   */
   params!: P;
-  /** The currently-executing rule's metadata (set per-rule by the runner). */
+  /**
+   * The currently-executing rule's metadata (set per-rule by the runner).
+   */
   currentRule!: FieldSchemaDecoratorMetadata;
 
   constructor(init: DecodeContextInit) {
@@ -133,14 +167,20 @@ export class DecodeContext<P = unknown> {
 // Public API
 // ---------------------------------------------------------------------------
 
-/** Decode an instance against a `@Schema` class's field decorators. */
+/**
+ * Decode an instance against a `@Schema` class's field decorators.
+ */
 export function decode<T>(clazz: AnyConstructor<T>, input: unknown): DecodeResult<T>;
 
-/** Decode a value against an explicit `NestedFieldSchema`. */
+/**
+ * Decode a value against an explicit `NestedFieldSchema`.
+ */
 // eslint-disable-next-line @typescript-eslint/unified-signatures
 export function decode<T>(schema: NestedFieldSchema, input: unknown): DecodeResult<T>;
 
-/** Re-enter the pipeline with an already-built `DecodeContext`. */
+/**
+ * Re-enter the pipeline with an already-built `DecodeContext`.
+ */
 export function decode<T>(ctx: DecodeContext): DecodeResult<T>;
 
 export function decode(
@@ -205,9 +245,13 @@ function decodeClass(clazz: AnyConstructor, input: unknown): DecodeResult<unknow
 
 interface RuleOutcome {
   ok: boolean;
-  /** Rule returned a string error message instead of plain `false`. */
+  /**
+   * Rule returned a string error message instead of plain `false`.
+   */
   message?: string;
-  /** Sub-results from nested `decode()` calls. */
+  /**
+   * Sub-results from nested `decode()` calls.
+   */
   subResults?: readonly DecodeResult[];
 }
 

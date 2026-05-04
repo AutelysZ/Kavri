@@ -8,27 +8,39 @@ import {
 } from '../field.js';
 import { isString } from '../utils.js';
 
-/** Options for `IsCompressed`. */
+/**
+ * Options for `IsCompressed`.
+ */
 export interface IsCompressedOptions {
-  /** Compression format. Default: `'gzip'`. */
+  /**
+   * Compression format. Default: `'gzip'`.
+   */
   format?: CompressionFormat;
-  /** Decode bytes to a UTF-8 string instead of `Uint8Array`. Default: `false`. */
+  /**
+   * Decode bytes to a UTF-8 string instead of `Uint8Array`. Default: `false`.
+   */
   text?: boolean;
 }
 
-/** Wrap a `Uint8Array` in a one-shot `ReadableStream` for piping. */
+/**
+ * Wrap a `Uint8Array` in a one-shot `ReadableStream` for piping.
+ */
 function bytesAsStream(input: Uint8Array): ReadableStream<BufferSource> {
   return new Blob([input as Uint8Array<ArrayBuffer>]).stream();
 }
 
-/** Pump bytes through a `DecompressionStream` and gather the result. */
+/**
+ * Pump bytes through a `DecompressionStream` and gather the result.
+ */
 async function decompress(input: Uint8Array, format: CompressionFormat, text?: boolean) {
   const stream = bytesAsStream(input).pipeThrough(new DecompressionStream(format));
   const response = new Response(stream);
   return text ? response.text() : new Uint8Array(await response.arrayBuffer());
 }
 
-/** Pump bytes through a `CompressionStream` and gather the result. */
+/**
+ * Pump bytes through a `CompressionStream` and gather the result.
+ */
 async function compress(input: Uint8Array, format: CompressionFormat) {
   const stream = bytesAsStream(input).pipeThrough(new CompressionStream(format));
   return new Uint8Array(await new Response(stream).arrayBuffer());
