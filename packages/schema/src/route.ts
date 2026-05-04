@@ -29,7 +29,10 @@ export interface SharedOptions {
    */
   responseType?: string;
   /**
-   * Request content type, compute rule is same as {@link responseType}.
+   * Request body content type, rule is same as {@link responseType} plus:
+   * - If any field marked with {@link RawBody}, then will be application/octet-stream
+   * - If method is no-body method, then is none
+   * - If all fields are marked as {@link InHeader} or {@link InQuery}, then is none
    */
   requestType?: string;
 }

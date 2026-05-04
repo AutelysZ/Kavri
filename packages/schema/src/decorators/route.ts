@@ -1,3 +1,4 @@
+import { createFieldDecorator, type FieldDecorator } from '@kavri/basic';
 import {
   type BinaryHandler,
   type FileHandler,
@@ -21,6 +22,7 @@ import { createUnionClass } from '../union.js';
 import { entryOf, isString, once } from '../utils.js';
 import { type ArrayOptions, IsArray } from './array.js';
 import { IsInteger } from './number.js';
+import { IsInstanceOf } from './object.js';
 import { IsString, type StringOptions } from './string.js';
 import { IsMimeType } from './string.semantics.js';
 
@@ -78,6 +80,18 @@ export const Accept = createFieldSchemaDecoratorFactory(
       }
       return false;
     },
+  },
+);
+
+export const MaxSize = createFieldSchemaDecoratorFactory(
+  'MaxSize',
+  (size: number, options: ValidateOptions = {}): FieldSchemaDecorator<number> => {
+    return FieldSchema<number>(MaxSize, size, options);
+  },
+  {
+    phase: Phase.Semantics,
+    message: 'The size of .label cannot exceed .params',
+    decode: ({ params, value }) => !FileUnion.is(value) || value.toHandle().size <= params,
   },
 );
 
@@ -216,42 +230,14 @@ export interface IsFileOptions {
  * - `accept`: checks file MIME type against allowed patterns (glob-style).
  * - `maxSize`: checks file size in bytes.
  */
-export const IsFile = createFieldSchemaDecoratorFactory(
-  'IsFile',
-  (
-    { array, accept, maxSize }: IsFileOptions = {},
-    options: ValidateOptions = {},
-  ): FieldSchemaDecorator<boolean> => {
-    const deps: FieldSchemaDecorator[] = [];
-    if (array) deps.push(IsArray(IsFile({ accept, maxSize }), array));
-    else {
-      if (accept) deps.push(Accept(...ofArrayField(accept)));
-      if (maxSize) deps.push(MaxSize(...ofValueField(maxSize)));
-    }
-    return FieldSchema<boolean>(IsFile, !array, options, deps);
-  },
-  {
-    phase: Phase.Type,
-    message: '.label should be a file.',
-    decode: ({ value, params }) => !params || FileUnion.is(value),
-  },
-);
 
-export const MaxSize = createFieldSchemaDecoratorFactory(
-  'MaxSize',
-  (size: number, options: ValidateOptions = {}): FieldSchemaDecorator<number> => {
-    return FieldSchema<number>(MaxSize, size, options);
-  },
-  {
-    phase: Phase.Semantics,
-    message: 'The size of .label cannot exceed .params',
-    decode: ({ params, value }) => !FileUnion.is(value) || value.toHandle().size <= params,
-  },
-);
-
-// ---------------------------------------------------------------------------
-// IsBody
-// ---------------------------------------------------------------------------
+export function IsFile(options?: IsFileOptions, schema?: ValidateOptions): FieldDecorator<void> {
+  const { array, accept, maxSize } = options ?? {};
+  const deps: FieldSchemaDecorator[] = [IsInstanceOf(FileUnion, schema)];
+  if (accept) deps.push(Accept(...ofArrayField(accept)));
+  if (maxSize) deps.push(MaxSize(...ofValueField(maxSize)));
+  return createFieldDecorator(IsFile, void 0, { self: array ? [IsArray(deps, array)] : deps });
+}
 
 export class BinaryUnion extends createUnionClass<Kavri.BinaryUnions, BinaryHandler>(
   'BinaryUnion',
@@ -261,45 +247,59 @@ export class BinaryUnion extends createUnionClass<Kavri.BinaryUnions, BinaryHand
 ) {}
 
 /**
- * Marks a field as the raw binary request body stream.
- * Use in binary request schemas only. At most one @IsBinary per schema.
+ * Check a field is a {@link BinaryUnion}
+ * @param options
+ * @constructor
  */
-export const IsBinary = createFieldSchemaDecoratorFactory(
-  'IsBinary',
-  (options: ValidateOptions = {}): FieldSchemaDecorator<undefined> => {
-    return FieldSchema<undefined>(IsBinary, void 0, options);
-  },
-  {
-    phase: Phase.Type,
-    message: '.label should be a binary stream',
-    decode: ({ value }) => BinaryUnion.is(value),
-  },
-);
+export function IsBinary(options?: ValidateOptions) {
+  return IsInstanceOf(BinaryUnion, options);
+}
 
 /**
- * Mark a field MUST be the entire body and as a binary data.
+ * Mark a field comes from entire body.
+ *
+ * All {@link IsFile}, {@link RawBody}, {@link InQuery} and {@link InHeader} are not
+ * {@link FieldSchemaDecoratorFactory}, they can only apply to the field directly.
+ *
+ * The affect:
+ *
+ * 1. How {@link toOpenAPIv3} generate OpenAPI schema
+ * 2. How {@link ResolveInterceptor} merge the parts of incoming data
+ * 3. If {@link MultipartParseInterceptor} is involved (via {@link IsFile})
  */
-export const IsBody = createFieldSchemaDecoratorFactory(
-  'IsBody',
-  (options: ValidateOptions = {}): FieldSchemaDecorator<undefined> => {
-    return FieldSchema<undefined>(IsBody, void 0, options, [IsBinary(options)]);
-  },
-  {
-    phase: Phase.Info,
-    message: '',
-  },
-);
+export function RawBody(): FieldDecorator<void> {
+  return createFieldDecorator(RawBody, void 0);
+}
 
 /**
- * Just mark a field MUST in query
+ * Mark a field comes from query, can specify a different name of the source.
+ *
+ * Note: there is no `InBody` method to mark a field comes from body. By default,
+ * if an HTTP method can accept body, body has high priority than query. InQuery
+ * means the field must come from query, to override the priority rule.
+ *
+ * It will provide:
+ * - undefined: If there is no such a header
+ * - string: if there is only one value of the header
+ * - string[]: if there are multiple values of the header
+ *
+ * You need to use this with constraints to ensure it fit your requirements.
  */
-export const IsQuery = createFieldSchemaDecoratorFactory(
-  'IsQuery',
-  (): FieldSchemaDecorator<undefined> => {
-    return FieldSchema<undefined>(IsQuery, void 0, void 0);
-  },
-  {
-    phase: Phase.Info,
-    message: '',
-  },
-);
+export function InQuery(name?: string): FieldDecorator<string | undefined> {
+  return createFieldDecorator(InQuery, name);
+}
+
+/**
+ * Mark a field comes from header. By default, header doesn't be involved when
+ * resolve request. Only if some fields used it explicitly.
+ *
+ * It will provide:
+ * - undefined: If there is no such a header
+ * - string: if there is only one value of the header
+ * - string[]: if there are multiple values of the header
+ *
+ * You need to use this with constraints to ensure it fit your requirements.
+ */
+export function InHeader(name: string): FieldDecorator<string> {
+  return createFieldDecorator(InHeader, name);
+}

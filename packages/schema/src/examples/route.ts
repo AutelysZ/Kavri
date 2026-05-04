@@ -1,15 +1,24 @@
+import { IsOptional, IsString } from '../decorators/index.js';
 import {
   BinaryUnion,
   FileUnion,
-  IsBody,
+  InHeader,
+  InQuery,
   IsFile,
   IsFilename,
-  IsQuery,
+  RawBody,
 } from '../decorators/route.js';
 import { Schema } from '../schema.js';
 
 @Schema({ description: 'Upload file request' })
-export class UploadRequest {
+export class MultipartUploadRequest {
+  @InQuery('path')
+  @IsString({ maxLength: 100 })
+  path!: string;
+  @InHeader('X-Bucket')
+  @IsOptional()
+  @IsString({ maxLength: 100 })
+  bucket: string | undefined;
   @IsFile({
     array: {
       maxItems: [10, { message: 'Upload up to 10 files at a time.' }],
@@ -23,7 +32,9 @@ export class UploadRequest {
 
 // the outgoing message's type is determined by sender
 // the runtime client should support all format supported by the env
-export const uploadRequest: UploadRequest = {
+export const uploadRequest: MultipartUploadRequest = {
+  path: '/upload/user/',
+  bucket: 's3',
   files: [
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     FileUnion.ofWebFile(HTMLInputElement.prototype.files!.item(0)!),
@@ -38,10 +49,10 @@ export const uploadRequest: UploadRequest = {
 };
 
 export class BinaryUploadRequest {
-  @IsQuery()
+  @InQuery()
   @IsFilename({ accept: ['image/*', '.pdf'] })
   name!: string;
-  @IsBody()
+  @RawBody()
   file!: BinaryUnion;
 }
 
@@ -56,7 +67,7 @@ export class UploadController {
     req.file.asNodeStream();
   }
 
-  async upload(req: UploadRequest) {
+  async upload(req: MultipartUploadRequest) {
     req.files.forEach((f) => f.asMultipart());
   }
 }
