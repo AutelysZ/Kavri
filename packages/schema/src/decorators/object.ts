@@ -4,6 +4,7 @@ import { decode } from '../decode.js';
 import {
   createFieldSchemaDecoratorFactory,
   decoupleOptions,
+  Dummy,
   FieldSchema,
   type FieldSchemaDecorator,
   type NestedFieldSchema,
@@ -20,15 +21,25 @@ import {
   entryOf,
   hasOwn,
   isArray,
+  isBoolean,
+  isMap,
   isNumber,
-  isObject,
+  isPlainObject,
   isString,
   keyOf,
   type PartialRecord,
   typeOf,
   type TypeOf,
 } from '../utils.js';
-import { type BaseOptions, Info } from './base.js';
+import { type BaseOptions, decoupleTypeOptions, Info, type TypeOptions } from './base.js';
+
+const is = (v: unknown) => isPlainObject(v) || isMap(v);
+
+const get = (v: object, k: unknown) => (isMap(v) ? v.get(k) : v[k as never]);
+
+const has = (v: object, k: unknown) => (isMap(v) ? v.has(k) : hasOwn(v, k as never));
+
+const keys = (v: object) => (isMap(v) ? (v.keys() as Iterable<string>) : keyOf(v));
 
 /**
  * Validate declared object properties against per-key schemas.
@@ -55,18 +66,17 @@ export const Properties = createFieldSchemaDecoratorFactory(
   {
     phase: Phase.Property,
     message: '',
-    decode: (ctx) => {
-      if (!isObject<Record<string, unknown>>(ctx.value)) {
+    decode: ({ value, child, params, evaluated }) => {
+      if (!is(value)) {
         return true;
       }
-      const value = ctx.value;
       const out: DecodeResult[] = [];
-      for (const [k, v] of entryOf(ctx.params as Record<string, NestedFieldSchema>)) {
-        if (v === undefined || !hasOwn(value, k)) {
+      for (const [k, v] of entryOf(params as Record<string, NestedFieldSchema>)) {
+        if (v === undefined || !has(value, k)) {
           continue;
         }
-        out.push(decode(ctx.child(k, value[k], v)));
-        ctx.evaluated.add(k);
+        out.push(decode(child(k, get(value, k), v)));
+        evaluated.add(k);
       }
       return out;
     },
@@ -113,18 +123,17 @@ export const PatternProperties = createFieldSchemaDecoratorFactory(
   {
     phase: Phase.Property,
     message: '',
-    decode: (ctx) => {
-      if (!isObject<Record<string, unknown>>(ctx.value)) {
+    decode: ({ value, params, child, evaluated }) => {
+      if (!is(value)) {
         return true;
       }
-      const value = ctx.value;
       const out: DecodeResult[] = [];
-      for (const [pattern, schema] of entryOf(ctx.params)) {
+      for (const [pattern, schema] of entryOf(params)) {
         const re = new RegExp(pattern);
-        for (const k of keyOf(value)) {
+        for (const k of keys(value)) {
           if (re.test(k)) {
-            out.push(decode(ctx.child(k, value[k], schema)));
-            ctx.evaluated.add(k);
+            out.push(decode(child(k, get(value, k), schema)));
+            evaluated.add(k);
           }
         }
       }
@@ -166,13 +175,13 @@ export const PropertyNames = createFieldSchemaDecoratorFactory(
   {
     phase: Phase.Property,
     message: '',
-    decode: (ctx) => {
-      if (!isObject<Record<string, unknown>>(ctx.value)) {
+    decode: ({ value, params, child }) => {
+      if (!is(value)) {
         return true;
       }
       const out: DecodeResult[] = [];
-      for (const k of keyOf(ctx.value)) {
-        out.push(decode(ctx.child(k, k, ctx.params)));
+      for (const k of keys(value)) {
+        out.push(decode(child(k, k, params)));
       }
       return out;
     },
@@ -202,60 +211,58 @@ export const PropertyNames = createFieldSchemaDecoratorFactory(
 export const AdditionalProperties = createFieldSchemaDecoratorFactory(
   'AdditionalProperties',
   (
-    value: NestedFieldSchema | false,
+    value: NestedFieldSchema | boolean,
     options?: ValidateOptions,
-  ): FieldSchemaDecorator<NestedFieldSchema | false> => {
+  ): FieldSchemaDecorator<NestedFieldSchema | boolean> => {
     return FieldSchema(AdditionalProperties, value, options);
   },
   {
     phase: Phase.Property,
     message: '.label has additional properties',
-    decode: (ctx) => {
-      if (!isObject<Record<string, unknown>>(ctx.value)) {
+    decode: ({ value, child, params, rules, currentRule, evaluated }) => {
+      if (!is(value) || params === true) {
         return true;
       }
-      const value = ctx.value;
       const declared = new Set<string>();
       const patterns: RegExp[] = [];
-      for (const rule of ctx.rules) {
-        if (rule === ctx.currentRule) {
+      for (const rule of rules) {
+        if (rule === currentRule) {
           continue;
         }
         if (rule.factory === Properties) {
           const props = rule.params as Record<string, NestedFieldSchema>;
           if (props) {
-            for (const k of keyOf(props)) {
+            for (const k of keys(props)) {
               declared.add(k);
             }
           }
         } else if (rule.factory === PatternProperties) {
           const pats = rule.params as Record<string, NestedFieldSchema>;
           if (pats) {
-            for (const re of keyOf(pats)) {
+            for (const re of keys(pats)) {
               patterns.push(new RegExp(re));
             }
           }
         }
       }
-      const extras = keyOf(value).filter(
+      const extras = [...keys(value)].filter(
         (k) => !declared.has(k) && !patterns.some((re) => re.test(k)),
       );
       if (extras.length === 0) {
         return true;
       }
-      const schema = ctx.params;
-      if (schema === false) {
+      if (params === false) {
         return false;
       }
       const out: DecodeResult[] = [];
       for (const k of extras) {
-        out.push(decode(ctx.child(k, value[k], schema)));
-        ctx.evaluated.add(k);
+        out.push(decode(child(k, get(value, k), params)));
+        evaluated.add(k);
       }
       return out;
     },
     toJsonSchema: (p) => ({
-      additionalProperties: p === false ? false : toJsonSchema(p),
+      additionalProperties: isBoolean(p) ? p : toJsonSchema(p),
     }),
     fromJsonSchema: ({ schema, fromJsonSchema }): FieldSchemaDecorator | undefined => {
       const ap = schema.additionalProperties;
@@ -284,36 +291,34 @@ export const AdditionalProperties = createFieldSchemaDecoratorFactory(
 export const UnevaluatedProperties = createFieldSchemaDecoratorFactory(
   'UnevaluatedProperties',
   (
-    value: NestedFieldSchema | false,
+    value: NestedFieldSchema | boolean,
     options?: ValidateOptions,
-  ): FieldSchemaDecorator<NestedFieldSchema | false> => {
+  ): FieldSchemaDecorator<NestedFieldSchema | boolean> => {
     return FieldSchema(UnevaluatedProperties, value, options);
   },
   {
     phase: Phase.AdditionalConstraints,
     message: '.label has unevaluated properties',
-    decode: (ctx) => {
-      if (!isObject<Record<string, unknown>>(ctx.value)) {
+    decode: ({ value, params, evaluated, child }) => {
+      if (!is(value) || params === true) {
         return true;
       }
-      const value = ctx.value;
-      const extras = keyOf(value).filter((k) => !ctx.evaluated.has(k));
+      const extras = [...keys(value)].filter((k) => !evaluated.has(k));
       if (extras.length === 0) {
         return true;
       }
-      const schema = ctx.params;
-      if (schema === false) {
+      if (params === false) {
         return false;
       }
       const out: DecodeResult[] = [];
       for (const k of extras) {
-        out.push(decode(ctx.child(k, value[k], schema)));
-        ctx.evaluated.add(k);
+        out.push(decode(child(k, get(value, k), params)));
+        evaluated.add(k);
       }
       return out;
     },
     toJsonSchema: (p) => ({
-      unevaluatedProperties: p === false ? false : toJsonSchema(p),
+      unevaluatedProperties: isBoolean(p) ? p : toJsonSchema(p),
     }),
     fromJsonSchema: ({ schema, fromJsonSchema }): FieldSchemaDecorator | undefined => {
       const up = schema.unevaluatedProperties;
@@ -342,7 +347,7 @@ export const MinProperties = createFieldSchemaDecoratorFactory(
     phase: Phase.Semantics,
     message: '.label must have at least .params properties',
     decode: ({ value, params }) => {
-      return !isObject<Record<string, unknown>>(value) || keyOf(value).length >= params;
+      return !is(value) || [...keys(value)].length >= params;
     },
     toJsonSchema: (p) => ({ minProperties: p }),
     fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined =>
@@ -364,7 +369,7 @@ export const MaxProperties = createFieldSchemaDecoratorFactory(
     phase: Phase.Semantics,
     message: '.label must have at most .params properties',
     decode: ({ value, params }) => {
-      return !isObject<Record<string, unknown>>(value) || keyOf(value).length <= params;
+      return !is(value) || [...keys(value)].length <= params;
     },
     toJsonSchema: (p) => ({ maxProperties: p }),
     fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined =>
@@ -389,10 +394,10 @@ export const Required = createFieldSchemaDecoratorFactory(
     phase: Phase.Semantics,
     message: '.label is missing required properties',
     decode: ({ value, params }) => {
-      if (!isObject(value)) {
+      if (!is(value)) {
         return true;
       }
-      return (params as readonly PropertyKey[]).every((k) => hasOwn(value, k));
+      return (params as readonly PropertyKey[]).every((k) => has(value, k));
     },
     toJsonSchema: (p) => ({ required: p as readonly unknown[] as string[] }),
     fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined => {
@@ -425,16 +430,16 @@ export const DependentRequired = createFieldSchemaDecoratorFactory(
     phase: Phase.Semantics,
     message: '.label has unsatisfied dependent required properties',
     decode: ({ value, params }) => {
-      if (!isObject<Record<string, unknown>>(value)) {
+      if (!is(value)) {
         return true;
       }
       const map = params as Record<string, readonly PropertyKey[] | undefined>;
       for (const [k, deps] of entryOf(map)) {
-        if (!deps || !hasOwn(value, k)) {
+        if (!deps || !has(value, k)) {
           continue;
         }
         for (const dep of deps) {
-          if (!hasOwn(value, dep)) {
+          if (!has(value, dep)) {
             return false;
           }
         }
@@ -479,16 +484,13 @@ export const DependentSchemas = createFieldSchemaDecoratorFactory(
   {
     phase: Phase.Property,
     message: '',
-    decode: (ctx) => {
-      if (!isObject<Record<string, unknown>>(ctx.value)) {
+    decode: ({ value, params }) => {
+      if (!is(value)) {
         return true;
       }
-      const value = ctx.value;
       const out: DecodeResult[] = [];
-      for (const [k, schema] of entryOf(
-        ctx.params as Record<string, NestedFieldSchema | undefined>,
-      )) {
-        if (schema === undefined || !hasOwn(value, k)) {
+      for (const [k, schema] of entryOf(params)) {
+        if (schema === undefined || !has(value, k)) {
           continue;
         }
         out.push(decode(schema, value));
@@ -520,11 +522,11 @@ export const DependentSchemas = createFieldSchemaDecoratorFactory(
 /**
  * Schema options for object fields.
  */
-export interface ObjectOptions<T extends object = object> extends BaseOptions<T> {
+export interface ObjectOptions<T extends object = object> extends TypeOptions<T> {
   properties?: PartialRecord<keyof T, NestedFieldSchema>;
   patternProperties?: Record<string, NestedFieldSchema>;
-  additionalProperties?: NestedFieldSchema | false;
-  unevaluatedProperties?: NestedFieldSchema | false;
+  additionalProperties?: NestedFieldSchema | boolean;
+  unevaluatedProperties?: NestedFieldSchema | boolean;
   propertyNames?: NestedFieldSchema;
   maxProperties?: ValidateField<number>;
   minProperties?: ValidateField<number>;
@@ -567,7 +569,7 @@ export const IsObject = createFieldSchemaDecoratorFactory(
       ...options
     }: ObjectOptions<T> = {},
   ): FieldSchemaDecorator<undefined> => {
-    const [opts, info] = decoupleOptions(options);
+    const [opts, info] = decoupleTypeOptions(options);
     const deps: FieldSchemaDecorator[] = [Info(info)];
     if (properties !== undefined) deps.push(Properties(properties));
     if (_properties !== undefined) deps.push(Properties(_properties));
@@ -581,12 +583,12 @@ export const IsObject = createFieldSchemaDecoratorFactory(
     if (additionalProperties !== undefined) deps.push(AdditionalProperties(additionalProperties));
     if (unevaluatedProperties !== undefined)
       deps.push(UnevaluatedProperties(unevaluatedProperties));
-    return FieldSchema<undefined>(IsObject, void 0, opts, deps);
+    return FieldSchema<undefined>(options.type === false ? Dummy : IsObject, void 0, opts, deps);
   },
   {
     phase: Phase.Type,
     message: '.label must be an object',
-    decode: ({ value }) => isObject(value),
+    decode: ({ value }) => isPlainObject(value),
     toJsonSchema: addType('object'),
     fromJsonSchema: ({ hasType }): FieldSchemaDecorator | undefined => {
       return hasType('object') ? IsObject(void 0) : void 0;
@@ -600,16 +602,45 @@ export const IsObject = createFieldSchemaDecoratorFactory(
  *
  * @example
  * ```ts
- * @IsMap(IsString())
+ * @IsRecord(IsString())
  * tags!: Record<string, string>;
  * ```
  */
-export function IsMap<V>(
+export function IsRecord<V>(
   value: NestedFieldSchema,
   schema: ObjectOptions<Record<string, V>> = {},
 ): FieldSchemaDecorator<undefined> {
   return IsObject(void 0, { ...schema, additionalProperties: value });
 }
+
+export const IsMap = createFieldSchemaDecoratorFactory(
+  'IsMap',
+  <V>(
+    value?: NestedFieldSchema,
+    schema: ObjectOptions<Record<string, V>> = {},
+  ): FieldSchemaDecorator<undefined> => {
+    const [opts, info] = decoupleOptions(schema);
+    return FieldSchema(IsMap, undefined, opts, [
+      IsObject(void 0, { ...info, additionalProperties: value }),
+      IsInstanceOf(Map),
+    ]);
+  },
+  {
+    phase: Phase.Coercion,
+    message: '.label should be a map',
+    decode: ({ value, provide }) => {
+      if (isMap(value)) return true;
+      if (!isPlainObject(value)) return true;
+      return provide(new Map(entryOf(value)));
+    },
+    encode: (params, value) => (isMap(value) ? Object.fromEntries(value) : value),
+    fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined => {
+      return !schema.properties && (schema.properties || schema.patternProperties)
+        ? IsMap()
+        : void 0;
+    },
+  },
+);
 
 /**
  * Reference to another `@Schema` class. The instance is validated against the

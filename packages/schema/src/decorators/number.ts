@@ -217,7 +217,7 @@ export const ToBigInt = createFieldSchemaDecoratorFactory(
   (schema: NumericSchema = {}): FieldSchemaDecorator<undefined> => {
     const [opts, info] = decoupleOptions(schema);
     return FieldSchema<undefined>(ToBigInt, void 0, opts, [
-      IsInteger({ ...info, multipleOf: 1 }),
+      IsInteger(info),
       IsString({ pattern: '^\\s*(?:[+-]?\\d+|0[bB][01]+|0[oO][0-7]+|0[xX][0-9a-fA-F]+)\\s*$' }),
       IsInstanceOf('bigint'),
     ]);
@@ -231,8 +231,11 @@ export const ToBigInt = createFieldSchemaDecoratorFactory(
       if (isNumber(value)) return provide(BigInt(value));
       return false;
     },
+    encode: (_, value) => {
+      return isBigInt(value) ? value.toString() : value;
+    },
     fromJsonSchema: ({ schema, hasType }): FieldSchemaDecorator | undefined => {
-      return (schema.format === 'bigint' || schema.format === 'integer') && hasType('string')
+      return schema.format === 'bigint' || (schema.format === 'integer' && hasType('string'))
         ? ToBigInt()
         : void 0;
     },

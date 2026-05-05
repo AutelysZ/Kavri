@@ -195,31 +195,9 @@ export interface FromJsonSchemaResult {
   defs: Map<string, DecodedSchema>;
 }
 
-/**
- * Decode one or more JsonSchemas into runtime form.
- *
- * Behaviour:
- * - Single schema: decoded as-is. If `type: 'object'` (or a schema with
- *   `properties`), a class is synthesized whose fields carry the property
- *   schemas as field decorators (with `IsOptional` added for non-required
- *   keys). Otherwise the registry is walked and the result is a
- *   `FieldSchemaDecorator[]`.
- * - Array input: treated as `allOf` — properties / required / non-object
- *   keywords are merged, the merged schema is then decoded by the same
- *   single-schema path. Useful for combining a body schema with auxiliary
- *   constraint schemas in a single decode.
- *
- * `$defs` from any input are recursively decoded and exposed via
- * `result.defs`. Property schemas that are themselves `$ref`s into `$defs`
- * resolve through this map; nested object property schemas are recursively
- * synthesized into their own classes and attached via `Ref(NestedClass)`.
- *
- * @throws if the eager `decorators/*` import has been tree-shaken away — the
- *   sentinel check exists purely to keep that import alive.
- */
-export function fromJsonSchema(
-  input: JsonSchema | readonly JsonSchema[],
-): FromJsonSchemaResult {
+// multiple inputs is used for cross schema references, it's not allOf. It makes things complex, remove it.
+// any type=object with properties will be parsed as a class, others will be parsed as FieldSchemaDecorator[]
+export function fromJsonSchema(input: JsonSchema): FromJsonSchemaResult {
   if (!decorators) throw new Error('Decorators namespace cannot be null');
   const defs = new Map<string, DecodedSchema>();
   const inputs: readonly JsonSchema[] = isArray(input) ? input : [input as JsonSchema];
@@ -258,10 +236,7 @@ function decodeDecorators(schema: JsonSchema): FieldSchemaDecorator[] {
   return out;
 }
 
-function buildObjectClass(
-  schema: JsonSchema,
-  defs: Map<string, DecodedSchema>,
-): AnyConstructor {
+function buildObjectClass(schema: JsonSchema, defs: Map<string, DecodedSchema>): AnyConstructor {
   class Decoded {}
   if (schema.properties) {
     const required = new Set(schema.required ?? []);
@@ -287,10 +262,11 @@ function attachProperty(
     return;
   }
   for (const dec of decoded) {
-    FieldSchema(dec.metadata.factory, dec.metadata.params, dec.metadata.options)(
-      cls.prototype,
-      key,
-    );
+    FieldSchema(
+      dec.metadata.factory,
+      dec.metadata.params,
+      dec.metadata.options,
+    )(cls.prototype, key);
   }
 }
 

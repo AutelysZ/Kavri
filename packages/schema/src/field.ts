@@ -52,11 +52,7 @@ export function ofValueField<T>(
   return isArray(input) ? (input as [T, ValidateOptions]) : [input as T, void 0];
 }
 
-export type NestedFieldSchema =
-  | FieldSchemaDecorator
-  | readonly FieldSchemaDecorator[]
-  | FieldSchemaDecoratorMetadata
-  | readonly FieldSchemaDecoratorMetadata[];
+export type NestedFieldSchema = FieldSchemaDecorator | readonly FieldSchemaDecorator[];
 
 export function ofNestedField(
   input: ValidateField<NestedFieldSchema>,

@@ -61,6 +61,22 @@ export function isObject<T extends object>(v: unknown): v is Exclude<T, readonly
   return typeof v === 'object' && v !== null && !isArray(v);
 }
 
+export function isPlainObject<T extends object>(v: unknown): v is Exclude<T, readonly any[]> {
+  if (!isObject(v)) return false;
+  const proto = Object.getPrototypeOf(v);
+  return proto === Object.prototype || proto === Object.prototype;
+}
+
+export function isMap<T extends ReadonlyMap<unknown, unknown> = Map<unknown, unknown>>(
+  v: unknown,
+): v is T {
+  return v instanceof Map;
+}
+
+export function isSet<T extends ReadonlySet<unknown> = Set<unknown>>(v: unknown): v is T {
+  return v instanceof Set;
+}
+
 export function isFunction<T extends (...args: any[]) => any>(v: unknown): v is T {
   return typeof v === 'function';
 }
@@ -116,7 +132,6 @@ export function uniqueFilter<T>() {
     return true;
   };
 }
-
 
 export function addType(types: string | string[], extra?: JsonSchema) {
   return (_: unknown, current: JsonSchema) => {
