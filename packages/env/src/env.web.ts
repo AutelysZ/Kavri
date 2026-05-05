@@ -1,36 +1,14 @@
 import type { AsyncLocalStorage } from 'node:async_hooks';
-import type { BinaryHandler, FileHandler } from './types.js';
-
-export interface ReadableFile {
-  name: string;
-  size: number;
-  stream: ReadableStream;
-}
-
-declare global {
-  // eslint-disable-next-line @typescript-eslint/no-namespace
-  namespace Kavri {
-    interface FileUnions {
-      webFile: File;
-      webStream: ReadableFile;
-    }
-
-    interface BinaryUnions {
-      webBinary: Uint8Array;
-      webStream: ReadableStream;
-      webBlob: Blob;
-    }
-  }
-}
+import type { BinaryHandler, BinaryUnions, FileHandler, FileUnions } from './types.js';
 
 export function createAsyncLocalStorage<T>(): AsyncLocalStorage<T> {
   throw new Error('Method not implemented');
 }
 
 export function registerFileHandlers(
-  register: <K extends keyof Kavri.FileUnions>(
+  register: <K extends keyof FileUnions>(
     key: K,
-    handler: (value: Kavri.FileUnions[K]) => FileHandler,
+    handler: (value: FileUnions[K]) => FileHandler,
   ) => void,
 ) {
   register('webFile', (v) => ({ name: v.name, size: v.size }));
@@ -38,9 +16,9 @@ export function registerFileHandlers(
 }
 
 export function registerBinaryHandlers(
-  register: <K extends keyof Kavri.BinaryUnions>(
+  register: <K extends keyof BinaryUnions>(
     key: K,
-    handler: (value: Kavri.BinaryUnions[K]) => BinaryHandler,
+    handler: (value: BinaryUnions[K]) => BinaryHandler,
   ) => void,
 ) {
   register('webBinary', (v) => ({ size: v.byteLength }));

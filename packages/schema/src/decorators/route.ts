@@ -1,7 +1,9 @@
 import { createFieldDecorator, type FieldDecorator } from '@kavri/basic';
 import {
   type BinaryHandler,
+  type BinaryUnions,
   type FileHandler,
+  type FileUnions as EnvFileUnions,
   registerBinaryHandlers,
   registerFileHandlers,
 } from '@kavri/env';
@@ -159,15 +161,6 @@ export const IsFilename = createFieldSchemaDecoratorFactory(
   },
 );
 
-declare global {
-  // eslint-disable-next-line @typescript-eslint/no-namespace
-  namespace Kavri {
-    interface FileUnions {
-      multipart: MultipartFile;
-    }
-  }
-}
-
 /**
  * Represents an uploaded file in a multipart request.
  */
@@ -195,13 +188,14 @@ export class MultipartFile {
   readonly path!: string;
 }
 
-export class FileUnion extends createUnionClass<Kavri.FileUnions, FileHandler>(
-  'FileUnion',
-  (ctor) => {
-    ctor.register('multipart', (v) => ({ name: v.name, size: v.size }));
-    registerFileHandlers(ctor.register.bind(ctor));
-  },
-) {}
+export interface FileUnions extends EnvFileUnions {
+  multipart: MultipartFile;
+}
+
+export class FileUnion extends createUnionClass<FileUnions, FileHandler>('FileUnion', (ctor) => {
+  ctor.register('multipart', (v) => ({ name: v.name, size: v.size }));
+  registerFileHandlers(ctor.register.bind(ctor));
+}) {}
 
 /**
  * Options for file upload fields.
@@ -239,7 +233,7 @@ export function IsFile(options?: IsFileOptions, schema?: ValidateOptions): Field
   return createFieldDecorator(IsFile, void 0, { self: array ? [IsArray(deps, array)] : deps });
 }
 
-export class BinaryUnion extends createUnionClass<Kavri.BinaryUnions, BinaryHandler>(
+export class BinaryUnion extends createUnionClass<BinaryUnions, BinaryHandler>(
   'BinaryUnion',
   (ctor) => {
     registerBinaryHandlers(ctor.register.bind(ctor));
