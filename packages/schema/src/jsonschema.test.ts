@@ -204,29 +204,32 @@ function onlyTestFactories(decs: NestedFieldSchema): FieldSchemaDecorator[] {
   return arr.filter((d) => tests.has(d.metadata.factory));
 }
 
+function rootDecorators(schema: JsonSchema): FieldSchemaDecorator[] {
+  const { root } = fromJsonSchema(schema);
+  if (typeof root === 'function') throw new Error('expected decorator list, got class');
+  return onlyTestFactories(root);
+}
+
 describe('fromJsonSchema', () => {
   it('returns an empty array when nothing matches', () => {
-    const result = onlyTestFactories(fromJsonSchema({}));
-    expect(result).toEqual([]);
+    expect(rootDecorators({})).toEqual([]);
   });
 
   it('produces a type-asserting decorator from `{ type: "string" }`', () => {
-    const result = onlyTestFactories(fromJsonSchema({ type: 'string' }));
+    const result = rootDecorators({ type: 'string' });
     expect(result).toHaveLength(1);
     expect(result[0].metadata.factory).toBe(StrType);
   });
 
   it('produces a constraint decorator from `{ minLength: 3 }`', () => {
-    const result = onlyTestFactories(fromJsonSchema({ minLength: 3 }));
+    const result = rootDecorators({ minLength: 3 });
     expect(result).toHaveLength(1);
     expect(result[0].metadata.factory).toBe(Min);
     expect(result[0].metadata.params).toBe(3);
   });
 
   it('produces multiple decorators from `{ type: "string", minLength: 2, maxLength: 10 }`', () => {
-    const result = onlyTestFactories(
-      fromJsonSchema({ type: 'string', minLength: 2, maxLength: 10 }),
-    );
+    const result = rootDecorators({ type: 'string', minLength: 2, maxLength: 10 });
     const factories = result.map((d) => d.metadata.factory);
     expect(factories).toContain(StrType);
     expect(factories).toContain(Min);
@@ -234,9 +237,7 @@ describe('fromJsonSchema', () => {
   });
 
   it('recurses into nested schemas via `ctx.fromJsonSchema`', () => {
-    const result = onlyTestFactories(
-      fromJsonSchema({ items: { type: 'string', minLength: 2 } }),
-    );
+    const result = rootDecorators({ items: { type: 'string', minLength: 2 } });
     expect(result).toHaveLength(1);
     expect(result[0].metadata.factory).toBe(Wrap);
     const nested = result[0].metadata.params as readonly FieldSchemaDecorator[];
@@ -259,9 +260,56 @@ describe('fromJsonSchema', () => {
     );
     // Boom registered itself; the call should not throw and should still
     // produce StrType.
-    const result = onlyTestFactories(fromJsonSchema({ type: 'string' }));
-    expect(result.some((d) => d.metadata.factory === StrType)).toBe(true);
+    expect(rootDecorators({ type: 'string' }).some((d) => d.metadata.factory === StrType)).toBe(
+      true,
+    );
     void Boom; // keep registered for the test body
+  });
+
+  it('synthesizes a class for `{ type: "object" }` with field decorators per property', () => {
+    const { root } = fromJsonSchema({
+      type: 'object',
+      properties: {
+        a: { type: 'string', minLength: 2 },
+        b: { minLength: 5 },
+      },
+      required: ['a'],
+    });
+    if (typeof root !== 'function') throw new Error('expected class root');
+    expect(toJsonSchema(root)).toMatchObject({
+      type: 'object',
+      properties: {
+        a: expect.objectContaining({ type: 'string', minLength: 2 }),
+        b: expect.objectContaining({ minLength: 5 }),
+      },
+    });
+  });
+
+  it('treats schemas with `properties` (no explicit type) as object', () => {
+    const { root } = fromJsonSchema({ properties: { x: { type: 'string' } } });
+    expect(typeof root).toBe('function');
+  });
+
+  it('hoists $defs into the result map', () => {
+    const { defs } = fromJsonSchema({
+      type: 'object',
+      properties: { name: { $ref: '#/$defs/Name' } },
+      $defs: { Name: { type: 'string' } },
+    });
+    expect(defs.has('Name')).toBe(true);
+    const name = defs.get('Name');
+    expect(Array.isArray(name)).toBe(true);
+  });
+
+  it('merges an array of input schemas (allOf-style)', () => {
+    const { root } = fromJsonSchema([
+      { type: 'object', properties: { a: { type: 'string' } }, required: ['a'] },
+      { properties: { b: { type: 'string' } } },
+    ]);
+    if (typeof root !== 'function') throw new Error('expected class root');
+    const js = toJsonSchema(root);
+    expect(js.type).toBe('object');
+    expect(Object.keys(js.properties ?? {}).sort()).toEqual(['a', 'b']);
   });
 });
 

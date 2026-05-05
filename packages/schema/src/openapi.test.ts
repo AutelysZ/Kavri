@@ -1,4 +1,7 @@
+import { Metadata } from '@kavri/basic';
 import { describe, expect, it } from 'vitest';
+import { IsOptional } from './decorators/base.js';
+import { InHeader, InQuery, IsFile, RawBody } from './decorators/route.js';
 import {
   createFieldSchemaDecoratorFactory,
   FieldSchema,
@@ -182,6 +185,7 @@ describe('toOpenAPIv3', () => {
           schema: {
             type: 'object',
             properties: { name: { type: 'string' } },
+            required: ['name'],
           },
         },
       },
@@ -482,6 +486,158 @@ describe('toOpenAPIv3', () => {
 });
 
 // ---------------------------------------------------------------------------
+// toOpenAPIv3 — request field placement
+// ---------------------------------------------------------------------------
+
+@Schema()
+class QueryRequest {
+  @InQuery('p')
+  @StrType()
+  p!: string;
+  @InHeader('X-Bucket')
+  @IsOptional()
+  @StrType()
+  bucket?: string;
+}
+
+@Schema()
+class RawBodyRequest {
+  @InQuery()
+  @StrType()
+  name!: string;
+  @RawBody()
+  @StrType()
+  data!: string;
+}
+
+@Schema()
+class FileRequest {
+  @InQuery('path')
+  @StrType()
+  path!: string;
+  @IsFile()
+  files!: unknown;
+}
+
+@Schema()
+class OptionalBodyRequest {
+  @StrType()
+  name!: string;
+  @IsOptional()
+  @StrType()
+  alias?: string;
+}
+
+describe('toOpenAPIv3 — request placement', () => {
+  it('promotes @InQuery fields to query parameters with the right name', () => {
+    const spec = toOpenAPIv3([
+      defineRoute({
+        name: 'X',
+        path: '/x',
+        operations: { upload: post(QueryRequest, null) },
+      }),
+    ]);
+    const op = spec.paths['/x/upload'].post;
+    const queryParam = op?.parameters?.find(
+      (p) => !('$ref' in p) && p.in === 'query',
+    );
+    expect(queryParam).toMatchObject({
+      name: 'p',
+      in: 'query',
+      required: true,
+      schema: { type: 'string' },
+    });
+  });
+
+  it('promotes @InHeader fields to header parameters and respects @IsOptional', () => {
+    const spec = toOpenAPIv3([
+      defineRoute({
+        name: 'X',
+        path: '/x',
+        operations: { upload: post(QueryRequest, null) },
+      }),
+    ]);
+    const op = spec.paths['/x/upload'].post;
+    const headerParam = op?.parameters?.find(
+      (p) => !('$ref' in p) && p.in === 'header',
+    );
+    expect(headerParam).toMatchObject({
+      name: 'X-Bucket',
+      in: 'header',
+      required: false,
+    });
+  });
+
+  it('omits the requestBody when only query/header fields are present', () => {
+    const spec = toOpenAPIv3([
+      defineRoute({
+        name: 'X',
+        path: '/x',
+        operations: { upload: post(QueryRequest, null) },
+      }),
+    ]);
+    expect(spec.paths['/x/upload'].post?.requestBody).toBeUndefined();
+  });
+
+  it('routes @RawBody fields to application/octet-stream by default', () => {
+    const spec = toOpenAPIv3([
+      defineRoute({
+        name: 'X',
+        path: '/x',
+        operations: { upload: post(RawBodyRequest, null) },
+      }),
+    ]);
+    const body = spec.paths['/x/upload'].post?.requestBody;
+    if (!body || '$ref' in body) throw new Error('expected inline requestBody');
+    expect(Object.keys(body.content)).toEqual(['application/octet-stream']);
+    expect(body.content['application/octet-stream'].schema).toEqual({ type: 'string' });
+  });
+
+  it('keeps query fields alongside a @RawBody body', () => {
+    const spec = toOpenAPIv3([
+      defineRoute({
+        name: 'X',
+        path: '/x',
+        operations: { upload: post(RawBodyRequest, null) },
+      }),
+    ]);
+    const op = spec.paths['/x/upload'].post;
+    const queryParam = op?.parameters?.find(
+      (p) => !('$ref' in p) && p.in === 'query',
+    );
+    expect(queryParam).toMatchObject({ name: 'name', in: 'query' });
+  });
+
+  it('switches to multipart/form-data when an @IsFile field is present', () => {
+    const spec = toOpenAPIv3([
+      defineRoute({
+        name: 'X',
+        path: '/x',
+        operations: { upload: post(FileRequest, null) },
+      }),
+    ]);
+    const body = spec.paths['/x/upload'].post?.requestBody;
+    if (!body || '$ref' in body) throw new Error('expected inline requestBody');
+    expect(Object.keys(body.content)).toEqual(['multipart/form-data']);
+  });
+
+  it('omits @IsOptional body fields from the body `required` array', () => {
+    const spec = toOpenAPIv3([
+      defineRoute({
+        name: 'X',
+        path: '/x',
+        operations: { upload: post(OptionalBodyRequest, null) },
+      }),
+    ]);
+    const body = spec.paths['/x/upload'].post?.requestBody;
+    if (!body || '$ref' in body) throw new Error('expected inline requestBody');
+    const schema = body.content['application/json'].schema;
+    if (!schema || '$ref' in schema) throw new Error('expected inline schema');
+    expect(schema.required).toEqual(['name']);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // fromOpenAPIv3
 // ---------------------------------------------------------------------------
 
@@ -624,5 +780,143 @@ describe('fromOpenAPIv3', () => {
     expect(route.operations.list.path).toBe('/users/list');
     expect(route.operations.create.method).toBe('POST');
     expect(route.operations.create.status).toBe(201);
+  });
+
+  it('reconstructs a request class from query/header parameters', () => {
+    const spec: OpenAPIv3 = {
+      openapi: '3.1.0',
+      info: { title: 't', version: '1' },
+      paths: {
+        '/x': {
+          post: {
+            operationId: 'upload',
+            parameters: [
+              { name: 'p', in: 'query', required: true, schema: { type: 'string' } },
+              { name: 'X-Bucket', in: 'header', required: false, schema: { type: 'string' } },
+            ],
+            responses: { 204: { description: '' } },
+          },
+        },
+      },
+    };
+    const routes = fromOpenAPIv3(spec);
+    const cls = routes[0].operations.upload.request;
+    if (!cls) throw new Error('expected reconstructed request class');
+    const queryEntries = Metadata.lookupField(InQuery, cls);
+    expect(queryEntries?.has('p' as never)).toBe(true);
+    const headerEntries = Metadata.lookupField(InHeader, cls);
+    expect(headerEntries?.has('X-Bucket' as never)).toBe(true);
+    const fieldEntries = Metadata.lookupField(FieldSchema, cls, 'X-Bucket' as never);
+    expect(fieldEntries?.some((m) => m.factory === IsOptional)).toBe(true);
+  });
+
+  it('reconstructs body fields from an object-shaped requestBody', () => {
+    const spec: OpenAPIv3 = {
+      openapi: '3.1.0',
+      info: { title: 't', version: '1' },
+      paths: {
+        '/x': {
+          post: {
+            operationId: 'create',
+            requestBody: {
+              required: true,
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      name: { type: 'string' },
+                      alias: { type: 'string' },
+                    },
+                    required: ['name'],
+                  },
+                },
+              },
+            },
+            responses: { 201: { description: '' } },
+          },
+        },
+      },
+    };
+    const routes = fromOpenAPIv3(spec);
+    const cls = routes[0].operations.create.request;
+    if (!cls) throw new Error('expected reconstructed request class');
+    const fields = Metadata.lookupField(FieldSchema, cls);
+    expect(fields?.has('name' as never)).toBe(true);
+    expect(fields?.has('alias' as never)).toBe(true);
+    const aliasEntries = Metadata.lookupField(FieldSchema, cls, 'alias' as never);
+    expect(aliasEntries?.some((m) => m.factory === IsOptional)).toBe(true);
+    const nameEntries = Metadata.lookupField(FieldSchema, cls, 'name' as never);
+    expect(nameEntries?.some((m) => m.factory === IsOptional)).toBe(false);
+  });
+
+  it('reconstructs a non-object body as a single `body` field with @RawBody', () => {
+    const spec: OpenAPIv3 = {
+      openapi: '3.1.0',
+      info: { title: 't', version: '1' },
+      paths: {
+        '/x': {
+          post: {
+            operationId: 'upload',
+            requestBody: {
+              required: true,
+              content: {
+                'application/octet-stream': { schema: { type: 'string' } },
+              },
+            },
+            responses: { 204: { description: '' } },
+          },
+        },
+      },
+    };
+    const routes = fromOpenAPIv3(spec);
+    const cls = routes[0].operations.upload.request;
+    if (!cls) throw new Error('expected reconstructed request class');
+    const raw = Metadata.lookupField(RawBody, cls);
+    expect(raw?.has('body' as never)).toBe(true);
+  });
+
+  it('reconstructs a response class from the first content type schema', () => {
+    const spec: OpenAPIv3 = {
+      openapi: '3.1.0',
+      info: { title: 't', version: '1' },
+      paths: {
+        '/x': {
+          get: {
+            operationId: 'get',
+            responses: {
+              200: {
+                description: '',
+                content: {
+                  'application/json': {
+                    schema: { type: 'object', properties: { greeting: { type: 'string' } } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+    const routes = fromOpenAPIv3(spec);
+    const cls = routes[0].operations.get.response;
+    if (!cls) throw new Error('expected reconstructed response class');
+    const fields = Metadata.lookupField(FieldSchema, cls);
+    expect(fields?.has('greeting' as never)).toBe(true);
+  });
+
+  it('round-trips a request shape through toOpenAPIv3 → fromOpenAPIv3', () => {
+    const original = toOpenAPIv3([
+      defineRoute({
+        name: 'UserRoute',
+        path: '/users',
+        operations: { upload: post(QueryRequest, null) },
+      }),
+    ]);
+    const routes = fromOpenAPIv3(original);
+    const cls = routes[0].operations.upload.request;
+    if (!cls) throw new Error('expected reconstructed request class');
+    expect(Metadata.lookupField(InQuery, cls)?.has('p' as never)).toBe(true);
+    expect(Metadata.lookupField(InHeader, cls)?.has('X-Bucket' as never)).toBe(true);
   });
 });

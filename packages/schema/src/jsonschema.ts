@@ -8,7 +8,7 @@ import {
   isFieldSchemaDecorator,
   type NestedFieldSchema,
 } from './field.js';
-import { isArray, isFunction, isString } from './utils.js';
+import { entryOf, isArray, isFunction, isString } from './utils.js';
 
 // ---------------------------------------------------------------------------
 // JSON Schema utils
@@ -100,17 +100,13 @@ function classToJsonSchema(clazz: AnyConstructor): JsonSchema {
   if (!fields || fields.size === 0) return out;
   const properties: Record<string, JsonSchema> = {};
   for (const [key, entries] of fields) {
-    properties[String(key)] = rulesToJsonSchema(
-      entries as readonly FieldSchemaDecoratorMetadata[],
-    );
+    properties[String(key)] = rulesToJsonSchema(entries as readonly FieldSchemaDecoratorMetadata[]);
   }
   out.properties = properties;
   return out;
 }
 
-function rulesToJsonSchema(
-  rules: readonly FieldSchemaDecoratorMetadata[],
-): JsonSchema {
+function rulesToJsonSchema(rules: readonly FieldSchemaDecoratorMetadata[]): JsonSchema {
   let current: JsonSchema = {};
   for (const rule of rules) {
     const fn = rule.factory.toJsonSchema;
@@ -121,13 +117,11 @@ function rulesToJsonSchema(
   return current;
 }
 
-function normalizeSchema(
-  schema: NestedFieldSchema,
-): readonly FieldSchemaDecoratorMetadata[] {
+function normalizeSchema(schema: NestedFieldSchema): readonly FieldSchemaDecoratorMetadata[] {
   if (isArray(schema)) {
-    return (
-      schema as readonly (FieldSchemaDecorator | FieldSchemaDecoratorMetadata)[]
-    ).map(toMetadata);
+    return (schema as readonly (FieldSchemaDecorator | FieldSchemaDecoratorMetadata)[]).map(
+      toMetadata,
+    );
   }
   return [toMetadata(schema as FieldSchemaDecorator | FieldSchemaDecoratorMetadata)];
 }
@@ -178,23 +172,77 @@ export class FromJsonSchemaContext {
 }
 
 /**
- * Walk the `FromJsonSchemaRegistry` and ask each registered factory whether it
- * recognizes the given JsonSchema. Returns the produced decorators in the
- * order they were registered (which is import-load order; type-asserting
- * factories typically register before constraint factories, so the resulting
- * array is naturally suitable for direct use as a `NestedFieldSchema`).
+ * Decoded form of a single JsonSchema:
+ *
+ * - Object types (`type: 'object'`, or any schema declaring `properties`) are
+ *   reconstructed as a synthesized class so the result can be plugged into
+ *   places that expect an `AnyConstructor` (e.g. `RouteDefinition.request`).
+ * - Everything else is returned as a `FieldSchemaDecorator[]` — the registry's
+ *   walk-product, suitable for direct use as a `NestedFieldSchema`.
+ */
+export type DecodedSchema = AnyConstructor | FieldSchemaDecorator[];
+
+/**
+ * Result of {@link fromJsonSchema}.
+ *
+ * `root` is the decoded form of the input (or, for an array input, the
+ * allOf-style merge of every input). `defs` collects everything reachable
+ * via `$defs` so that `$ref`s can be resolved and so callers can register
+ * the auxiliary classes/decorators alongside the root.
+ */
+export interface FromJsonSchemaResult {
+  root: DecodedSchema;
+  defs: Map<string, DecodedSchema>;
+}
+
+/**
+ * Decode one or more JsonSchemas into runtime form.
+ *
+ * Behaviour:
+ * - Single schema: decoded as-is. If `type: 'object'` (or a schema with
+ *   `properties`), a class is synthesized whose fields carry the property
+ *   schemas as field decorators (with `IsOptional` added for non-required
+ *   keys). Otherwise the registry is walked and the result is a
+ *   `FieldSchemaDecorator[]`.
+ * - Array input: treated as `allOf` — properties / required / non-object
+ *   keywords are merged, the merged schema is then decoded by the same
+ *   single-schema path. Useful for combining a body schema with auxiliary
+ *   constraint schemas in a single decode.
+ *
+ * `$defs` from any input are recursively decoded and exposed via
+ * `result.defs`. Property schemas that are themselves `$ref`s into `$defs`
+ * resolve through this map; nested object property schemas are recursively
+ * synthesized into their own classes and attached via `Ref(NestedClass)`.
  *
  * @throws if the eager `decorators/*` import has been tree-shaken away — the
  *   sentinel check exists purely to keep that import alive.
  */
-export function fromJsonSchema(schema: JsonSchema): NestedFieldSchema {
-  // Side-effect retainer: ensure the decorators graph hasn't been removed by
-  // tree-shaking, otherwise the registry would be empty.
+export function fromJsonSchema(
+  input: JsonSchema | readonly JsonSchema[],
+): FromJsonSchemaResult {
   if (!decorators) throw new Error('Decorators namespace cannot be null');
+  const defs = new Map<string, DecodedSchema>();
+  const inputs: readonly JsonSchema[] = isArray(input) ? input : [input as JsonSchema];
 
+  for (const s of inputs) collectDefs(s, defs);
+
+  const merged = inputs.length === 1 ? inputs[0] : mergeAllOf(inputs);
+  return { root: decodeRoot(merged, defs), defs };
+}
+
+function decodeRoot(schema: JsonSchema, defs: Map<string, DecodedSchema>): DecodedSchema {
+  if (schema.$ref?.startsWith('#/$defs/')) {
+    const name = schema.$ref.slice('#/$defs/'.length);
+    const target = defs.get(name);
+    if (target) return target;
+  }
+  if (isObjectSchema(schema)) return buildObjectClass(schema, defs);
+  return decodeDecorators(schema);
+}
+
+function decodeDecorators(schema: JsonSchema): FieldSchemaDecorator[] {
   const out: FieldSchemaDecorator[] = [];
-  const recurse = (nested: JsonSchema): NestedFieldSchema => fromJsonSchema(nested);
-  const ctx = new FromJsonSchemaContext(schema, recurse, out);
+  const ctx = new FromJsonSchemaContext(schema, decodeDecorators, out);
   for (const factory of FromJsonSchemaRegistry) {
     if (!factory.fromJsonSchema) continue;
     ctx.current = out;
@@ -206,6 +254,90 @@ export function fromJsonSchema(schema: JsonSchema): NestedFieldSchema {
       continue;
     }
     if (result) out.push(result);
+  }
+  return out;
+}
+
+function buildObjectClass(
+  schema: JsonSchema,
+  defs: Map<string, DecodedSchema>,
+): AnyConstructor {
+  class Decoded {}
+  if (schema.properties) {
+    const required = new Set(schema.required ?? []);
+    for (const [key, propSchema] of entryOf(schema.properties)) {
+      attachProperty(Decoded as AnyConstructor, key, propSchema, defs);
+      if (!required.has(key)) {
+        decorators.IsOptional()(Decoded.prototype, key);
+      }
+    }
+  }
+  return Decoded as AnyConstructor;
+}
+
+function attachProperty(
+  cls: AnyConstructor,
+  key: string,
+  schema: JsonSchema,
+  defs: Map<string, DecodedSchema>,
+): void {
+  const decoded = decodeRoot(schema, defs);
+  if (typeof decoded === 'function') {
+    decorators.Ref(decoded)(cls.prototype, key);
+    return;
+  }
+  for (const dec of decoded) {
+    FieldSchema(dec.metadata.factory, dec.metadata.params, dec.metadata.options)(
+      cls.prototype,
+      key,
+    );
+  }
+}
+
+function collectDefs(schema: JsonSchema, defs: Map<string, DecodedSchema>): void {
+  if (!schema.$defs) return;
+  for (const [name, ds] of entryOf(schema.$defs)) {
+    if (defs.has(name)) continue;
+    // Insert a placeholder before recursing so cyclic $refs resolve to the
+    // same eventual entry instead of looping forever.
+    defs.set(name, []);
+    defs.set(name, decodeRoot(ds, defs));
+    collectDefs(ds, defs);
+  }
+}
+
+function isObjectSchema(schema: JsonSchema): boolean {
+  if (schema.type === 'object') return true;
+  if (isArray(schema.type) && schema.type.includes('object')) return true;
+  return schema.properties !== undefined;
+}
+
+/**
+ * Merge an array of input schemas into a single schema with allOf semantics.
+ *
+ * Object-shaped fields (`properties`, `required`) accumulate; the resulting
+ * schema is marked `type: 'object'` if any input was object-shaped. Other
+ * keywords are last-wins via `Object.assign`, which is sufficient for
+ * decoder-side reconstruction (it does not aim to be a fully general
+ * schema combinator).
+ */
+function mergeAllOf(inputs: readonly JsonSchema[]): JsonSchema {
+  const out: JsonSchema = {};
+  let anyObject = false;
+  const properties: Record<string, JsonSchema> = {};
+  const required: string[] = [];
+
+  for (const s of inputs) {
+    Object.assign(out, s);
+    if (isObjectSchema(s)) anyObject = true;
+    if (s.properties) Object.assign(properties, s.properties);
+    if (s.required) required.push(...s.required);
+  }
+
+  if (anyObject) {
+    out.type = 'object';
+    if (Object.keys(properties).length > 0) out.properties = properties;
+    if (required.length > 0) out.required = [...new Set(required)];
   }
   return out;
 }
