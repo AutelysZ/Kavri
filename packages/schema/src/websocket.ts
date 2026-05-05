@@ -1,6 +1,6 @@
 import type { AnyConstructor } from '@kavri/basic';
 
-export interface SharedOptions {
+export interface WebSocketSharedOptions {
   /**
    * Short summary, used as message title in generated docs.
    */
@@ -25,7 +25,7 @@ export interface SharedOptions {
   codec?: string;
 }
 
-export interface MessageOptions extends SharedOptions {
+export interface MessageOptions extends WebSocketSharedOptions {
   /**
    * Wire discriminator value used to identify which message arrived. Defaults
    * to the message key in the inbound/outbound map. Provide an explicit value
@@ -55,7 +55,7 @@ export interface WebSocketDefinition<
   TReq = unknown,
   TIn extends Record<string, Message> = Record<string, Message>,
   TOut extends Record<string, Message> = Record<string, Message>,
-> extends SharedOptions {
+> extends WebSocketSharedOptions {
   /**
    * Protocol identifier, like `ChatProtocol`. Becomes the AsyncAPI tag for the
    * generated documentation.

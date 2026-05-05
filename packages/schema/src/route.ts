@@ -3,7 +3,7 @@ import type { OpenAPIv3Operation } from './openapi.js';
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | 'HEAD';
 
-export interface SharedOptions {
+export interface RouteSharedOptions {
   /**
    * OpenAPI summary
    */
@@ -38,7 +38,7 @@ export interface SharedOptions {
 }
 
 export interface OperationOptions
-  extends Partial<Omit<OpenAPIv3Operation, 'deprecated' | 'operationId'>>, SharedOptions {
+  extends Partial<Omit<OpenAPIv3Operation, 'deprecated' | 'operationId'>>, RouteSharedOptions {
   /**
    * The operation's path suffix, like `/create`, it's optional, if not present, will use
    * operation's name as this field. If you want empty path, use ''.
@@ -68,7 +68,7 @@ export interface Operation<TReq = unknown, TRes = unknown> extends OperationOpti
 
 export interface RouteDefinition<
   T extends Record<string, Operation> = Record<string, Operation>,
-> extends SharedOptions {
+> extends RouteSharedOptions {
   /**
    * The route name, like `UserRoute`, `UserController`, depends on user habits. It will be added to OpenAPI's tags
    */
@@ -114,7 +114,7 @@ function operation<TReq, TRes>(
  * - {@link FileUnion} or {@link BinaryUnion}: if as root, means the req/res is octet-stream,
  *    if any field of the req/res use these two, will force change the content type to multipart.
  *
- * Ref: {@link SharedOptions.requestType}, {@link SharedOptions.responseType}
+ * Ref: {@link RouteSharedOptions.requestType}, {@link RouteSharedOptions.responseType}
  */
 export interface OperationBuilder {
   <TReq, TRes>(
