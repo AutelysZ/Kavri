@@ -1,672 +1,662 @@
-# Schema Design v2
-
-Package: `@kavri/schema`
-
-Status: design proposal for the current package scope. This document intentionally keeps the
-implemented feature envelope: class schemas, field decorators, decode/coercion, JSON Schema
-round-trip, route descriptions, OpenAPI generation/import, WebSocket descriptions, schema reshaping,
-file/binary markers, and custom decorator factories.
-
-The goal is not to make Kavri a general validation library clone. The goal is to make class-based
-message schemas predictable enough to share across server, client, documentation, and transport
-adapters.
-
-## 1. Problems With The Current Shape
-
-The current implementation has good raw ingredients but the public model is not crisp enough.
-
-- `FieldSchemaDecoratorFactory` is too visible. Users should rarely need to understand phases,
-  strategies, registry mutation, or `DecodeContext` internals.
-- Decorator options are inconsistent. Some decorators accept a schema object first, some accept a
-  value then options, and route decorators are field decorators but not schema decorator factories.
-- `decode()` returns a result object but there is no high-level `parse()` helper for the common
-  "throw or return typed instance" path.
-- JSON Schema conversion accepts several useful runtime inputs, but the conceptual input type is not
-  named as a public API.
-- `@Schema()` class metadata and field metadata are loosely connected. Required-by-default behavior
-  is implemented by consumers such as OpenAPI, not by a single schema description API.
-- Route and WebSocket definitions are good identity helpers, but their names are transport-centric
-  enough that they should remain declarative data, not validation logic.
-- The old design doc describes unimplemented or outdated API forms (`parse`, `json`, `defineSchema`,
-  older route signatures), which makes it hard to know what is stable.
-
-## 2. Design Principles
-
-1. **Classes define messages.** A schema class is a named message shape. Field decorators define the
-   fields that participate. Undecorated fields are ignored.
-2. **Decorators are metadata plus behavior.** A field decorator contributes typed metadata, decode
-   behavior, encode behavior, and JSON Schema behavior through one channel.
-3. **Required by default.** A decorated field is required unless `IsOptional`, `IsNullable`, or a
-   default rule short-circuits presence.
-4. **Decode is deterministic.** Rules run in stable phases. Type/coercion/presence semantics must be
-   explainable without reading decorator source.
-5. **Transport is declarative.** HTTP routes, OpenAPI, WebSocket messages, files, and raw bodies are
-   described by schemas and metadata. Runtime web packages may consume this metadata later.
-6. **Compatibility first.** Existing names should continue to work. V2 may add clearer aliases and
-   higher-level helpers, but should not break decorator call sites unnecessarily.
-7. **Small public core, large decorator catalog.** Internal pipeline types stay available for custom
-   decorators, but everyday users should mostly use `@Schema`, field decorators, `decode`, `parse`,
-   `toJsonSchema`, route builders, and reshape helpers.
-
-## 3. Public API Layers
-
-V2 should document the package as five layers.
-
-### 3.1 Message Schema Layer
-
 ```ts
-export interface SchemaOptions<T extends object = object> extends ObjectOptions<T> {
-  slug?: string;
-}
+// A class constructor used as a schema/message type.
+export type SchemaClass<T = unknown> = abstract new (...args: never[]) => T;
 
-export function Schema<T extends object = object>(
-  options?: SchemaOptions<T>,
-): ClassDecorator<SchemaOptions<T>>;
+// A lazy class reference, mainly for circular object graphs.
+export type SchemaRef<T = unknown> = SchemaClass<T> | (() => SchemaClass<T>);
 
-export function describeSchema<T extends object>(
-  target: AnyConstructor<T> | T,
-): SchemaDescription<T>;
+// A string path segment for nested validation errors.
+export type SchemaPath = readonly (string | number)[];
 
-export function getSchema<T extends object>(
-  target: AnyConstructor<T> | T,
-): SchemaDescription<T> | undefined;
-
-export interface SchemaDescription<T extends object = object> extends SchemaOptions<T> {
-  properties: ReadonlyMap<keyof T & string, readonly FieldRule[]>;
-  required: readonly (keyof T & string)[];
-}
-```
-
-Compatibility:
-
-- Keep `Schema()` and `getSchema()`.
-- `getSchema()` may keep returning an object-like shape for compatibility, but v2 should prefer
-  `describeSchema()` as the canonical introspection API.
-- `SchemaOptions` should replace the currently internal `SchemaMetadata` name in docs.
-
-Decision:
-
-- Decorated fields are the source of truth. `@Schema({ properties })` may add object-level JSON
-  Schema metadata, but it must not invent validation for undecorated class fields.
-- `describeSchema()` should compute required fields once from field rules and expose a stable
-  readonly view. OpenAPI, JSON Schema, decode, and reshape should depend on this same view.
-
-### 3.2 Rule And Decorator Layer
-
-Every field decorator contributes a `FieldRule`.
-
-```ts
-export interface FieldRule<P = unknown> {
-  readonly factory: FieldRuleFactory<P>;
-  readonly params: P;
-  readonly options?: RuleOptions;
-}
-
-export interface RuleOptions {
+// Shared options for rules that can customize user-facing error output.
+export interface RuleMessageOptions {
+  // Human label used in generated errors instead of the field name.
   label?: string;
+
+  // Full error-message override. May reference implementation-defined placeholders.
   message?: string;
 }
 
-export type FieldRuleInput =
-  | FieldSchemaDecorator
-  | FieldRule
-  | readonly (FieldSchemaDecorator | FieldRule)[];
+// Class-level schema metadata. This describes the message as a whole.
+export interface SchemaOptions {
+  // Stable schema name. Defaults to the class name.
+  name?: string;
 
-export type FieldSchemaDecorator<P = unknown> = FieldDecorator<FieldRule<P>>;
-```
+  // Human title for generated JSON Schema/OpenAPI docs.
+  title?: string;
 
-Compatibility:
+  // Human description for generated JSON Schema/OpenAPI docs.
+  description?: string;
 
-- Keep `ValidateOptions`, `ValidateField`, `NestedFieldSchema`,
-  `FieldSchemaDecoratorMetadata`, `FieldSchemaDecoratorFactory`, and `FieldSchema()` as aliases or
-  low-level names.
-- Add clearer public aliases: `RuleOptions`, `RuleValue<T>`, `FieldRule`, `FieldRuleFactory`,
-  `FieldRuleInput`.
-- The current `NestedFieldSchema` is too narrow because the implementation already accepts metadata
-  arrays in useful places. V2 should formalize that as `FieldRuleInput`.
+  // Optional stable JSON Schema id.
+  id?: string;
 
-Decision:
-
-- Use "rule" in documentation for the thing that runs in the pipeline.
-- Use "decorator" for the JavaScript decorator value applied to a class field.
-- Keep factory statics public for custom rule authors, but mark phase/strategy APIs as advanced.
-
-### 3.3 Decode Layer
-
-```ts
-export class DecodeResult<T = unknown> {
-  readonly ok: boolean;
-  get value(): T;
-  get issue(): DecodeIssue;
+  // Mark the schema deprecated. Must explain why and what to use instead.
+  deprecated?: string;
 }
 
+// Marks a class as a Kavri schema/message.
+// Only decorated fields participate in validation, decoding, encoding, and docs.
+export function Schema(options?: SchemaOptions): ClassDecorator;
+
+// Runtime description of a schema class after decorators are collected.
+export interface SchemaDescription<T = unknown> {
+  // Original class constructor.
+  type: SchemaClass<T>;
+
+  // Resolved schema options.
+  options: Required<Pick<SchemaOptions, 'name'>> & Omit<SchemaOptions, 'name'>;
+
+  // Ordered field descriptions.
+  fields: readonly FieldDescription[];
+
+  // Lookup by public field name.
+  field(name: string): FieldDescription | undefined;
+}
+
+// Runtime description of one schema field.
+export interface FieldDescription {
+  // JavaScript property key.
+  key: string | symbol;
+
+  // Public serialized field name. Defaults to String(key).
+  name: string;
+
+  // Ordered rules applied to this field.
+  rules: readonly RuleDescription[];
+
+  // Whether missing/undefined input is accepted.
+  optional: boolean;
+
+  // Whether null input is accepted.
+  nullable: boolean;
+
+  // Where this field is read from in an HTTP request.
+  source?: FieldSource;
+}
+
+// Request/source placement for transport-aware schemas.
+export type FieldSource =
+  | { kind: 'body' }
+  | { kind: 'query'; name?: string }
+  | { kind: 'header'; name?: string }
+  | { kind: 'path'; name?: string }
+  | { kind: 'rawBody' };
+
+// Returns the canonical schema description for a class.
+export function describe<T>(type: SchemaClass<T>): SchemaDescription<T>;
+
+// A field rule decorator.
+export type RuleDecorator<T = unknown> = PropertyDecorator & {
+  readonly rule: RuleDescription<T>;
+};
+
+// Runtime description of one rule attached to a field.
+export interface RuleDescription<T = unknown> {
+  // Stable rule identifier, e.g. "string", "minLength", "email".
+  name: string;
+
+  // Rule-specific parameters.
+  params: T;
+
+  // Rule execution phase.
+  phase: RulePhase;
+
+  // User-facing error options.
+  message?: RuleMessageOptions;
+}
+
+// Ordered validation/decode phases.
+export type RulePhase =
+  | 'presence'
+  | 'default'
+  | 'type'
+  | 'coerce'
+  | 'normalize'
+  | 'semantic'
+  | 'children'
+  | 'composition'
+  | 'encode';
+
+// Context passed to custom rule implementations.
+export interface RuleContext<TParams = unknown> {
+  // Current path in the input graph.
+  path: SchemaPath;
+
+  // Current field/value name.
+  name?: string;
+
+  // Original root input.
+  root: unknown;
+
+  // Parent object/array value.
+  parent: unknown;
+
+  // Current value. Rules may replace it through provide().
+  value: unknown;
+
+  // Rule parameters.
+  params: TParams;
+
+  // Shared per-decode state.
+  state: Map<unknown, unknown>;
+
+  // Replace the current value for later rules.
+  provide(value: unknown): RuleResult;
+
+  // Decode a nested value with another schema/rule list.
+  child(schema: SchemaInput, value: unknown, path: string | number): DecodeResult;
+}
+
+// Result returned by a rule implementation.
+export type RuleResult = boolean | string | DecodeResult | readonly DecodeResult[] | void;
+
+// Custom rule definition.
+export interface RuleDefinition<TParams = unknown> {
+  // Stable public name.
+  name: string;
+
+  // Execution phase.
+  phase: RulePhase;
+
+  // Default error message.
+  message?: string | ((ctx: RuleContext<TParams>) => string);
+
+  // Decode/validate/coerce implementation.
+  decode?: (ctx: RuleContext<TParams>) => RuleResult | Promise<RuleResult>;
+
+  // Convert this rule into JSON Schema keywords.
+  toJsonSchema?: (params: TParams, current: JsonSchema) => JsonSchema | void;
+
+  // Reconstruct this rule from JSON Schema.
+  fromJsonSchema?: (ctx: FromJsonSchemaContext) => RuleDecorator | void;
+
+  // Encode a runtime value to plain JSON/output.
+  encode?: (params: TParams, value: unknown, ctx: EncodeContext) => unknown;
+}
+
+// Creates a custom field rule decorator factory.
+export function defineRule<TParams>(
+  definition: RuleDefinition<TParams>,
+): (params: TParams, options?: RuleMessageOptions) => RuleDecorator<TParams>;
+
+// Anything accepted as a schema for one value.
+export type SchemaInput =
+  | SchemaClass
+  | RuleDecorator
+  | RuleDescription
+  | readonly (RuleDecorator | RuleDescription)[];
+
+// Decode success/failure container.
+export type DecodeResult<T = unknown> =
+  | { ok: true; value: T }
+  | { ok: false; error: DecodeError };
+
+// Structured decode error.
+export class DecodeError extends Error {
+  // Root schema/input that failed.
+  readonly schema: SchemaInput;
+
+  // All validation issues.
+  readonly issues: readonly DecodeIssue[];
+}
+
+// One validation issue.
 export interface DecodeIssue {
-  issues?: readonly RuleIssue[];
-  children?: readonly FieldIssue[];
-}
+  // Path to the invalid value.
+  path: SchemaPath;
 
-export interface FieldIssue extends DecodeIssue {
-  field: string;
-}
-
-export interface RuleIssue {
+  // Rule that failed.
   rule: string;
-  params: unknown;
+
+  // User-facing message.
   message: string;
+
+  // Invalid received value.
+  value: unknown;
+
+  // Rule parameters.
+  params?: unknown;
 }
 
-export function decode<T>(schema: AnyConstructor<T>, input: unknown): DecodeResult<T>;
-export function decode<T>(schema: FieldRuleInput, input: unknown): DecodeResult<T>;
-export function parse<T>(schema: AnyConstructor<T>, input: unknown): T;
-export function parse<T>(schema: FieldRuleInput, input: unknown): T;
-export function assertValid<T>(schema: AnyConstructor<T>, input: unknown): asserts input is T;
-```
+// Decode input and return a result object.
+export function decode<T>(schema: SchemaClass<T>, input: unknown): DecodeResult<T>;
+export function decode<T = unknown>(schema: SchemaInput, input: unknown): DecodeResult<T>;
 
-Compatibility:
+// Decode input and throw DecodeError on failure.
+export function parse<T>(schema: SchemaClass<T>, input: unknown): T;
+export function parse<T = unknown>(schema: SchemaInput, input: unknown): T;
 
-- Keep `decode()` returning `DecodeResult`.
-- Add `parse()` as the ergonomic throwing API.
-- Add `DecodeError extends Error` for `parse()` failures. It should carry the same issue tree as
-  `DecodeResult.issue`.
-- Keep `DecodeContext` public only for custom rule authors.
+// Assert that an input matches a schema.
+export function assert<T>(schema: SchemaClass<T>, input: unknown): asserts input is T;
 
-Decision:
+// Encode runtime data to plain JSON-compatible output.
+export function encode<T>(schema: SchemaClass<T>, value: T): unknown;
 
-- `decode(class, input)` returns a class instance with the target prototype when successful.
-- `decode(ruleInput, input)` returns the decoded/coerced value.
-- Presence rules short-circuit success (`IsOptional`, `IsNullable`, `Default`). This is current
-  behavior and should remain.
-- Coercion rules may replace `ctx.value` with `provide(value)`. They must not silently swallow
-  invalid coercions; the subsequent type rule should fail.
+// JSON.stringify replacer that delegates to encode metadata when possible.
+export function jsonReplacer(this: unknown, key: string, value: unknown): unknown;
 
-### 3.4 JSON, OpenAPI, And Transport Layer
-
-```ts
-export type JsonSchemaInput = AnyConstructor | FieldRuleInput;
-
-export function toJsonSchema(input: JsonSchemaInput): JsonSchema;
-export function fromJsonSchema(input: JsonSchema | readonly JsonSchema[]): FromJsonSchemaResult;
-
-export function jsonReplacer(this: unknown, value: unknown, key: string): unknown;
-export function toJson<T>(value: T): unknown;
-```
-
-Compatibility:
-
-- Keep `toJsonSchema()` and `fromJsonSchema()`.
-- Keep `jsonReplacer()` but document it as incomplete until encode traversal is implemented.
-- Add `toJson()` once encoding traversal exists. It should use rule `encode` hooks and preserve
-  field-level schema rules.
-
-Decision:
-
-- `toJsonSchema(class)` emits an object schema.
-- `toJsonSchema(ruleInput)` emits the schema for one value or field.
-- `fromJsonSchema()` returns synthesized classes for object schemas and rule arrays for scalar
-  schemas. It should continue to return `{ root, defs }`.
-- Miswired `fromJsonSchema` rule factories must not be silently swallowed in production mode. V2
-  should make this configurable:
-
-```ts
-export interface FromJsonSchemaOptions {
-  onFactoryError?: 'throw' | 'skip';
+// Minimal JSON Schema 2020-12 shape accepted/emitted by Kavri.
+export interface JsonSchema {
+  [keyword: string]: unknown;
 }
-```
 
-Default should be `'throw'` for explicit failures. A compatibility wrapper can use `'skip'`.
+// Context passed to JSON Schema reconstruction.
+export interface FromJsonSchemaContext {
+  // Current JSON Schema node.
+  schema: JsonSchema;
 
-### 3.5 Protocol Definition Layer
+  // Rules already reconstructed for this node.
+  current: readonly RuleDecorator[];
 
-HTTP and WebSocket definitions are schema-adjacent declarations. They do not validate by
-themselves.
+  // Reconstruct a nested JSON Schema node.
+  fromJsonSchema(schema: JsonSchema): SchemaInput;
 
-```ts
-export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | 'HEAD';
+  // Whether the current JSON Schema node has the given type.
+  hasType(type: string): boolean;
+}
 
-export interface Operation<TReq = unknown, TRes = unknown> extends OperationOptions {
+// Context passed to encode hooks.
+export interface EncodeContext {
+  // Current path in the encoded object graph.
+  path: SchemaPath;
+
+  // Current field name.
+  name?: string;
+
+  // Root value being encoded.
+  root: unknown;
+
+  // Parent object/array value.
+  parent: unknown;
+}
+
+// Convert a schema class or field schema to JSON Schema.
+export function toJsonSchema(schema: SchemaInput): JsonSchema;
+
+// Result of converting JSON Schema back into Kavri schema/rules.
+export interface FromJsonSchemaResult {
+  // Object schemas become generated classes; scalar schemas become rule arrays.
+  root: SchemaClass | readonly RuleDecorator[];
+
+  // Decoded $defs by name.
+  defs: ReadonlyMap<string, SchemaClass | readonly RuleDecorator[]>;
+}
+
+// Convert JSON Schema into Kavri schema/rules.
+export function fromJsonSchema(schema: JsonSchema): FromJsonSchemaResult;
+
+// Field naming/metadata.
+export function Field(name?: string): RuleDecorator;
+
+// Presence/default rules.
+export function Optional(options?: RuleMessageOptions): RuleDecorator;
+export function Nullable(options?: RuleMessageOptions): RuleDecorator;
+export function Default<T>(value: T, options?: RuleMessageOptions): RuleDecorator<T>;
+export function Const<T>(value: T, options?: RuleMessageOptions): RuleDecorator<T>;
+
+// Primitive type rules.
+export function String(options?: StringRuleOptions): RuleDecorator;
+export function Number(options?: NumberRuleOptions): RuleDecorator;
+export function Integer(options?: NumberRuleOptions): RuleDecorator;
+export function Boolean(options?: RuleMessageOptions): RuleDecorator;
+export function BigInt(options?: NumberRuleOptions): RuleDecorator;
+export function DateTime(options?: DateRuleOptions): RuleDecorator<Date>;
+export function Duration(options?: DurationRuleOptions): RuleDecorator;
+
+// Coercion/normalization rules.
+export function ToString(options?: StringRuleOptions): RuleDecorator;
+export function ToNumber(options?: NumberRuleOptions): RuleDecorator;
+export function ToInteger(options?: NumberRuleOptions): RuleDecorator;
+export function ToBoolean(options?: RuleMessageOptions): RuleDecorator;
+export function ToBigInt(options?: NumberRuleOptions): RuleDecorator;
+export function Trim(options?: RuleMessageOptions): RuleDecorator;
+export function Lowercase(options?: RuleMessageOptions): RuleDecorator;
+export function Uppercase(options?: RuleMessageOptions): RuleDecorator;
+
+// String validation options.
+export interface StringRuleOptions extends RuleMessageOptions {
+  minLength?: number;
+  maxLength?: number;
+  pattern?: string | RegExp;
+  format?: string;
+  allowEmpty?: boolean;
+}
+
+// Numeric validation options.
+export interface NumberRuleOptions extends RuleMessageOptions {
+  minimum?: number | bigint;
+  maximum?: number | bigint;
+  exclusiveMinimum?: number | bigint;
+  exclusiveMaximum?: number | bigint;
+  multipleOf?: number | bigint;
+}
+
+// Date validation options.
+export interface DateRuleOptions extends RuleMessageOptions {
+  format?: 'date-time' | 'date' | 'unix' | 'unix-ms';
+  before?: Date | string | number;
+  after?: Date | string | number;
+}
+
+// Duration validation options.
+export interface DurationRuleOptions extends RuleMessageOptions {
+  minimum?: Duration;
+  maximum?: Duration;
+}
+
+// Object rules.
+export function ObjectOf<T extends object>(
+  fields?: Record<keyof T & string, SchemaInput>,
+  options?: ObjectRuleOptions<T>,
+): RuleDecorator;
+
+export interface ObjectRuleOptions<T extends object = object> extends RuleMessageOptions {
+  additionalProperties?: boolean | SchemaInput;
+  unevaluatedProperties?: boolean | SchemaInput;
+  minProperties?: number;
+  maxProperties?: number;
+  required?: readonly (keyof T & string)[];
+}
+
+// Reference to another schema class.
+export function Ref<T>(type: SchemaRef<T>, options?: RuleMessageOptions): RuleDecorator<T>;
+
+// Record/map rules.
+export function RecordOf(value: SchemaInput, options?: ObjectRuleOptions): RuleDecorator;
+export function MapOf(
+  key: SchemaInput,
+  value: SchemaInput,
+  options?: RuleMessageOptions,
+): RuleDecorator;
+
+// Array rules.
+export function ArrayOf(item: SchemaInput, options?: ArrayRuleOptions): RuleDecorator;
+export function TupleOf(items: readonly SchemaInput[], options?: ArrayRuleOptions): RuleDecorator;
+
+export interface ArrayRuleOptions extends RuleMessageOptions {
+  minItems?: number;
+  maxItems?: number;
+  uniqueItems?: boolean;
+  contains?: SchemaInput;
+  minContains?: number;
+  maxContains?: number;
+  unevaluatedItems?: false | SchemaInput;
+}
+
+// Composition rules.
+export function AnyOf(schemas: readonly SchemaInput[], options?: RuleMessageOptions): RuleDecorator;
+export function OneOf(schemas: readonly SchemaInput[], options?: RuleMessageOptions): RuleDecorator;
+export function AllOf(schemas: readonly SchemaInput[], options?: RuleMessageOptions): RuleDecorator;
+export function Not(schema: SchemaInput, options?: RuleMessageOptions): RuleDecorator;
+
+export function If(
+  condition: SchemaInput,
+  branches: { then?: SchemaInput; else?: SchemaInput },
+  options?: RuleMessageOptions,
+): RuleDecorator;
+
+// Enum rules.
+export function EnumOf<T extends readonly unknown[]>(
+  values: T,
+  options?: RuleMessageOptions,
+): RuleDecorator<T[number]>;
+
+export function NativeEnum<T extends Record<string, string | number>>(
+  value: T,
+  options?: RuleMessageOptions,
+): RuleDecorator<T[keyof T]>;
+
+// Common string semantic rules.
+export function Email(options?: RuleMessageOptions): RuleDecorator;
+export function Url(options?: RuleMessageOptions): RuleDecorator;
+export function Uuid(options?: { version?: 3 | 4 | 5 | 7 } & RuleMessageOptions): RuleDecorator;
+export function Ip(options?: { version?: 4 | 6 } & RuleMessageOptions): RuleDecorator;
+export function Hostname(options?: RuleMessageOptions): RuleDecorator;
+export function MimeType(options?: RuleMessageOptions): RuleDecorator;
+export function SemVer(options?: RuleMessageOptions): RuleDecorator;
+export function StrongPassword(options?: StrongPasswordOptions): RuleDecorator;
+
+export interface StrongPasswordOptions extends RuleMessageOptions {
+  minLength?: number;
+  minLowercase?: number;
+  minUppercase?: number;
+  minNumbers?: number;
+  minSymbols?: number;
+}
+
+// Encoding/content rules.
+export function Base64(options?: RuleMessageOptions): RuleDecorator;
+export function Base58(options?: RuleMessageOptions): RuleDecorator;
+export function Base32(options?: RuleMessageOptions): RuleDecorator;
+export function JsonContent(schema?: SchemaInput, options?: RuleMessageOptions): RuleDecorator;
+
+// Binary/file abstractions.
+export interface FileValue {
+  name: string;
+  size: number;
+  type?: string;
+  stream?: unknown;
+  path?: string;
+}
+
+export interface BinaryValue {
+  size: number;
+  stream?: unknown;
+  bytes?: Uint8Array;
+  path?: string;
+}
+
+// File upload field.
+export function File(options?: FileRuleOptions): RuleDecorator<FileValue>;
+
+// Binary value field.
+export function Binary(options?: BinaryRuleOptions): RuleDecorator<BinaryValue>;
+
+// Raw request body marker. Only valid in route request schemas.
+export function RawBody(options?: BinaryRuleOptions): RuleDecorator<BinaryValue>;
+
+// Filename/path validation.
+export function Filename(options?: FilenameRuleOptions): RuleDecorator<string>;
+
+export interface FileRuleOptions extends RuleMessageOptions {
+  accept?: readonly string[];
+  maxSize?: number;
+  multiple?: boolean | ArrayRuleOptions;
+}
+
+export interface BinaryRuleOptions extends RuleMessageOptions {
+  maxSize?: number;
+  contentType?: string;
+}
+
+export interface FilenameRuleOptions extends RuleMessageOptions {
+  kind?: 'name' | 'relative' | 'absolute' | 'path';
+  accept?: readonly string[];
+}
+
+// HTTP field placement.
+export function Query(name?: string): RuleDecorator;
+export function Header(name?: string): RuleDecorator;
+export function Path(name?: string): RuleDecorator;
+export function Body(): RuleDecorator;
+
+// HTTP methods.
+export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD';
+
+// HTTP operation declaration.
+export interface Operation<TRequest = unknown, TResponse = unknown> {
   method: HttpMethod;
-  request: AnyConstructor<TReq> | null;
-  response: AnyConstructor<TRes> | null;
+  path?: string;
+  request?: SchemaClass<TRequest>;
+  response?: SchemaClass<TResponse>;
+  options?: OperationOptions;
 }
 
-export interface RouteDefinition<
-  T extends Record<string, Operation> = Record<string, Operation>,
-> extends RouteSharedOptions {
+// HTTP operation metadata.
+export interface OperationOptions {
+  summary?: string;
+  description?: string;
+  deprecated?: string;
+  tags?: readonly string[];
+  status?: number;
+  requestType?: string;
+  responseType?: string;
+  maxBodySize?: number;
+  idempotency?: 'safe' | 'idempotent' | 'volatile';
+}
+
+// HTTP route declaration.
+export interface Route<T extends Record<string, Operation> = Record<string, Operation>> {
   name: string;
   path: string;
   operations: T;
+  options?: RouteOptions;
 }
 
-export function defineRoute<T extends Record<string, Operation>>(
-  def: RouteDefinition<T>,
-): RouteDefinition<T>;
-
-export function toOpenAPIv3(
-  routes: readonly RouteDefinition[],
-  extra?: Partial<OpenAPIv3>,
-): OpenAPIv3;
-
-export function fromOpenAPIv3(spec: OpenAPIv3): RouteDefinition[];
-```
-
-Compatibility:
-
-- Keep the current `defineRoute({ name, path, operations })` identity helper.
-- Keep `get`, `post`, `put`, `del`, `patch`, `head`.
-- Keep `null` for no request/response. Do not reintroduce `'void'`; it is noisier than `null` and
-  less TypeScript-friendly.
-
-Decision:
-
-- OpenAPI generation owns the policy for request placement:
-  - `InQuery` and `InHeader` become parameters.
-  - `RawBody` owns the request body.
-  - `IsFile` implies multipart form data.
-  - Remaining request fields become structured body fields.
-- A request field should never be in more than one placement. V2 should add explicit errors for
-  contradictory route metadata.
-
-WebSocket definitions stay parallel:
-
-```ts
-export interface Message<TPayload = unknown> extends MessageOptions {
-  payload: AnyConstructor<TPayload> | null;
+// Route-level metadata.
+export interface RouteOptions {
+  summary?: string;
+  description?: string;
+  deprecated?: string;
 }
 
-export interface WebSocketDefinition<
-  TReq = unknown,
-  TIn extends Record<string, Message> = Record<string, Message>,
-  TOut extends Record<string, Message> = Record<string, Message>,
-> extends WebSocketSharedOptions {
+// Define a route as plain typed data.
+export function route<T extends Record<string, Operation>>(definition: Route<T>): Route<T>;
+
+// Operation builders.
+export function get<TReq, TRes>(
+  request?: SchemaClass<TReq>,
+  response?: SchemaClass<TRes>,
+  path?: string,
+  options?: OperationOptions,
+): Operation<TReq, TRes>;
+
+export function post<TReq, TRes>(
+  request?: SchemaClass<TReq>,
+  response?: SchemaClass<TRes>,
+  path?: string,
+  options?: OperationOptions,
+): Operation<TReq, TRes>;
+
+export function put<TReq, TRes>(
+  request?: SchemaClass<TReq>,
+  response?: SchemaClass<TRes>,
+  path?: string,
+  options?: OperationOptions,
+): Operation<TReq, TRes>;
+
+export function patch<TReq, TRes>(
+  request?: SchemaClass<TReq>,
+  response?: SchemaClass<TRes>,
+  path?: string,
+  options?: OperationOptions,
+): Operation<TReq, TRes>;
+
+export function del<TReq, TRes>(
+  request?: SchemaClass<TReq>,
+  response?: SchemaClass<TRes>,
+  path?: string,
+  options?: OperationOptions,
+): Operation<TReq, TRes>;
+
+export function head<TReq, TRes>(
+  request?: SchemaClass<TReq>,
+  response?: SchemaClass<TRes>,
+  path?: string,
+  options?: OperationOptions,
+): Operation<TReq, TRes>;
+
+// OpenAPI document shape.
+export interface OpenApiDocument {
+  [key: string]: unknown;
+}
+
+// Generate OpenAPI 3.1 from routes.
+export function toOpenApi(routes: readonly Route[], options: OpenApiOptions): OpenApiDocument;
+
+export interface OpenApiOptions {
+  title: string;
+  version: string;
+  description?: string;
+  servers?: readonly { url: string; description?: string }[];
+}
+
+// WebSocket message declaration.
+export interface SocketMessage<TPayload = unknown> {
+  payload?: SchemaClass<TPayload>;
+  options?: SocketMessageOptions;
+}
+
+// WebSocket message metadata.
+export interface SocketMessageOptions {
+  type?: string;
+  summary?: string;
+  description?: string;
+  deprecated?: string;
+  codec?: string;
+  maxSize?: number;
+}
+
+// WebSocket protocol declaration.
+export interface SocketProtocol<
+  TRequest = unknown,
+  TIn extends Record<string, SocketMessage> = Record<string, SocketMessage>,
+  TOut extends Record<string, SocketMessage> = Record<string, SocketMessage>,
+> {
   name: string;
   path: string;
-  request?: AnyConstructor<TReq>;
+  request?: SchemaClass<TRequest>;
   inbound: TIn;
   outbound: TOut;
-}
-```
-
-Compatibility:
-
-- Keep `message(payload, discriminatorOrOptions?, options?)`.
-- Keep `defineWebSocket(def)` as an identity helper.
-
-## 4. Decorator Catalog
-
-V2 should keep the current decorator coverage, but group it more clearly.
-
-### 4.1 Base Rules
-
-- `Info`
-- `Examples`
-- `Deprecated`
-- `Default`
-- `IsOptional`
-- `IsNullable`
-- `IsConst`
-
-Policy:
-
-- `Info` contributes JSON Schema annotations only.
-- `Default`, `IsOptional`, and `IsNullable` are presence-phase rules.
-- `Deprecated` should require a non-empty reason in public helpers, matching the project error
-  philosophy.
-
-### 4.2 Primitive Type Rules
-
-- Strings: `IsString`, `MinLength`, `MaxLength`, `Pattern`, `AllowEmpty`, `ToString`
-- Numbers: `IsInteger`, `IsNumber`, `ToBigInt`, `ToNumber`, `ToInteger`, `Minimum`, `Maximum`,
-  `ExclusiveMinimum`, `ExclusiveMaximum`, `MultipleOf`
-- Booleans: `IsBoolean`, `ToBoolean`
-- Time: `IsDate`, `DefaultDate`, `IsBefore`, `IsAfter`, `IsDuration`, `Duration`
-- Enums: `IsEnum`
-
-Policy:
-
-- Type decorators accept one options object.
-- Constraint decorators accept `(value, options?)`.
-- Coercion decorators are named `ToX`.
-- BigInt should be documented as a coercing type (`ToBigInt`) even if the registered factory name
-  remains `IsBigInt` for compatibility.
-
-### 4.3 Object And Array Rules
-
-- Object: `IsObject`, `Properties`, `PatternProperties`, `PropertyNames`, `AdditionalProperties`,
-  `UnevaluatedProperties`, `MinProperties`, `MaxProperties`, `Required`, `DependentRequired`,
-  `DependentSchemas`, `IsRecord`, `IsMap`, `Ref`, `IsInstanceOf`
-- Array: `IsArray`, `Items`, `PrefixItems`, `Contains`, `MinContains`, `MaxContains`, `MinItems`,
-  `MaxItems`, `UniqueItems`, `UnevaluatedItems`
-
-Policy:
-
-- `Ref` should accept `AnyConstructor<T> | (() => AnyConstructor<T>)`. The lazy function form is
-  recommended for circular references.
-- Object and array rules should mark evaluated keys/items consistently so additional/unevaluated
-  constraints match JSON Schema 2020-12 semantics.
-- `Required` the field rule and `Required` the reshape helper currently share a name. V2 should
-  avoid exporting both under one ambiguous name from the root. Preferred:
-  - Keep object-rule `Required` from `decorators/object`.
-  - Export reshape helper as `RequiredFields` from the root, while preserving `Required` as a
-    compatibility alias.
-
-### 4.4 Composition Rules
-
-- `AnyOf`
-- `OneOf`
-- `AllOf`
-- `IfThenElse`
-- `Not`
-
-Policy:
-
-- Composition rules run after type/coercion/property phases.
-- Composition failures should preserve nested child issues.
-- `AllOf([...])` should not require repeated type checks; `type: false` stays supported for
-  advanced composition.
-
-### 4.5 String Semantics And Sanitizers
-
-Keep the validator-backed catalog:
-
-- Semantic validators such as `IsEmail`, `IsURL`, `IsUUID`, `IsIP`, `IsFQDN`, `IsStrongPassword`,
-  `IsSemVer`, and the rest of the current validator.js-backed exports.
-- Sanitizers such as `Trim`, `LTrim`, `RTrim`, `NormalizeEmail`, `Escape`, `Unescape`,
-  `ToLowerCase`, `ToUpperCase`, `Whitelist`, `Blacklist`, `StripLow`.
-
-Policy:
-
-- Validators should compose `IsString` by default.
-- Sanitizers should run in `Phase.Normalization`.
-- Names should match validator.js where possible, but keep existing Kavri names as aliases.
-
-### 4.6 Encoding, Content, File, And Route Field Rules
-
-- Text encoding: `IsBase32`, `IsBase58`, `IsBase64`
-- Binary/content: `IsCompressed`, `ContentSchema`, `IsJSON`
-- Files/binary: `MultipartFile`, `FileUnion`, `BinaryUnion`, `IsFile`, `IsBinary`, `IsFilename`,
-  `Accept`, `MaxSize`
-- Route placement: `RawBody`, `InQuery`, `InHeader`
-
-Policy:
-
-- `IsFile`, `RawBody`, `InQuery`, and `InHeader` are placement/transport decorators, not ordinary
-  schema rules. This distinction must be documented.
-- `IsFile` should still compose ordinary field rules so it participates in decode and JSON Schema
-  where possible.
-- `RawBody` should be exclusive: at most one per request schema.
-- `InQuery` and `InHeader` source names default to the field name when omitted.
-
-## 5. Canonical Examples
-
-### 5.1 Basic Message
-
-```ts
-@Schema({ title: 'Create user request' })
-class CreateUserRequest {
-  @IsString({ minLength: 1, maxLength: 80, label: 'name' })
-  name!: string;
-
-  @IsEmail()
-  email!: string;
-
-  @IsOptional()
-  @IsString()
-  displayName?: string;
+  options?: SocketProtocolOptions;
 }
 
-const result = decode(CreateUserRequest, input);
-if (!result.ok) {
-  console.error(result.issue);
+export interface SocketProtocolOptions {
+  summary?: string;
+  description?: string;
+  deprecated?: string;
+  codec?: string;
+  maxSize?: number;
 }
 
-const user = parse(CreateUserRequest, input);
+// Define one WebSocket message.
+export function message<T>(
+  payload?: SchemaClass<T>,
+  options?: SocketMessageOptions,
+): SocketMessage<T>;
+
+// Define a WebSocket protocol as plain typed data.
+export function socket<
+  TRequest,
+  TIn extends Record<string, SocketMessage>,
+  TOut extends Record<string, SocketMessage>,
+>(definition: SocketProtocol<TRequest, TIn, TOut>): SocketProtocol<TRequest, TIn, TOut>;
+
+// Schema class reshaping helpers.
+export function pick<T, K extends keyof T>(
+  type: SchemaClass<T>,
+  keys: readonly K[],
+): SchemaClass<Pick<T, K>>;
+
+export function omit<T, K extends keyof T>(
+  type: SchemaClass<T>,
+  keys: readonly K[],
+): SchemaClass<Omit<T, K>>;
+
+export function partial<T>(type: SchemaClass<T>): SchemaClass<Partial<T>>;
+export function partial<T, K extends keyof T>(
+  type: SchemaClass<T>,
+  keys: readonly K[],
+): SchemaClass<Omit<T, K> & Partial<Pick<T, K>>>;
+
+export function required<T>(type: SchemaClass<T>): SchemaClass<Required<T>>;
+export function required<T, K extends keyof T>(
+  type: SchemaClass<T>,
+  keys: readonly K[],
+): SchemaClass<Omit<T, K> & Required<Pick<T, K>>>;
+
+export function merge<T extends readonly SchemaClass[]>(
+  types: T,
+): SchemaClass<UnionToIntersection<InstanceType<T[number]>>>;
 ```
-
-### 5.2 Nested Message
-
-```ts
-@Schema()
-class Address {
-  @IsString()
-  city!: string;
-}
-
-@Schema()
-class User {
-  @Ref(() => Address)
-  address!: Address;
-
-  @IsArray({ items: Ref(() => Address), minItems: 1 })
-  previousAddresses!: Address[];
-}
-```
-
-### 5.3 Route
-
-```ts
-@Schema()
-class ListUsersRequest {
-  @InQuery()
-  @ToInteger({ minimum: 1, default: 1 })
-  page!: number;
-}
-
-const UserRoute = defineRoute({
-  name: 'UserRoute',
-  path: '/users',
-  operations: {
-    list: get(ListUsersRequest, UserListResponse, ''),
-    create: post(CreateUserRequest, UserResponse),
-  },
-});
-
-const spec = toOpenAPIv3([UserRoute], {
-  info: { title: 'Users API', version: '1.0.0' },
-});
-```
-
-### 5.4 WebSocket
-
-```ts
-const ChatSocket = defineWebSocket({
-  name: 'Chat',
-  path: '/ws/chat',
-  request: HandshakeRequest,
-  inbound: {
-    send: message(ChatMessage, 'chat.send'),
-  },
-  outbound: {
-    ack: message(AckMessage),
-  },
-});
-```
-
-### 5.5 Reshape
-
-```ts
-class RegisterUser extends Omit(User, 'id', 'createdAt', 'updatedAt') {}
-
-class UpdateUser extends Merge([
-  Pick(User, 'id'),
-  Partial(Pick(User, 'name', 'email', 'displayName')),
-]) {}
-```
-
-V2 compatibility aliases:
-
-```ts
-export const RequiredFields = Required;
-```
-
-The root export may keep `Required` for compatibility, but documentation should prefer
-`RequiredFields` for reshaping to avoid confusion with object-rule `Required`.
-
-## 6. Internal Pipeline Design
-
-The current phase model is worth keeping, but it should be specified as an advanced contract.
-
-```ts
-export enum Phase {
-  Info,
-  Defaults,
-  Presence,
-  Type,
-  Coercion,
-  Normalization,
-  TextEncoding,
-  BinaryEncoding,
-  ContentType,
-  Semantics,
-  Property,
-  Composition,
-  AdditionalConstraints,
-}
-```
-
-Rules:
-
-- `Info` never fails decode.
-- `Defaults` and `Presence` may short-circuit successful decode.
-- `Type` and `Coercion` are "any pass" within their phase.
-- `Normalization`, encoding, and content phases fail fast.
-- `Semantics`, `Property`, `Composition`, and `AdditionalConstraints` aggregate issues.
-
-This keeps current behavior but gives custom rule authors a stable target.
-
-Custom rule factory API:
-
-```ts
-export interface FieldRuleFactoryStatic<P> {
-  readonly name: string;
-  readonly phase: Phase;
-  readonly message: string | ((ctx: DecodeContext<P>) => string);
-  decode?: (ctx: DecodeContext<P>) => Awaitable<boolean | string | DecodeResult | DecodeResult[]>;
-  encode?: (params: P, value: unknown, key: string, object: object) => unknown;
-  toJsonSchema?: (params: P, current: JsonSchema) => JsonSchema | undefined;
-  fromJsonSchema?: (ctx: FromJsonSchemaContext) => FieldSchemaDecorator | undefined;
-}
-```
-
-Compatibility:
-
-- Continue supporting the existing symbol-based `FieldSchemaDecoratorName`.
-- Add a string `name` getter or helper so users do not need to read a symbol.
-
-## 7. Error Design
-
-Add specific errors:
-
-```ts
-export class DecodeError extends Error {
-  readonly issue: DecodeIssue;
-}
-
-export class InvalidSchemaError extends Error {}
-export class InvalidRouteSchemaError extends Error {}
-export class JsonSchemaConversionError extends Error {}
-```
-
-Error messages must say:
-
-- what failed,
-- which class/field/rule was involved,
-- how to fix it.
-
-Examples:
-
-- `InvalidRouteSchemaError: UserUploadRequest.body uses @RawBody, but avatar also uses @IsFile. A request schema can have either one raw body field or multipart fields, not both.`
-- `JsonSchemaConversionError: IsCompressed.fromJsonSchema threw while reading property "payload". Fix the decorator's fromJsonSchema implementation or pass { onFactoryError: "skip" } for compatibility mode.`
-
-## 8. Compatibility Plan
-
-V2 should be implemented in four passes.
-
-### Pass 1: Documentation And Type Aliases
-
-- Add this document.
-- Add aliases without changing behavior:
-  - `RuleOptions = ValidateOptions`
-  - `FieldRule = FieldSchemaDecoratorMetadata`
-  - `FieldRuleFactory = FieldSchemaDecoratorFactory`
-  - `FieldRuleInput`
-  - `JsonSchemaInput`
-- Add `describeSchema()` while keeping `getSchema()`.
-- Add `parse()` and `DecodeError`.
-
-### Pass 2: Normalize Introspection
-
-- Make JSON Schema, OpenAPI, decode, and reshape consume `describeSchema()`.
-- Keep existing `Metadata.lookupField(FieldSchema, cls)` behavior under the hood.
-- Centralize required-field computation.
-
-### Pass 3: Route Validation
-
-- Add explicit route-schema validation for impossible combinations:
-  - multiple `RawBody` fields,
-  - `RawBody` plus `IsFile`,
-  - duplicate source names in query/header/body placement,
-  - `RawBody` on no-body methods unless explicitly allowed.
-- OpenAPI generation should call this validation before producing specs.
-
-### Pass 4: Encode/JSON Output
-
-- Implement `toJson()` and make `jsonReplacer()` delegate where possible.
-- Use field `encode` hooks.
-- Preserve the same field selection rules as decode: decorated fields only.
-
-## 9. Non-Goals
-
-- No `reflect-metadata`.
-- No parameter decorators.
-- No Zod-like builder-first API.
-- No runtime dependency on `@kavri/container`.
-- No transport runtime in `@kavri/schema`; web packages consume route/WebSocket metadata.
-- No hidden validation of undecorated class fields.
-
-## 10. Root Export Recommendation
-
-The root package should export the everyday API:
-
-```ts
-export * from './schema.js';
-export * from './field.js';
-export * from './decode.js';
-export * from './jsonschema.js';
-export * from './openapi.js';
-export * from './route.js';
-export * from './websocket.js';
-export * from './reshape.js';
-export * from './decorators/index.js';
-```
-
-Compatibility note:
-
-- The current root export repeats `route.js` and does not export decorators or reshape helpers.
-  V2 should fix that as a public API decision. If this is too broad for the first release, expose
-  decorators through `@kavri/schema/decorators` subpath exports instead.
-
-## 11. Final Shape
-
-The best v2 API is not a rewrite. It is the current implementation with sharper public names,
-centralized schema introspection, a high-level throwing parse API, explicit route-schema errors, and
-documented advanced extension points.
-
-The compatibility surface should remain:
-
-- current decorators,
-- current route builders,
-- current WebSocket helpers,
-- current `decode()` result style,
-- current JSON Schema round-trip shape,
-- current reshape helpers.
-
-The new preferred surface should add:
-
-- `describeSchema()`,
-- `parse()`,
-- `DecodeError`,
-- `FieldRuleInput`,
-- `JsonSchemaInput`,
-- `RequiredFields` as a clearer reshape alias,
-- explicit invalid schema/route/conversion errors.
-
