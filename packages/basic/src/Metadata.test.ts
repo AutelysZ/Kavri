@@ -48,7 +48,7 @@ describe('class decorators (TC39)', () => {
 
     const entries = Metadata.ofClass(Tag, Foo);
     expect(entries).toHaveLength(1);
-    expect(entries[0]).toEqual({ tag: 'hello' });
+    expect(entries?.[0]).toEqual({ tag: 'hello' });
   });
 
   it('supports multiple decorators', () => {
@@ -90,7 +90,7 @@ describe('method decorators (TC39)', () => {
 
     const entries = Metadata.ofMethod(Marker, Foo, 'hello' as keyof Foo);
     expect(entries).toHaveLength(1);
-    expect(entries[0]).toEqual({ label: 'greet' });
+    expect(entries?.[0]).toEqual({ label: 'greet' });
   });
 
   it('returns undefined for undecorated method', () => {
@@ -113,7 +113,7 @@ describe('field decorators (TC39)', () => {
 
     const entries = Metadata.ofField(FieldType, Foo, 'name' as keyof Foo);
     expect(entries).toHaveLength(1);
-    expect(entries[0]).toEqual({ type: 'string' });
+    expect(entries?.[0]).toEqual({ type: 'string' });
   });
 });
 
@@ -124,7 +124,7 @@ describe('composite decorators', () => {
 
     expect(Metadata.ofClass(Special, Foo)).toHaveLength(1);
     expect(Metadata.ofClass(Tag, Foo)).toHaveLength(1);
-    expect(Metadata.ofClass(Tag, Foo)[0].tag).toBe('special:vip');
+    expect(Metadata.ofClass(Tag, Foo)?.[0]?.tag).toBe('special:vip');
   });
 });
 
@@ -141,8 +141,8 @@ describe('ofClass() global', () => {
     class B {}
 
     const all = Metadata.ofClass(U);
-    expect(all.get(A)).toHaveLength(1);
-    expect(all.get(B)).toHaveLength(1);
+    expect(all?.get(A)).toHaveLength(1);
+    expect(all?.get(B)).toHaveLength(1);
   });
 });
 
@@ -192,7 +192,7 @@ describe('ComposeOptions', () => {
 
     const useEntries = Metadata.ofClass(Inject, Foo);
     expect(useEntries).toHaveLength(1);
-    expect(useEntries[0].injectables).toContain(Date);
+    expect(useEntries?.[0]?.injectables).toContain(Date);
   });
 
   it('proxyMethod wraps the method (legacy)', () => {
@@ -206,7 +206,7 @@ describe('ComposeOptions', () => {
           proxyMethod: (original) => {
             return function (this: unknown, ...args: unknown[]) {
               calls.push('before');
-              const result = (original as Function).apply(this, args);
+              const result = original.apply(this, args);
               calls.push('after');
               return result;
             };
@@ -271,7 +271,7 @@ describe('legacy decorator protocol', () => {
     }
 
     LTag('cls')(Foo);
-    (LField('string') as Function)(Foo.prototype, 'name');
+    (LField('string') as (target: object, key: string) => void)(Foo.prototype, 'name');
     expect(LM.ofField(LField, Foo, 'name' as keyof Foo)).toHaveLength(1);
   });
 });
@@ -287,11 +287,16 @@ describe('proxyMethod decorator pattern', () => {
     }
 
     abstract class Aspect<T> {
-      abstract aspect(metadata: T, instance: object, method: Function, args: unknown[]): unknown;
+      abstract aspect(
+        metadata: T,
+        instance: object,
+        method: (...args: unknown[]) => unknown,
+        args: unknown[],
+      ): unknown;
     }
 
     class TransactionalAspect extends Aspect<undefined> {
-      aspect(_m: undefined, _i: object, method: Function, args: unknown[]) {
+      aspect(_m: undefined, _i: object, method: (...args: unknown[]) => unknown, args: unknown[]) {
         return method(...args);
       }
     }
@@ -317,7 +322,7 @@ describe('proxyMethod decorator pattern', () => {
     }
 
     expect(AM.ofClass(Inject, UserService)).toHaveLength(1);
-    expect(AM.ofClass(Inject, UserService)[0].injectables).toContain(TransactionalAspect);
+    expect(AM.ofClass(Inject, UserService)?.[0]?.injectables).toContain(TransactionalAspect);
     expect(AM.ofMethod(Transactional, UserService, 'createUser')).toHaveLength(1);
   });
 });

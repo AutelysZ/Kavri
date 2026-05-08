@@ -113,7 +113,6 @@ export const FieldSchemaDecoratorName = Symbol('schema:name');
  * factory declares `fromJsonSchema`. Lives here (not `jsonschema.ts`) so
  * `field.ts` doesn't have to eagerly load the decorator graph.
  */
-// eslint-disable-next-line @typescript-eslint/no-use-before-define
 export const FromJsonSchemaRegistry = new Set<FieldSchemaDecoratorFactory>();
 
 export enum Phase {

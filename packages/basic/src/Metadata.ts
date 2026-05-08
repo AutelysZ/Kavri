@@ -52,7 +52,7 @@ export interface ComposeOptions<T, Kind extends keyof DecoratorMap<T>> {
    * @param original - The original method function.
    * @returns The replacement method function.
    */
-  proxyMethod?: (original: Function) => Function;
+  proxyMethod?: (original: (...args: any[]) => any) => (...args: any[]) => any;
   /**
    * Replace the entire class with a subclass or wrapper.
    * Only applies to class decorators.
@@ -217,7 +217,7 @@ export class MetadataManager {
         }
         if (p.compose) this.#applyCompose(p.compose, target, p.kind, p.key);
       }
-      delete obj[PENDING];
+      Reflect.deleteProperty(obj, PENDING);
     }
     obj[FLUSHED] = true;
   }
@@ -250,33 +250,35 @@ export class MetadataManager {
    */
   #applyCompose(
     compose: ComposeOptions<any, any>,
-    target: Function,
+    target: AnyConstructor,
     kind: string,
     key?: Qualifier,
   ): void {
     if (compose.self) {
       for (const d of compose.self) {
-        if (kind === 'class') (d as Function)(target);
-        else if (key !== undefined) (d as Function)(target.prototype, key);
+        if (kind === 'class') (d as (...args: any[]) => unknown)(target);
+        else if (key !== undefined) (d as (...args: any[]) => unknown)(target.prototype, key);
       }
     }
     if (compose.classes) {
-      for (const d of compose.classes) (d as Function)(target);
+      for (const d of compose.classes) (d as (...args: any[]) => unknown)(target);
     }
     if (compose.methods) {
-      for (const [k, d] of compose.methods) (d as Function)(target.prototype, k);
+      for (const [k, d] of compose.methods) (d as (...args: any[]) => unknown)(target.prototype, k);
     }
     if (compose.fields) {
-      for (const [k, d] of compose.fields) (d as Function)(target.prototype, k);
+      for (const [k, d] of compose.fields) (d as (...args: any[]) => unknown)(target.prototype, k);
     }
     if (compose.otherClass) {
-      for (const [cls, d] of compose.otherClass) (d as Function)(cls);
+      for (const [cls, d] of compose.otherClass) (d as (...args: any[]) => unknown)(cls);
     }
     if (compose.otherMethods) {
-      for (const [cls, k, d] of compose.otherMethods) (d as Function)(cls.prototype, k);
+      for (const [cls, k, d] of compose.otherMethods)
+        (d as (...args: any[]) => unknown)(cls.prototype, k);
     }
     if (compose.otherFields) {
-      for (const [cls, k, d] of compose.otherFields) (d as Function)(cls.prototype, k);
+      for (const [cls, k, d] of compose.otherFields)
+        (d as (...args: any[]) => unknown)(cls.prototype, k);
     }
   }
 
@@ -426,7 +428,9 @@ export class MetadataManager {
    * Metadata.ofClass(Tag, fooInst);  // entries for fooInst's class
    * ```
    */
-  ofClass<T>(factory: ClassDecoratorFactory<T>): ReadonlyMap<AnyConstructor, readonly T[]> | undefined;
+  ofClass<T>(
+    factory: ClassDecoratorFactory<T>,
+  ): ReadonlyMap<AnyConstructor, readonly T[]> | undefined;
   ofClass<T, R extends object>(
     factory: ClassDecoratorFactory<T>,
     target: AnyConstructor<R> | R,
@@ -533,19 +537,26 @@ export class MetadataManager {
   ): ReadonlySet<AnyConstructor<R>> | undefined {
     const byFactory = this.#subclassIndex.get(superTarget);
     if (!byFactory) return void 0;
-    return (byFactory.get(factory) ) ;
+    return byFactory.get(factory);
   }
 
   // find all decorators on self and super classes
   // if a field has target decorators on child class, will not use super class's decorators
   // there is no lookup class, it doesn't make sense.
-  lookupMethod<T, R extends object>(factory: MethodDecoratorFactory<T>, target: AnyConstructor<R> | R): ReadonlyMap<keyof R, readonly T[]> | undefined
-  lookupMethod<T, R extends object>(factory: MethodDecoratorFactory<T>, target: AnyConstructor<R> | R, key: keyof R): readonly T[] | undefined
+  lookupMethod<T, R extends object>(
+    factory: MethodDecoratorFactory<T>,
+    target: AnyConstructor<R> | R,
+  ): ReadonlyMap<keyof R, readonly T[]> | undefined;
+  lookupMethod<T, R extends object>(
+    factory: MethodDecoratorFactory<T>,
+    target: AnyConstructor<R> | R,
+    key: keyof R,
+  ): readonly T[] | undefined;
   lookupMethod(factory: MethodDecoratorFactory, target: any, key?: any): any {
     let current = this.#resolve(target)?.prototype;
-    while(current?.constructor) {
+    while (current?.constructor) {
       const result = this.ofMethod(factory, current.constructor, key);
-      if(result) return result;
+      if (result) return result;
       current = Object.getPrototypeOf(current);
     }
     return void 0;
@@ -553,13 +564,20 @@ export class MetadataManager {
 
   // find all decorators on self and super classes
   // if a field has target decorators on child class, will not use super class's decorators
-  lookupField<T, R extends object>(factory: FieldDecoratorFactory<T>, target: AnyConstructor<R> | R): ReadonlyMap<keyof R, readonly T[]> | undefined
-  lookupField<T, R extends object>(factory: FieldDecoratorFactory<T>, target: AnyConstructor<R> | R, key: keyof R): readonly T[] | undefined
+  lookupField<T, R extends object>(
+    factory: FieldDecoratorFactory<T>,
+    target: AnyConstructor<R> | R,
+  ): ReadonlyMap<keyof R, readonly T[]> | undefined;
+  lookupField<T, R extends object>(
+    factory: FieldDecoratorFactory<T>,
+    target: AnyConstructor<R> | R,
+    key: keyof R,
+  ): readonly T[] | undefined;
   lookupField(factory: FieldDecoratorFactory, target: any, key?: any): any {
     let current = this.#resolve(target)?.prototype;
-    while(current?.constructor) {
+    while (current?.constructor) {
       const result = this.ofField(factory, current.constructor, key);
-      if(result) return result;
+      if (result) return result;
       current = Object.getPrototypeOf(current);
     }
     return void 0;

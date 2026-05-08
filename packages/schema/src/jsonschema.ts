@@ -76,6 +76,11 @@ export interface JsonSchema {
   [P: `x-${string}`]: unknown;
 }
 
+type JsonSchemaSource =
+  | NestedFieldSchema
+  | FieldSchemaDecoratorMetadata
+  | readonly FieldSchemaDecoratorMetadata[];
+
 /**
  * Generate JSON Schema 2020-12 from a `@Schema` class or from an explicit
  * `NestedFieldSchema`. Decorators contribute partial JsonSchema fragments via
@@ -86,12 +91,12 @@ export interface JsonSchema {
  */
 export function toJsonSchema(clazz: AnyConstructor): JsonSchema;
 // eslint-disable-next-line @typescript-eslint/unified-signatures
-export function toJsonSchema(schema: NestedFieldSchema): JsonSchema;
-export function toJsonSchema(input: AnyConstructor | NestedFieldSchema): JsonSchema {
+export function toJsonSchema(schema: JsonSchemaSource): JsonSchema;
+export function toJsonSchema(input: AnyConstructor | JsonSchemaSource): JsonSchema {
   if (isFunction(input) && !isFieldSchemaDecorator(input)) {
     return classToJsonSchema(input as AnyConstructor);
   }
-  return rulesToJsonSchema(normalizeSchema(input as NestedFieldSchema));
+  return rulesToJsonSchema(normalizeSchema(input as JsonSchemaSource));
 }
 
 function classToJsonSchema(clazz: AnyConstructor): JsonSchema {
@@ -117,7 +122,7 @@ function rulesToJsonSchema(rules: readonly FieldSchemaDecoratorMetadata[]): Json
   return current;
 }
 
-function normalizeSchema(schema: NestedFieldSchema): readonly FieldSchemaDecoratorMetadata[] {
+function normalizeSchema(schema: JsonSchemaSource): readonly FieldSchemaDecoratorMetadata[] {
   if (isArray(schema)) {
     return (schema as readonly (FieldSchemaDecorator | FieldSchemaDecoratorMetadata)[]).map(
       toMetadata,
@@ -197,10 +202,10 @@ export interface FromJsonSchemaResult {
 
 // multiple inputs is used for cross schema references, it's not allOf. It makes things complex, remove it.
 // any type=object with properties will be parsed as a class, others will be parsed as FieldSchemaDecorator[]
-export function fromJsonSchema(input: JsonSchema): FromJsonSchemaResult {
+export function fromJsonSchema(input: JsonSchema | readonly JsonSchema[]): FromJsonSchemaResult {
   if (!decorators) throw new Error('Decorators namespace cannot be null');
   const defs = new Map<string, DecodedSchema>();
-  const inputs: readonly JsonSchema[] = isArray(input) ? input : [input as JsonSchema];
+  const inputs = isArray(input) ? input : [input];
 
   for (const s of inputs) collectDefs(s, defs);
 
