@@ -9,5 +9,6 @@ export * from './route.js';
 export * from './jsonschema.js';
 export * from './openapi.js';
 export * from './decode.js';
+export * from './defaults.js';
 export * from './json.js';
 export * from './websocket.js';
