@@ -47,7 +47,7 @@ export const Min = createFieldSchemaDecoratorFactory(
     phase: Phase.Semantics,
     message: '',
     decode: ({ value, params }) => typeof value !== 'string' || value.length >= params,
-    toJsonSchema: (p) => ({ minLength: p }),
+    toJsonSchema: ({ params }) => ({ minLength: params }),
     fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined =>
       typeof schema.minLength === 'number' ? Min(schema.minLength) : void 0,
   },
@@ -60,7 +60,7 @@ export const Max = createFieldSchemaDecoratorFactory(
     phase: Phase.Semantics,
     message: '',
     decode: ({ value, params }) => typeof value !== 'string' || value.length <= params,
-    toJsonSchema: (p) => ({ maxLength: p }),
+    toJsonSchema: ({ params }) => ({ maxLength: params }),
     fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined =>
       typeof schema.maxLength === 'number' ? Max(schema.maxLength) : void 0,
   },
@@ -74,7 +74,7 @@ export const Wrap = createFieldSchemaDecoratorFactory(
     phase: Phase.Property,
     message: '',
     decode: () => true,
-    toJsonSchema: (p) => ({ items: toJsonSchema(p) }),
+    toJsonSchema: ({ params, toJsonSchema }) => ({ items: toJsonSchema(params) }),
     fromJsonSchema: ({ schema, fromJsonSchema: rec }): FieldSchemaDecorator | undefined =>
       schema.items === undefined ? void 0 : Wrap(rec(schema.items)),
   },

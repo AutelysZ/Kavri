@@ -7,7 +7,6 @@ import {
   Phase,
   type ValidateOptions,
 } from '../field.js';
-import { toJsonSchema } from '../jsonschema.js';
 
 /**
  * Union — value must match at least one of `params`. Maps to JSON Schema
@@ -30,7 +29,9 @@ export const AnyOf = createFieldSchemaDecoratorFactory(
       }
       return false;
     },
-    toJsonSchema: (params) => ({ anyOf: params.map((s) => toJsonSchema(s)) }),
+    toJsonSchema: ({ params, toJsonSchema }) => ({
+      anyOf: params.map((s) => toJsonSchema(s)),
+    }),
     fromJsonSchema: ({ schema, fromJsonSchema }): FieldSchemaDecorator | undefined => {
       return schema.anyOf ? AnyOf(schema.anyOf.map((s) => fromJsonSchema(s))) : void 0;
     },
@@ -59,7 +60,9 @@ export const OneOf = createFieldSchemaDecoratorFactory(
       }
       return matched === 1;
     },
-    toJsonSchema: (params) => ({ oneOf: params.map((s) => toJsonSchema(s)) }),
+    toJsonSchema: ({ params, toJsonSchema }) => ({
+      oneOf: params.map((s) => toJsonSchema(s)),
+    }),
     fromJsonSchema: ({ schema, fromJsonSchema }): FieldSchemaDecorator | undefined => {
       return schema.oneOf ? OneOf(schema.oneOf.map((s) => fromJsonSchema(s))) : void 0;
     },
@@ -83,7 +86,9 @@ export const AllOf = createFieldSchemaDecoratorFactory(
     phase: Phase.Composition,
     message: '',
     decode: ({ value, params }) => params.map((schema) => decode(schema, value)),
-    toJsonSchema: (params) => ({ allOf: params.map((s) => toJsonSchema(s)) }),
+    toJsonSchema: ({ params, toJsonSchema }) => ({
+      allOf: params.map((s) => toJsonSchema(s)),
+    }),
     fromJsonSchema: ({ schema, fromJsonSchema }): FieldSchemaDecorator | undefined => {
       return schema.allOf ? AllOf(schema.allOf.map((s) => fromJsonSchema(s))) : void 0;
     },
@@ -128,7 +133,7 @@ export const IfThenElse = createFieldSchemaDecoratorFactory(
       const branch = decode(params.if, value).ok ? params.then : params.else;
       return branch === undefined ? true : decode(branch, value);
     },
-    toJsonSchema: (params) => ({
+    toJsonSchema: ({ params, toJsonSchema }) => ({
       if: toJsonSchema(params.if),
       ...(params.then !== undefined && { then: toJsonSchema(params.then) }),
       ...(params.else !== undefined && { else: toJsonSchema(params.else) }),
@@ -158,7 +163,7 @@ export const Not = createFieldSchemaDecoratorFactory(
     phase: Phase.Composition,
     message: '.label must not match the negated schema',
     decode: ({ value, params }) => !decode(params, value).ok,
-    toJsonSchema: (params) => ({ not: toJsonSchema(params) }),
+    toJsonSchema: ({ params, toJsonSchema }) => ({ not: toJsonSchema(params) }),
     fromJsonSchema: ({ schema, fromJsonSchema }): FieldSchemaDecorator | undefined => {
       return schema.not ? Not(fromJsonSchema(schema.not)) : void 0;
     },

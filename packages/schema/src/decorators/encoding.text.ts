@@ -196,7 +196,7 @@ export const IsBase32 = createFieldSchemaDecoratorFactory(
       if (decoded === null) return false;
       return provide(fromUint8Array(decoded, text));
     },
-    encode: ({ variant }, value) => {
+    encode: ({ params: { variant }, value }) => {
       if (!isString(value) && !(value instanceof Uint8Array)) return value;
       return base32Encode(toUint8Array(value), getBase32Alphabet(variant));
     },
@@ -238,7 +238,7 @@ export const IsBase58 = createFieldSchemaDecoratorFactory(
       if (decoded === null) return false;
       return provide(fromUint8Array(decoded, text));
     },
-    encode: (_, value) => {
+    encode: ({ value }) => {
       if (!isString(value) && !(value instanceof Uint8Array)) return value;
       return base58Encode(toUint8Array(value));
     },
@@ -290,11 +290,11 @@ export const IsBase64 = createFieldSchemaDecoratorFactory(
       if (decoded === null) return false;
       return provide(fromUint8Array(decoded, text));
     },
-    encode: ({ urlSafe = true, padding = false }, value) => {
+    encode: ({ params: { urlSafe = true, padding = false }, value }) => {
       if (!isString(value) && !(value instanceof Uint8Array)) return value;
       return base64Encode(toUint8Array(value), urlSafe, padding);
     },
-    toJsonSchema: ({ urlSafe = true }) => ({
+    toJsonSchema: ({ params: { urlSafe = true } }) => ({
       contentEncoding: urlSafe ? 'base64url' : 'base64',
     }),
     fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined => {

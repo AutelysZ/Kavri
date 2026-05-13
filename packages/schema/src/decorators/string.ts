@@ -23,7 +23,7 @@ export const MinLength = createFieldSchemaDecoratorFactory(
     phase: Phase.Semantics,
     message: '.label must be at least .params characters',
     decode: ({ value, params }) => !isString(value) || value.length >= params,
-    toJsonSchema: (p) => ({ minLength: p }),
+    toJsonSchema: ({ params }) => ({ minLength: params }),
     fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined => {
       return isNumber(schema.minLength) ? MinLength(schema.minLength) : void 0;
     },
@@ -39,7 +39,7 @@ export const MaxLength = createFieldSchemaDecoratorFactory(
     phase: Phase.Semantics,
     message: '.label must be at most .params characters',
     decode: ({ value, params }) => !isString(value) || value.length <= params,
-    toJsonSchema: (p) => ({ maxLength: p }),
+    toJsonSchema: ({ params }) => ({ maxLength: params }),
     fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined => {
       return isNumber(schema.maxLength) ? MaxLength(schema.maxLength) : void 0;
     },
@@ -55,7 +55,7 @@ export const Pattern = createFieldSchemaDecoratorFactory(
     phase: Phase.Semantics,
     message: '.label must match pattern .params',
     decode: ({ value, params }) => !isString(value) || new RegExp(params).test(value),
-    toJsonSchema: (p) => ({ pattern: p }),
+    toJsonSchema: ({ params }) => ({ pattern: params }),
     fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined => {
       return isString(schema.pattern) ? Pattern(schema.pattern) : void 0;
     },
@@ -103,6 +103,7 @@ export const IsString = createFieldSchemaDecoratorFactory(
     phase: Phase.Type,
     message: ({ value }) => `.label should be a string, got ${typeof value}`,
     decode: ({ value }) => isString(value),
+    default: () => '',
     toJsonSchema: addType('string'),
     fromJsonSchema: ({ hasType }): FieldSchemaDecorator | undefined => {
       return hasType('string') ? IsString() : void 0;

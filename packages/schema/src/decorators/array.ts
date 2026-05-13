@@ -13,7 +13,6 @@ import {
   type ValidateField,
   type ValidateOptions,
 } from '../field.js';
-import { toJsonSchema } from '../jsonschema.js';
 import { addType, isArray, isEqual, isNumber } from '../utils.js';
 import { decoupleTypeOptions, Info, type TypeOptions } from './base.js';
 
@@ -32,8 +31,8 @@ export const Items = createFieldSchemaDecoratorFactory(
       if (!isArray(value)) return true;
       return value.map((item, index) => decode(child(index + '', item, params)));
     },
-    toJsonSchema: (p, current) => ({
-      items: { ...current.items, ...toJsonSchema(p) },
+    toJsonSchema: ({ params, current, toJsonSchema }) => ({
+      items: { ...current.items, ...toJsonSchema(params) },
     }),
     fromJsonSchema: ({ schema, fromJsonSchema }): FieldSchemaDecorator | undefined => {
       return schema.items === void 0 ? void 0 : Items(fromJsonSchema(schema.items));
@@ -57,7 +56,9 @@ export const PrefixItems = createFieldSchemaDecoratorFactory(
       const limit = Math.min(value.length, params.length);
       return value.slice(0, limit).map((item, i) => decode(child(i + '', item, params[i])));
     },
-    toJsonSchema: (p) => ({ prefixItems: p.map((s) => toJsonSchema(s)) }),
+    toJsonSchema: ({ params, toJsonSchema }) => ({
+      prefixItems: params.map((s) => toJsonSchema(s)),
+    }),
     fromJsonSchema: ({ schema, fromJsonSchema }): FieldSchemaDecorator | undefined => {
       return schema.prefixItems === void 0
         ? void 0
@@ -107,7 +108,7 @@ export const Contains = createFieldSchemaDecoratorFactory(
       }
       return matched > 0;
     },
-    toJsonSchema: (p) => ({ contains: toJsonSchema(p) }),
+    toJsonSchema: ({ params, toJsonSchema }) => ({ contains: toJsonSchema(params) }),
     fromJsonSchema: ({ schema, fromJsonSchema }): FieldSchemaDecorator | undefined => {
       return schema.contains === void 0 ? void 0 : Contains(fromJsonSchema(schema.contains));
     },
@@ -126,7 +127,7 @@ export const MinContains = createFieldSchemaDecoratorFactory(
       if (!isArray(value)) return true;
       return containsCount(evaluated) >= params;
     },
-    toJsonSchema: (p) => ({ minContains: p }),
+    toJsonSchema: ({ params }) => ({ minContains: params }),
     fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined => {
       return isNumber(schema.minContains) ? MinContains(schema.minContains) : void 0;
     },
@@ -145,7 +146,7 @@ export const MaxContains = createFieldSchemaDecoratorFactory(
       if (!isArray(value)) return true;
       return containsCount(evaluated) <= params;
     },
-    toJsonSchema: (p) => ({ maxContains: p }),
+    toJsonSchema: ({ params }) => ({ maxContains: params }),
     fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined => {
       return isNumber(schema.maxContains) ? MaxContains(schema.maxContains) : void 0;
     },
@@ -161,7 +162,7 @@ export const MinItems = createFieldSchemaDecoratorFactory(
     phase: Phase.Property,
     message: '.label has at least .params elements',
     decode: ({ value, params }) => !isArray(value) || value.length >= params,
-    toJsonSchema: (p) => ({ minItems: p }),
+    toJsonSchema: ({ params }) => ({ minItems: params }),
     fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined => {
       return isNumber(schema.minItems) ? MinItems(schema.minItems) : void 0;
     },
@@ -177,7 +178,7 @@ export const MaxItems = createFieldSchemaDecoratorFactory(
     phase: Phase.Property,
     message: '.label can contain at most .params elements',
     decode: ({ value, params }) => !isArray(value) || value.length <= params,
-    toJsonSchema: (p) => ({ maxItems: p }),
+    toJsonSchema: ({ params }) => ({ maxItems: params }),
     fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined => {
       return isNumber(schema.maxItems) ? MaxItems(schema.maxItems) : void 0;
     },
@@ -233,8 +234,8 @@ export const UnevaluatedItems = createFieldSchemaDecoratorFactory(
       if (params === false) return false;
       return unevaluated.map((i) => decode(child(i + '', value[i], params)));
     },
-    toJsonSchema: (p) => ({
-      unevaluatedItems: p === false ? false : toJsonSchema(p),
+    toJsonSchema: ({ params, toJsonSchema }) => ({
+      unevaluatedItems: params === false ? false : toJsonSchema(params),
     }),
     fromJsonSchema: ({ schema, fromJsonSchema }): FieldSchemaDecorator | undefined => {
       const u = schema.unevaluatedItems;
@@ -292,6 +293,7 @@ export const IsArray = createFieldSchemaDecoratorFactory(
     phase: Phase.Type,
     message: '.label should be an array',
     decode: ({ value }) => isArray(value),
+    default: () => [],
     toJsonSchema: addType('array'),
     fromJsonSchema: ({ hasType }): FieldSchemaDecorator | undefined => {
       return hasType('array') ? IsArray() : void 0;

@@ -14,7 +14,7 @@ import {
   type ValidateField,
   type ValidateOptions,
 } from '../field.js';
-import { type JsonSchema, toJsonSchema } from '../jsonschema.js';
+import type { JsonSchema } from '../jsonschema.js';
 import { getSchema } from '../schema.js';
 import {
   addType,
@@ -80,7 +80,14 @@ export const Properties = createFieldSchemaDecoratorFactory(
       }
       return out;
     },
-    toJsonSchema: (params, current) => {
+    default: ({ params, defaultOf }) => {
+      const out: Record<string, unknown> = {};
+      for (const [key, schema] of entryOf(params as Record<string, NestedFieldSchema>)) {
+        if (schema !== undefined) out[key] = defaultOf(schema);
+      }
+      return out;
+    },
+    toJsonSchema: ({ params, current, toJsonSchema }) => {
       const out: Record<string, JsonSchema> = current.properties || {};
       for (const [k, v] of entryOf(params as Record<string, NestedFieldSchema>)) {
         if (v !== undefined) {
@@ -139,7 +146,7 @@ export const PatternProperties = createFieldSchemaDecoratorFactory(
       }
       return out;
     },
-    toJsonSchema: (params) => {
+    toJsonSchema: ({ params, toJsonSchema }) => {
       const out: Record<string, JsonSchema> = {};
       for (const [k, v] of entryOf(params)) {
         out[k] = toJsonSchema(v);
@@ -185,7 +192,7 @@ export const PropertyNames = createFieldSchemaDecoratorFactory(
       }
       return out;
     },
-    toJsonSchema: (params) => ({ propertyNames: toJsonSchema(params) }),
+    toJsonSchema: ({ params, toJsonSchema }) => ({ propertyNames: toJsonSchema(params) }),
     fromJsonSchema: ({ schema, fromJsonSchema }): FieldSchemaDecorator | undefined => {
       return schema.propertyNames === void 0
         ? void 0
@@ -261,8 +268,8 @@ export const AdditionalProperties = createFieldSchemaDecoratorFactory(
       }
       return out;
     },
-    toJsonSchema: (p) => ({
-      additionalProperties: isBoolean(p) ? p : toJsonSchema(p),
+    toJsonSchema: ({ params, toJsonSchema }) => ({
+      additionalProperties: isBoolean(params) ? params : toJsonSchema(params),
     }),
     fromJsonSchema: ({ schema, fromJsonSchema }): FieldSchemaDecorator | undefined => {
       const ap = schema.additionalProperties;
@@ -317,8 +324,8 @@ export const UnevaluatedProperties = createFieldSchemaDecoratorFactory(
       }
       return out;
     },
-    toJsonSchema: (p) => ({
-      unevaluatedProperties: isBoolean(p) ? p : toJsonSchema(p),
+    toJsonSchema: ({ params, toJsonSchema }) => ({
+      unevaluatedProperties: isBoolean(params) ? params : toJsonSchema(params),
     }),
     fromJsonSchema: ({ schema, fromJsonSchema }): FieldSchemaDecorator | undefined => {
       const up = schema.unevaluatedProperties;
@@ -349,7 +356,7 @@ export const MinProperties = createFieldSchemaDecoratorFactory(
     decode: ({ value, params }) => {
       return !is(value) || [...keys(value)].length >= params;
     },
-    toJsonSchema: (p) => ({ minProperties: p }),
+    toJsonSchema: ({ params }) => ({ minProperties: params }),
     fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined =>
       isNumber(schema.minProperties) ? MinProperties(schema.minProperties) : void 0,
   },
@@ -371,7 +378,7 @@ export const MaxProperties = createFieldSchemaDecoratorFactory(
     decode: ({ value, params }) => {
       return !is(value) || [...keys(value)].length <= params;
     },
-    toJsonSchema: (p) => ({ maxProperties: p }),
+    toJsonSchema: ({ params }) => ({ maxProperties: params }),
     fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined =>
       isNumber(schema.maxProperties) ? MaxProperties(schema.maxProperties) : void 0,
   },
@@ -399,7 +406,7 @@ export const Required = createFieldSchemaDecoratorFactory(
       }
       return (params as readonly PropertyKey[]).every((k) => has(value, k));
     },
-    toJsonSchema: (p) => ({ required: p as readonly unknown[] as string[] }),
+    toJsonSchema: ({ params }) => ({ required: params as readonly unknown[] as string[] }),
     fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined => {
       return schema.required && schema.required.length > 0
         ? Required(schema.required as never)
@@ -446,9 +453,9 @@ export const DependentRequired = createFieldSchemaDecoratorFactory(
       }
       return true;
     },
-    toJsonSchema: (p) => {
+    toJsonSchema: ({ params }) => {
       const out: Record<string, string[]> = {};
-      for (const [k, v] of entryOf(p as Record<string, readonly string[] | undefined>)) {
+      for (const [k, v] of entryOf(params as Record<string, readonly string[] | undefined>)) {
         if (v) {
           out[k] = [...v];
         }
@@ -497,9 +504,9 @@ export const DependentSchemas = createFieldSchemaDecoratorFactory(
       }
       return out;
     },
-    toJsonSchema: (p) => {
+    toJsonSchema: ({ params, toJsonSchema }) => {
       const out: Record<string, JsonSchema> = {};
-      for (const [k, v] of entryOf(p as Record<string, NestedFieldSchema | undefined>)) {
+      for (const [k, v] of entryOf(params as Record<string, NestedFieldSchema | undefined>)) {
         if (v !== undefined) {
           out[k] = toJsonSchema(v);
         }
@@ -589,6 +596,7 @@ export const IsObject = createFieldSchemaDecoratorFactory(
     phase: Phase.Type,
     message: '.label must be an object',
     decode: ({ value }) => isPlainObject(value),
+    default: () => ({}),
     toJsonSchema: addType('object'),
     fromJsonSchema: ({ hasType }): FieldSchemaDecorator | undefined => {
       return hasType('object') ? IsObject(void 0) : void 0;
@@ -633,7 +641,8 @@ export const IsMap = createFieldSchemaDecoratorFactory(
       if (!isPlainObject(value)) return true;
       return provide(new Map(entryOf(value)));
     },
-    encode: (params, value) => (isMap(value) ? Object.fromEntries(value) : value),
+    default: () => new Map(),
+    encode: ({ value }) => (isMap(value) ? Object.fromEntries(value) : value),
     fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined => {
       return !schema.properties && (schema.properties || schema.patternProperties)
         ? IsMap()
@@ -674,7 +683,8 @@ export const Ref = createFieldSchemaDecoratorFactory(
     phase: Phase.Property,
     message: '.label must conform to the referenced schema',
     decode: ({ value, params }) => decode(params(), value),
-    toJsonSchema: (params) => {
+    default: ({ params, defaultOf }) => defaultOf(params()),
+    toJsonSchema: ({ params, toJsonSchema }) => {
       const clazz = params();
       const key = getSchema(clazz)?.slug ?? clazz.name;
       return {
@@ -699,7 +709,7 @@ export const Ref = createFieldSchemaDecoratorFactory(
 export const IsInstanceOf = createFieldSchemaDecoratorFactory(
   'IsInstanceOf',
   (
-    clazz: AnyConstructor | TypeOf | [() => AnyConstructor],
+    clazz: AnyConstructor | TypeOf | [() => AnyConstructor] /* lazy */,
     options: ValidateOptions = {},
   ): FieldSchemaDecorator<() => AnyConstructor | TypeOf> => {
     const thunk = isArray(clazz) ? clazz[0] : () => clazz as AnyConstructor | TypeOf;

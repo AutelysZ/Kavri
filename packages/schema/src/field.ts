@@ -213,6 +213,66 @@ export const DecoratorPhaseStrategy: Readonly<Record<Phase, Strategy>> = {
 };
 
 /**
+ * Runtime marker used by `DefaultContext.provide` to distinguish an explicit
+ * provided default from the absence of a default.
+ *
+ * Decorator authors should not construct this marker manually. Use
+ * `ctx.provide(value)` from a field decorator `default` method instead.
+ */
+export const ProvidedDefaultValue = Symbol('kavri:schema:provided-default');
+
+/**
+ * Wrapper returned from `DefaultContext.provide` when a decorator needs to
+ * provide a default value that could otherwise be confused with no default.
+ *
+ * This is primarily useful for `undefined`, because a bare `undefined` return
+ * from `default(ctx)` means "continue to the next decorator".
+ */
+export interface ProvidedDefault<T = unknown> {
+  readonly [ProvidedDefaultValue]: true;
+  readonly value: T;
+}
+
+/**
+ * Context passed to a field decorator factory's `default` static method.
+ *
+ * It exposes the decorator params, a `provide` helper for explicit defaults,
+ * and `defaultOf` for recursively creating defaults from nested schemas or
+ * referenced schema classes.
+ */
+export interface DefaultContext<P = unknown> {
+  readonly params: P;
+  provide<T>(value: T): ProvidedDefault<T>;
+  defaultOf<T>(schema: AnyConstructor<T> | NestedFieldSchema): T;
+}
+
+/**
+ * Context passed to a field decorator factory's `encode` static method.
+ *
+ * The context mirrors the JSON replacer call site while keeping decorator
+ * params grouped with the value being encoded.
+ */
+export interface EncodeContext<P = unknown> {
+  readonly params: P;
+  readonly value: unknown;
+  readonly key: string;
+  readonly object: object;
+}
+
+/**
+ * Context passed to a field decorator factory's `toJsonSchema` static method.
+ *
+ * The current partially built JSON Schema is supplied so decorators can merge
+ * or inspect existing output, and `toJsonSchema` recursively converts nested
+ * schema classes or inline field schemas.
+ */
+export interface ToJsonSchemaContext<P = unknown> {
+  readonly params: P;
+  readonly current: JsonSchema;
+  toJsonSchema(schema: AnyConstructor | NestedFieldSchema): JsonSchema;
+}
+
+/**
  * Static methods attached to a schema field decorator factory.
  * Used by the schema pipeline for validation, parsing, serialization, and JSON Schema generation.
  */
@@ -261,14 +321,21 @@ export interface FieldSchemaDecoratorFactoryStatic<P> {
    * do it, which increases the complexity. For now, we only handle values
    * independently, and should only be used by {@link jsonReplacer}.
    */
-  encode?: (params: P, value: unknown, key: string, obj: object) => unknown;
+  encode?: (ctx: EncodeContext<P>) => Awaitable<unknown>;
 
   /**
    * Convert the decorator to JSON schema.
    * This is required for all decorators.
    * You may use {@link toJsonSchema} to convert your nested rules.
    */
-  toJsonSchema?: (params: P, current: JsonSchema) => JsonSchema | undefined;
+  toJsonSchema?: (ctx: ToJsonSchemaContext<P>) => JsonSchema | undefined;
+
+  /**
+   * Create a default value for this decorator. Returning `undefined` means
+   * this decorator does not provide a default; use `ctx.provide(undefined)`
+   * when `undefined` itself is the intended default value.
+   */
+  default?: (ctx: DefaultContext<P>) => unknown;
 
   /**
    * Build decorators from external JSON schema.
@@ -327,7 +394,7 @@ export function FieldSchema<P>(
  *   {
  *     message: '.label must be at least .value characters',
  *     decode: (params, value) => typeof value !== 'string' || value.length >= params.value,
- *     toJsonSchema: (params) => ({ minLength: params.value }),
+ *     toJsonSchema: ({ params }) => ({ minLength: params.value }),
  *   },
  * );
  * ```

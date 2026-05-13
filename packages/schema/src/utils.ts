@@ -81,6 +81,10 @@ export function isFunction<T extends (...args: any[]) => any>(v: unknown): v is 
   return typeof v === 'function';
 }
 
+export function isConstructor<T extends abstract new (...args: any[]) => any>(v: unknown): v is T {
+  return typeof v === 'function' && isObject(v.prototype);
+}
+
 export function isString<T extends string>(v: unknown): v is T {
   return typeof v === 'string';
 }
@@ -134,14 +138,14 @@ export function uniqueFilter<T>() {
 }
 
 export function addType(types: string | string[], extra?: JsonSchema) {
-  return (_: unknown, current: JsonSchema) => {
+  return ({ current }: { current: JsonSchema }) => {
     const out = toNonNullableArray(current.type).concat(types).filter(uniqueFilter());
     return { type: out.length > 1 ? out : out[0], ...extra };
   };
 }
 
 export function addEncoding(encoding: string) {
-  return (_: unknown, current: JsonSchema): JsonSchema => {
+  return ({ current }: { current: JsonSchema }): JsonSchema => {
     return {
       contentEncoding: `${current.contentEncoding ? current.contentEncoding + '+' : ''}${encoding}`,
     };

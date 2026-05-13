@@ -7,6 +7,12 @@ import { IsInteger, IsNumber, ToBigInt } from './decorators/number.js';
 import { IsMap, IsObject, IsRecord, Ref } from './decorators/object.js';
 import { IsString } from './decorators/string.js';
 import { defaultOf } from './defaults.js';
+import {
+  createFieldSchemaDecoratorFactory,
+  FieldSchema,
+  type FieldSchemaDecorator,
+  Phase,
+} from './field.js';
 import { Schema } from './schema.js';
 
 describe('defaultOf', () => {
@@ -21,6 +27,42 @@ describe('defaultOf', () => {
     }
 
     expect(defaultOf(Example)).toMatchObject({ value: 'configured' });
+  });
+
+  it('uses phase strategy for short-circuit defaults', () => {
+    expect(defaultOf([Default('abc'), IsNullable()])).toBe('abc');
+  });
+
+  it('lets later phases refine an earlier type default', () => {
+    expect(defaultOf([IsString(), IsEnum(['abc'] as const)])).toBe('abc');
+  });
+
+  it('uses the first provider in an AnyPass phase', () => {
+    expect(defaultOf([IsString(), IsNumber()])).toBe('');
+  });
+
+  it('distinguishes no default from an explicit undefined default', () => {
+    const NoDefault = createFieldSchemaDecoratorFactory(
+      'NoDefault',
+      (): FieldSchemaDecorator<undefined> => FieldSchema(NoDefault, void 0, void 0),
+      {
+        phase: Phase.Semantics,
+        message: '',
+        default: () => undefined,
+      },
+    );
+    const UndefinedDefault = createFieldSchemaDecoratorFactory(
+      'UndefinedDefault',
+      (): FieldSchemaDecorator<undefined> => FieldSchema(UndefinedDefault, void 0, void 0),
+      {
+        phase: Phase.Semantics,
+        message: '',
+        default: ({ provide }) => provide(undefined),
+      },
+    );
+
+    expect(defaultOf([IsString(), NoDefault()])).toBe('');
+    expect(defaultOf([IsString(), UndefinedDefault()])).toBeUndefined();
   });
 
   it('uses undefined for optional fields and null for nullable fields', () => {

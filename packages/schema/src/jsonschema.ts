@@ -116,7 +116,11 @@ function rulesToJsonSchema(rules: readonly FieldSchemaDecoratorMetadata[]): Json
   for (const rule of rules) {
     const fn = rule.factory.toJsonSchema;
     if (!fn) continue;
-    const partial = fn(rule.params, current);
+    const partial = fn({
+      params: rule.params,
+      current,
+      toJsonSchema,
+    });
     if (partial) current = { ...current, ...partial };
   }
   return current;

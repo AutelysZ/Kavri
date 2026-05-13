@@ -82,7 +82,8 @@ export const IsEnum = createFieldSchemaDecoratorFactory(
     phase: Phase.Semantics,
     message: ({ params }) => `.label should be one of: ${params.values.join(', ')}`,
     decode: ({ value, params }) => params.set.has(value as never),
-    toJsonSchema: ({ values, varnames, descriptions }) => {
+    default: ({ params }) => params.values[0],
+    toJsonSchema: ({ params: { values, varnames, descriptions } }) => {
       const types = [...new Set(values.map((v) => typeof v))];
       return {
         type: (types.length === 1 ? types[0] : types) as string | string[],

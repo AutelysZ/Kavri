@@ -383,7 +383,7 @@ export const IsDate = createFieldSchemaDecoratorFactory(
       }
       return true;
     },
-    encode: ({ format = 'iso' }, value) => {
+    encode: ({ params: { format = 'iso' }, value }) => {
       if (!(value instanceof Date)) return value;
       switch (format) {
         case 'date':
@@ -397,7 +397,7 @@ export const IsDate = createFieldSchemaDecoratorFactory(
           return value.toISOString();
       }
     },
-    toJsonSchema: ({ format = 'iso' }) => {
+    toJsonSchema: ({ params: { format = 'iso' } }) => {
       if (format === 'iso') return { type: 'date-time' };
       if (format === 'date') return { type: 'date' };
       return void 0;
@@ -438,7 +438,8 @@ export const DefaultDate = createFieldSchemaDecoratorFactory(
     phase: Phase.Defaults,
     message: '',
     decode: ({ value, params, provide }) => value !== void 0 || provide(resolveDate(params)),
-    toJsonSchema: (params) => {
+    default: ({ params }) => resolveDate(params),
+    toJsonSchema: ({ params }) => {
       if (isString(params)) return { default: params };
       if (params instanceof Date) return { default: params.toISOString() };
       if (params instanceof Duration) {

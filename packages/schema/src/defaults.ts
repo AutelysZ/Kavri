@@ -1,33 +1,25 @@
 import { type AnyConstructor, Metadata } from '@kavri/basic';
-import { IsArray } from './decorators/array.js';
-import { Default, IsNullable, IsOptional } from './decorators/base.js';
-import { IsBoolean } from './decorators/boolean.js';
-import { IsEnum } from './decorators/enum.js';
-import { IsInteger, IsNumber, ToBigInt } from './decorators/number.js';
-import { IsMap, IsObject, Properties, Ref } from './decorators/object.js';
-import { IsString } from './decorators/string.js';
-import { DecodeResult, type DecodeContext } from './decode.js';
 import {
+  DecoratorPhaseStrategy,
   FieldSchema,
   type FieldSchemaDecorator,
   type FieldSchemaDecoratorMetadata,
   isFieldSchemaDecorator,
   type NestedFieldSchema,
   Phase,
+  type ProvidedDefault,
+  ProvidedDefaultValue,
+  Strategy,
 } from './field.js';
-import { isArray, isFunction, isObject } from './utils.js';
+import { isArray, isConstructor } from './utils.js';
 
 /**
  * Create the default value for a schema class or an inline field schema.
  *
- * The default is selected from the field rules in this order:
- *
- * 1. explicit default rules,
- * 2. optional / nullable presence rules,
- * 3. enum first value,
- * 4. known type rules (`string`, `number`, `bigint`, `boolean`, object/ref,
- *    map, array, record),
- * 5. `undefined` for unknown rule sets.
+ * Defaults use the same phase order and phase strategy as decoding. Each
+ * decorator may expose a `default(ctx)` static. Returning `undefined` means
+ * "no default"; returning `ctx.provide(undefined)` explicitly provides
+ * `undefined`.
  *
  * @param target - A `@Schema` class constructor, a single field decorator, or
  * an array of field decorators.
@@ -45,10 +37,10 @@ import { isArray, isFunction, isObject } from './utils.js';
  * ```
  */
 export function defaultOf<T>(target: AnyConstructor<T> | NestedFieldSchema): T {
-  if (isFunction(target) && !isFieldSchemaDecorator(target)) {
+  if (isConstructor(target) && !isFieldSchemaDecorator(target)) {
     return defaultClass(target) as T;
   }
-  return defaultRules(normalizeRules(target as NestedFieldSchema)) as T;
+  return defaultRules(normalizeRules(target)) as T;
 }
 
 function defaultClass<T>(clazz: AnyConstructor<T>): T {
@@ -64,103 +56,75 @@ function defaultClass<T>(clazz: AnyConstructor<T>): T {
 }
 
 function defaultRules(rules: readonly FieldSchemaDecoratorMetadata[]): unknown {
-  const explicit = explicitDefault(rules);
-  if (explicit.found) return explicit.value;
+  const groups = groupByPhase(rules);
+  let hasDefault = false;
+  let value: unknown;
 
-  if (hasRule(rules, IsOptional)) return undefined;
-  if (hasRule(rules, IsNullable)) return null;
+  for (const [phase, phaseRules] of groups) {
+    const strategy = DecoratorPhaseStrategy[phase];
 
-  const enumRule = findRule(rules, IsEnum);
-  if (enumRule) {
-    const values = enumRule.params as { values?: readonly unknown[] };
-    return values.values?.[0];
-  }
+    for (const rule of phaseRules) {
+      const result = invokeDefault(rule);
+      if (!result.found) {
+        continue;
+      }
 
-  const refRule = findRule(rules, Ref);
-  if (refRule) {
-    return defaultClass((refRule.params as () => AnyConstructor)());
-  }
+      value = result.value;
+      hasDefault = true;
 
-  const mapRule = findRule(rules, IsMap);
-  if (mapRule) {
-    return new Map();
-  }
-
-  const objectRule = findRule(rules, IsObject);
-  if (objectRule) {
-    return defaultObjectFromProperties(rules);
-  }
-
-  if (hasRule(rules, IsArray)) return [];
-  if (hasRule(rules, ToBigInt)) return 0n;
-  if (hasRule(rules, IsString)) return '';
-  if (hasRule(rules, IsNumber) || hasRule(rules, IsInteger)) return 0;
-  if (hasRule(rules, IsBoolean)) return false;
-
-  return undefined;
-}
-
-function explicitDefault(
-  rules: readonly FieldSchemaDecoratorMetadata[],
-): { found: true; value: unknown } | { found: false } {
-  for (const rule of rules) {
-    if (rule.factory.phase !== Phase.Defaults) {
-      continue;
-    }
-    if (rule.factory === Default) {
-      return { found: true, value: rule.params };
-    }
-    const decoded = decodeDefaultRule(rule);
-    if (decoded.found) {
-      return decoded;
-    }
-  }
-  return { found: false };
-}
-
-function decodeDefaultRule(
-  rule: FieldSchemaDecoratorMetadata,
-): { found: true; value: unknown } | { found: false } {
-  if (!rule.factory.decode) {
-    return { found: true, value: rule.params };
-  }
-  let provided: unknown;
-  const result = rule.factory.decode({
-    value: undefined,
-    originalValue: undefined,
-    params: rule.params,
-    currentRule: rule,
-    provide: (value: unknown) => {
-      provided = value;
-      return new DecodeResult(true, value);
-    },
-  } as DecodeContext);
-
-  if (result instanceof Promise) {
-    return { found: false };
-  }
-  if (result instanceof DecodeResult && result.ok) {
-    return { found: true, value: result.value };
-  }
-  if (provided !== undefined) {
-    return { found: true, value: provided };
-  }
-  return { found: true, value: rule.params };
-}
-
-function defaultObjectFromProperties(rules: readonly FieldSchemaDecoratorMetadata[]): object {
-  const out: Record<string, unknown> = {};
-  for (const rule of rules) {
-    if (rule.factory !== Properties || !isObject(rule.params)) {
-      continue;
-    }
-    for (const [key, schema] of Object.entries(rule.params)) {
-      if (schema !== undefined) {
-        out[key] = defaultRules(normalizeRules(schema as NestedFieldSchema));
+      if (strategy === Strategy.ShortCircuit) {
+        return value;
+      }
+      if (strategy === Strategy.AnyPass || strategy === Strategy.FailFast) {
+        break;
+      }
+      if (strategy === Strategy.ContinueOnError) {
+        break;
       }
     }
   }
-  return out;
+
+  return hasDefault ? value : undefined;
+}
+
+function invokeDefault(
+  rule: FieldSchemaDecoratorMetadata,
+): { found: true; value: unknown } | { found: false } {
+  if (!rule.factory.default) {
+    return { found: false };
+  }
+  const result = rule.factory.default({
+    params: rule.params,
+    provide: (value) => ({ [ProvidedDefaultValue]: true, value }),
+    defaultOf,
+  });
+  if (isProvidedDefault(result)) {
+    return { found: true, value: result.value };
+  }
+  return result === undefined ? { found: false } : { found: true, value: result };
+}
+
+function isProvidedDefault(value: unknown): value is ProvidedDefault {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    (value as Record<typeof ProvidedDefaultValue, unknown>)[ProvidedDefaultValue] === true
+  );
+}
+
+function groupByPhase(
+  rules: readonly FieldSchemaDecoratorMetadata[],
+): Array<[Phase, FieldSchemaDecoratorMetadata[]]> {
+  const map = new Map<Phase, FieldSchemaDecoratorMetadata[]>();
+  for (const rule of rules) {
+    let bucket = map.get(rule.factory.phase);
+    if (!bucket) {
+      bucket = [];
+      map.set(rule.factory.phase, bucket);
+    }
+    bucket.push(rule);
+  }
+  return [...map.entries()].sort((a, b) => a[0] - b[0]);
 }
 
 function normalizeRules(schema: NestedFieldSchema): readonly FieldSchemaDecoratorMetadata[] {
@@ -181,18 +145,4 @@ function expandDecorator(decorator: FieldSchemaDecorator): readonly FieldSchemaD
   decorator(Inline.prototype, 'value');
   return (Metadata.ofField(FieldSchema, Inline, 'value') ??
     []) as readonly FieldSchemaDecoratorMetadata[];
-}
-
-function hasRule(
-  rules: readonly FieldSchemaDecoratorMetadata[],
-  factory: FieldSchemaDecoratorMetadata['factory'],
-): boolean {
-  return findRule(rules, factory) !== undefined;
-}
-
-function findRule(
-  rules: readonly FieldSchemaDecoratorMetadata[],
-  factory: FieldSchemaDecoratorMetadata['factory'],
-): FieldSchemaDecoratorMetadata | undefined {
-  return rules.find((rule) => rule.factory === factory);
 }

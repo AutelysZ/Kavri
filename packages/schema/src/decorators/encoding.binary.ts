@@ -79,11 +79,11 @@ export const IsCompressed = createFieldSchemaDecoratorFactory(
       if (!(value instanceof Uint8Array)) return true;
       return provide(decompress(value, params.format ?? 'gzip', params.text));
     },
-    encode: async (params, value: unknown) => {
+    encode: async ({ params, value }) => {
       if (!isString(value) && !(value instanceof Uint8Array)) return value;
       return await compress(toUint8Array(value), params.format ?? 'gzip');
     },
-    toJsonSchema: ({ format = 'gzip' }, current) => ({
+    toJsonSchema: ({ params: { format = 'gzip' }, current }) => ({
       contentEncoding: current.contentEncoding ? `${current.contentEncoding}+${format}` : format,
     }),
     fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined => {

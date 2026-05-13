@@ -27,6 +27,7 @@ export const IsBoolean = createFieldSchemaDecoratorFactory(
     phase: Phase.Type,
     message: '.label must be a boolean',
     decode: ({ value }) => isBoolean(value),
+    default: () => false,
     toJsonSchema: addType('boolean'),
     fromJsonSchema: ({ hasType }): FieldSchemaDecorator | undefined => {
       return hasType('boolean') ? IsBoolean() : void 0;
