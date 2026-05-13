@@ -723,6 +723,7 @@ export const IsInstanceOf = createFieldSchemaDecoratorFactory(
       const v = params();
       return isString(v) ? typeOf(v) === value : value instanceof v;
     },
+    default: ({ provide }) => provide(undefined),
   },
   {
     lazy: (clazz: () => AnyConstructor, options?: ValidateOptions) => {

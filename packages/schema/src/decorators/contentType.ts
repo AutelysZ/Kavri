@@ -32,6 +32,7 @@ export const ContentSchema = createFieldSchemaDecoratorFactory(
     phase: Phase.Property,
     message: '',
     decode: ({ value, params }) => decode(params, value),
+    default: ({ params, defaultOf }) => defaultOf(params),
     toJsonSchema: ({ params, toJsonSchema }) => ({ contentSchema: toJsonSchema(params) }),
     fromJsonSchema: ({ schema, fromJsonSchema }): FieldSchemaDecorator | undefined => {
       return schema.contentSchema ? ContentSchema(fromJsonSchema(schema.contentSchema)) : void 0;

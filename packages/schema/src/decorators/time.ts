@@ -487,6 +487,7 @@ export const IsDuration = createFieldSchemaDecoratorFactory(
     decode: ({ value, provide }) => {
       return !isString(value) || provide(Duration.parse(value));
     },
+    default: ({ provide }) => provide(undefined),
     toJsonSchema: () => ({ format: 'duration' }),
     fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined => {
       return schema.format === 'duration' ? IsDuration() : void 0;

@@ -80,8 +80,8 @@ export const Info = createFieldSchemaDecoratorFactory(
     if (optional) deps.push(IsOptional(ofBoolField(optional)[1]));
     if (nullable) deps.push(IsNullable(ofBoolField(nullable)[1]));
     if (examples) deps.push(Examples(examples));
-    if (_default) deps.push(Default(_default));
-    if (_const) deps.push(IsConst(_const));
+    if (_default !== undefined) deps.push(Default(_default));
+    if (_const !== undefined) deps.push(IsConst(_const));
     return FieldSchema<BaseSchema>(Info, schema, { label: label ?? schema.title, message }, deps);
   },
   {
@@ -209,6 +209,7 @@ export const IsConst = createFieldSchemaDecoratorFactory(
     phase: Phase.Semantics,
     message: '.label should be .params',
     decode: ({ value, params }) => isEqual(value, params),
+    default: ({ params }) => params,
     toJsonSchema: ({ params }) => ({ const: params }),
     fromJsonSchema: ({ schema }): FieldSchemaDecorator | undefined => {
       return schema.const === void 0 ? void 0 : IsConst(schema.const);

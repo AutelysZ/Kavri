@@ -5,8 +5,39 @@ import {
   type FieldSchemaDecorator,
   type NestedFieldSchema,
   Phase,
+  type ProvidedDefault,
   type ValidateOptions,
 } from '../field.js';
+import { isPlainObject } from '../utils.js';
+
+function provideDefault(
+  value: unknown,
+  provide: (value: undefined) => ProvidedDefault<undefined>,
+): unknown {
+  return value === undefined ? provide(undefined) : value;
+}
+
+function branchDefault(
+  schemas: readonly NestedFieldSchema[],
+  defaultOf: (schema: NestedFieldSchema) => unknown,
+  provide: (value: undefined) => ProvidedDefault<undefined>,
+  match: (value: unknown) => boolean,
+): unknown {
+  for (const schema of schemas) {
+    const value = defaultOf(schema);
+    if (match(value)) {
+      return provideDefault(value, provide);
+    }
+  }
+  return undefined;
+}
+
+function mergeDefault(left: unknown, right: unknown): unknown {
+  if (isPlainObject(left) && isPlainObject(right)) {
+    return { ...left, ...right };
+  }
+  return right;
+}
 
 /**
  * Union — value must match at least one of `params`. Maps to JSON Schema
@@ -28,6 +59,11 @@ export const AnyOf = createFieldSchemaDecoratorFactory(
         if (decode(schema, value).ok) return true;
       }
       return false;
+    },
+    default: ({ params, defaultOf, provide }) => {
+      return branchDefault(params, defaultOf, provide, (value) =>
+        params.some((schema) => decode(schema, value).ok),
+      );
     },
     toJsonSchema: ({ params, toJsonSchema }) => ({
       anyOf: params.map((s) => toJsonSchema(s)),
@@ -60,6 +96,15 @@ export const OneOf = createFieldSchemaDecoratorFactory(
       }
       return matched === 1;
     },
+    default: ({ params, defaultOf, provide }) => {
+      return branchDefault(params, defaultOf, provide, (value) => {
+        let matched = 0;
+        for (const schema of params) {
+          if (decode(schema, value).ok) matched++;
+        }
+        return matched === 1;
+      });
+    },
     toJsonSchema: ({ params, toJsonSchema }) => ({
       oneOf: params.map((s) => toJsonSchema(s)),
     }),
@@ -86,6 +131,23 @@ export const AllOf = createFieldSchemaDecoratorFactory(
     phase: Phase.Composition,
     message: '',
     decode: ({ value, params }) => params.map((schema) => decode(schema, value)),
+    default: ({ params, defaultOf, provide }) => {
+      let hasDefault = false;
+      let value: unknown;
+      for (const schema of params) {
+        const next = defaultOf(schema);
+        if (!hasDefault) {
+          value = next;
+          hasDefault = true;
+        } else if (next !== undefined) {
+          value = mergeDefault(value, next);
+        }
+      }
+      if (!hasDefault || !params.every((schema) => decode(schema, value).ok)) {
+        return undefined;
+      }
+      return provideDefault(value, provide);
+    },
     toJsonSchema: ({ params, toJsonSchema }) => ({
       allOf: params.map((s) => toJsonSchema(s)),
     }),
@@ -133,6 +195,20 @@ export const IfThenElse = createFieldSchemaDecoratorFactory(
       const branch = decode(params.if, value).ok ? params.then : params.else;
       return branch === undefined ? true : decode(branch, value);
     },
+    default: ({ params, defaultOf, provide }) => {
+      const candidates: unknown[] = [];
+      if (params.then !== undefined) candidates.push(defaultOf(params.then));
+      if (params.else !== undefined) candidates.push(defaultOf(params.else));
+      candidates.push(defaultOf(params.if));
+
+      for (const value of candidates) {
+        const branch = decode(params.if, value).ok ? params.then : params.else;
+        if (branch === undefined || decode(branch, value).ok) {
+          return provideDefault(value, provide);
+        }
+      }
+      return undefined;
+    },
     toJsonSchema: ({ params, toJsonSchema }) => ({
       if: toJsonSchema(params.if),
       ...(params.then !== undefined && { then: toJsonSchema(params.then) }),
@@ -163,6 +239,9 @@ export const Not = createFieldSchemaDecoratorFactory(
     phase: Phase.Composition,
     message: '.label must not match the negated schema',
     decode: ({ value, params }) => !decode(params, value).ok,
+    default: ({ params, provide }) => {
+      return decode(params, undefined).ok ? undefined : provide(undefined);
+    },
     toJsonSchema: ({ params, toJsonSchema }) => ({ not: toJsonSchema(params) }),
     fromJsonSchema: ({ schema, fromJsonSchema }): FieldSchemaDecorator | undefined => {
       return schema.not ? Not(fromJsonSchema(schema.not)) : void 0;
