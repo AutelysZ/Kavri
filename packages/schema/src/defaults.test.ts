@@ -127,6 +127,10 @@ describe('defaultOf', () => {
     expect(defaultOf(IsDuration())).toBeUndefined();
   });
 
+  it('does not infer decoded content defaults for encoded values', () => {
+    expect(defaultOf(IsJSON(IsObject({ payload: IsString() })))).toBe('');
+  });
+
   it('uses explicit date defaults', () => {
     const value = new Date('2026-05-13T00:00:00.000Z');
 
@@ -255,11 +259,6 @@ describe('defaultOf', () => {
       @Not(IsString())
       notString!: unknown;
 
-      @IsJSON(IsObject({ payload: IsString() }))
-      json!: {
-        payload: string;
-      };
-
       @NoDefault()
       unknown!: unknown;
     }
@@ -297,9 +296,6 @@ describe('defaultOf', () => {
       allOf: {
         left: '',
         right: 0,
-      },
-      json: {
-        payload: '',
       },
     });
     expect(value.map).toEqual(new Map());
