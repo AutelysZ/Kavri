@@ -61,7 +61,7 @@ describe('defaultOf', () => {
     expect(defaultOf(AllOf([IsString(), IsEnum(['refined'] as const)]))).toBe('refined');
     expect(
       defaultOf(IfThenElse({ if: IsString(), then: IsEnum(['then'] as const), else: IsNumber() })),
-    ).toBe('then');
+    ).toBeUndefined();
     expect(defaultOf(Not(IsString()))).toBeUndefined();
   });
 
@@ -252,13 +252,6 @@ describe('defaultOf', () => {
         right: number;
       };
 
-      @IfThenElse({
-        if: IsString(),
-        then: IsEnum(['then'] as const),
-        else: IsNumber(),
-      })
-      conditional!: 'then' | number;
-
       @Not(IsString())
       notString!: unknown;
 
@@ -305,7 +298,6 @@ describe('defaultOf', () => {
         left: '',
         right: 0,
       },
-      conditional: 'then',
       json: {
         payload: '',
       },

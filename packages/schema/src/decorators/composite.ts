@@ -195,20 +195,6 @@ export const IfThenElse = createFieldSchemaDecoratorFactory(
       const branch = decode(params.if, value).ok ? params.then : params.else;
       return branch === undefined ? true : decode(branch, value);
     },
-    default: ({ params, defaultOf, provide }) => {
-      const candidates: unknown[] = [];
-      if (params.then !== undefined) candidates.push(defaultOf(params.then));
-      if (params.else !== undefined) candidates.push(defaultOf(params.else));
-      candidates.push(defaultOf(params.if));
-
-      for (const value of candidates) {
-        const branch = decode(params.if, value).ok ? params.then : params.else;
-        if (branch === undefined || decode(branch, value).ok) {
-          return provideDefault(value, provide);
-        }
-      }
-      return undefined;
-    },
     toJsonSchema: ({ params, toJsonSchema }) => ({
       if: toJsonSchema(params.if),
       ...(params.then !== undefined && { then: toJsonSchema(params.then) }),
@@ -239,9 +225,6 @@ export const Not = createFieldSchemaDecoratorFactory(
     phase: Phase.Composition,
     message: '.label must not match the negated schema',
     decode: ({ value, params }) => !decode(params, value).ok,
-    default: ({ params, provide }) => {
-      return decode(params, undefined).ok ? undefined : provide(undefined);
-    },
     toJsonSchema: ({ params, toJsonSchema }) => ({ not: toJsonSchema(params) }),
     fromJsonSchema: ({ schema, fromJsonSchema }): FieldSchemaDecorator | undefined => {
       return schema.not ? Not(fromJsonSchema(schema.not)) : void 0;
