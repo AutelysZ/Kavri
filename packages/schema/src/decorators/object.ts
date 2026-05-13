@@ -22,6 +22,7 @@ import {
   hasOwn,
   isArray,
   isBoolean,
+  isInstanceOf,
   isMap,
   isNumber,
   isPlainObject,
@@ -672,17 +673,22 @@ export const Ref = createFieldSchemaDecoratorFactory(
   'Ref',
   <T extends object>(
     ref: AnyConstructor<T> | [() => AnyConstructor<T>],
-    options: BaseOptions<T> = {},
+    options: TypeOptions<T> = {},
   ): FieldSchemaDecorator<() => AnyConstructor<T>> => {
     const [opts, info] = decoupleOptions(options);
-    const deps: FieldSchemaDecorator[] = [Info(info)];
     const thunk = isArray(ref) ? ref[0] : () => ref;
+    const deps: FieldSchemaDecorator[] = [IsObject(void 0, info), IsInstanceOf([thunk], opts)];
     return FieldSchema<() => AnyConstructor<T>>(Ref as never, thunk, opts, deps);
   },
   {
     phase: Phase.Property,
     message: '.label must conform to the referenced schema',
-    decode: ({ value, params }) => decode(params(), value),
+    decode: ({ value, params, decode, provide }) => {
+      const target = params();
+      if (isInstanceOf(value, target)) return provide(value);
+      if (isPlainObject(value)) return decode(target, value);
+      return true;
+    },
     default: ({ params, defaultOf }) => defaultOf(params()),
     toJsonSchema: ({ params, toJsonSchema }) => {
       const clazz = params();

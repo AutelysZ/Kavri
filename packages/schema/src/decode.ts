@@ -80,6 +80,8 @@ export interface DecodeContextInit {
    * Shared between parent and children when omitted (defaults to a fresh `KeyMap`).
    */
   state?: KeyMap;
+
+  decode: <T>(target: NestedFieldSchema | AnyConstructor<T>, input: unknown) => DecodeResult<T>;
 }
 
 /**
@@ -136,6 +138,7 @@ export class DecodeContext<P = unknown> {
     this.rules = init.rules;
     this.state = init.state ?? new KeyMap();
     this.evaluated = new Set();
+    this.decode = init.decode;
   }
 
   /**
@@ -146,6 +149,11 @@ export class DecodeContext<P = unknown> {
     this.value = value;
     return new DecodeResult(true, value);
   };
+
+  readonly decode: <T>(
+    target: NestedFieldSchema | AnyConstructor<T>,
+    input: unknown,
+  ) => DecodeResult<T>;
 
   /**
    * Build a child context for a nested value (object property, array item,
@@ -159,6 +167,7 @@ export class DecodeContext<P = unknown> {
       parent: this,
       rules: normalizeSchema(schema),
       state: this.state,
+      decode: this.decode,
     });
   };
 }

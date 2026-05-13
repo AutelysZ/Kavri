@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+import type { AnyConstructor } from '@kavri/basic';
 import type { JsonSchema } from './jsonschema.js';
 
 export type StringKeyOf<T> = keyof T & string;
@@ -59,6 +60,10 @@ export function isArray<T extends readonly unknown[]>(v: unknown): v is T {
  */
 export function isObject<T extends object>(v: unknown): v is Exclude<T, readonly any[]> {
   return typeof v === 'object' && v !== null && !isArray(v);
+}
+
+export function isInstanceOf<T>(v: unknown, c: AnyConstructor<T>): v is T {
+  return v instanceof c;
 }
 
 export function isPlainObject<T extends object>(v: unknown): v is Exclude<T, readonly any[]> {
